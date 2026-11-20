@@ -6,7 +6,6 @@ import { useDbTick } from '../../../hooks/useDbSync';
 import { punyaIzin, type SesiLogin } from '../../../utils/autentikasi';
 import { normalisasiProdukKatalog } from '../../../utils/productCatalog';
 import { bangunProduk, selesaikanGambar } from '../../../utils/website';
-import { DATA_DAFTAR_HARGA_AMS_V6, SUMBER_DAFTAR_HARGA_AMS } from '../../../data/productCatalogReference';
 import { MedanGambarBanyak } from '../website/editor/medanEditor';
 
 const PERUNTUKAN_BAWAAN = ['UGD', 'Operasi', 'Umum'];
@@ -211,9 +210,6 @@ export default function ProductCatalogModule({
       </header>
 
       {!bisaUbah && <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">Akses baca-saja. Hubungi Sales Manager atau PJT untuk mengubah master produk.</p>}
-      <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
-        Rujukan awal: {SUMBER_DAFTAR_HARGA_AMS} ({DATA_DAFTAR_HARGA_AMS_V6.length} produk). Harga dalam dokumen belum tentu masih berlaku, tidak menjamin stok, dan belum termasuk ongkir, instalasi, serta pelatihan di luar Jakarta. NIE, SKU resmi, TKDN, tautan, dan ketersediaan harus diverifikasi. Kode REF-DH-V6 adalah ID internal sementara, bukan SKU resmi. Produk tidak dipublikasikan otomatis.
-      </p>
       {pesan && <div role="status" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">{pesan}</div>}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.8fr)]">
