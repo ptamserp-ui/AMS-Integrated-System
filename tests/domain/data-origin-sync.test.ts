@@ -15,7 +15,7 @@ import {
   INITIAL_VALUASI_BATCH
 } from '../../src/data/seedKeuangan';
 import { db } from '../../src/services/pocketbase';
-import type { IzinEdarAlkes, JurnalKeuangan, RoleDefinition } from '../../src/types';
+import type { IzinEdarAlkes, JurnalKeuangan, RoleDefinition, TerimaBarang } from '../../src/types';
 import { GENESIS_JURNAL, hashJurnal, verifikasiRantaiJurnal } from '../../src/utils/akuntansi';
 import {
   bangunUlangRantaiJurnal,
@@ -84,6 +84,104 @@ describe('dataOrigin.ts — klasifikasi asal data & penyaringan selektif', () =>
 
     const detectedEditedIds = kumpulkanIdSeedDiedit('izin_edar', [dummyItem, editedItem, userNewItem]);
     expect(detectedEditedIds).toEqual([INITIAL_IZIN_EDAR[0].id]);
+  });
+
+  describe('db.pindahkanStokAntarBin() — hanya memindahkan saldo bebas', () => {
+    const originalLocalStorage = globalThis.localStorage;
+
+    beforeEach(() => {
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: new MemoryStorage(),
+        configurable: true,
+        writable: true
+      });
+    });
+
+    afterEach(() => {
+      if (originalLocalStorage === undefined) {
+        Reflect.deleteProperty(globalThis, 'localStorage');
+      } else {
+        Object.defineProperty(globalThis, 'localStorage', {
+          value: originalLocalStorage,
+          configurable: true,
+          writable: true
+        });
+      }
+    });
+
+    it('menolak pemindahan yang akan mengambil unit yang sudah dipesan', () => {
+      const binAsal = INITIAL_LOKASI_BIN[0];
+      const binTujuan = INITIAL_LOKASI_BIN.find((bin) => bin.id !== binAsal.id && bin.zonaSuhu === binAsal.zonaSuhu);
+      if (!binTujuan) throw new Error('fixture tidak memiliki bin tujuan dengan zona yang sama');
+
+      db.saveLokasiBin([binAsal, binTujuan]);
+      db.saveStokGudang([
+        {
+          ...INITIAL_STOK_GUDANG[0],
+          id: 'TEST-MUTASI-RESERVED',
+          binId: binAsal.id,
+          gudangId: binAsal.gudangId,
+          zonaSuhu: binAsal.zonaSuhu,
+          satuan: binAsal.satuan,
+          statusStok: 'AVAILABLE',
+          jumlahStok: 10,
+          qtyDipesan: 8
+        }
+      ]);
+
+      const hasil = db.pindahkanStokAntarBin(
+        'TEST-MUTASI-RESERVED',
+        binTujuan.id,
+        3,
+        { pengguna: 'Kepala Gudang', peran: 'Operations & Technical' },
+        new Date('2026-11-15T10:00:00.000Z')
+      );
+
+      expect(hasil).toMatchObject({ boleh: false });
+      expect(hasil.keterangan).toContain('stok bebas 2');
+      expect(db.getStokGudang()).toHaveLength(1);
+      expect(db.getStokGudang()[0]).toMatchObject({ jumlahStok: 10, qtyDipesan: 8 });
+    });
+
+    it('mengizinkan pemindahan sampai batas stok bebas dan mempertahankan reservasi di bin asal', () => {
+      const binAsal = INITIAL_LOKASI_BIN[0];
+      const binTujuan = INITIAL_LOKASI_BIN.find((bin) => bin.id !== binAsal.id && bin.zonaSuhu === binAsal.zonaSuhu);
+      if (!binTujuan) throw new Error('fixture tidak memiliki bin tujuan dengan zona yang sama');
+
+      db.saveLokasiBin([binAsal, binTujuan]);
+      db.saveStokGudang([
+        {
+          ...INITIAL_STOK_GUDANG[0],
+          id: 'TEST-MUTASI-FREE',
+          binId: binAsal.id,
+          gudangId: binAsal.gudangId,
+          zonaSuhu: binAsal.zonaSuhu,
+          satuan: binAsal.satuan,
+          statusStok: 'AVAILABLE',
+          jumlahStok: 10,
+          qtyDipesan: 8
+        }
+      ]);
+
+      const hasil = db.pindahkanStokAntarBin(
+        'TEST-MUTASI-FREE',
+        binTujuan.id,
+        2,
+        { pengguna: 'Kepala Gudang', peran: 'Operations & Technical' },
+        new Date('2026-11-15T10:00:00.000Z')
+      );
+
+      expect(hasil.boleh).toBe(true);
+      expect(db.getStokGudang()).toHaveLength(2);
+      expect(db.getStokGudang().find((stok) => stok.binId === binAsal.id)).toMatchObject({
+        jumlahStok: 8,
+        qtyDipesan: 8
+      });
+      expect(db.getStokGudang().find((stok) => stok.binId === binTujuan.id)).toMatchObject({
+        jumlahStok: 2,
+        qtyDipesan: 0
+      });
+    });
   });
 
   it('menggunakan kunci majemuk nomorBatch|kodeSKU untuk keuangan_valuasi_batch', () => {
@@ -205,6 +303,83 @@ describe('dataOrigin.ts — klasifikasi asal data & penyaringan selektif', () =>
   });
 });
 
+describe('db.releasePenerimaanKeStok() — valuasi penerimaan berbasis biaya aktual', () => {
+  const originalLocalStorage = globalThis.localStorage;
+
+  beforeEach(() => {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: new MemoryStorage(),
+      configurable: true,
+      writable: true
+    });
+  });
+
+  afterEach(() => {
+    if (originalLocalStorage === undefined) {
+      Reflect.deleteProperty(globalThis, 'localStorage');
+    } else {
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: originalLocalStorage,
+        configurable: true,
+        writable: true
+      });
+    }
+  });
+
+  it('menghitung moving weighted average dari harga beli dan tidak memasukkan ongkir', () => {
+    const bin = { ...INITIAL_LOKASI_BIN[0], id: 'BIN-VALUASI-UJI', kapasitas: 10_000, terpakai: 0 };
+    db.saveLokasiBin([bin]);
+    db.saveStokGudang([]);
+    db.saveTerimaBarang([]);
+    db.saveJejakPergerakan([]);
+    db.saveValuasiBatch([]);
+
+    const buatDokumen = (nomor: string, batch: string, qty: number, harga: number, ongkir: number): TerimaBarang => ({
+      id: `TRM-${nomor}`,
+      nomorTerima: `GRN-${nomor}`,
+      tanggalTerima: '2026-01-15',
+      purchaseOrderId: `PO-${nomor}`,
+      nomorPurchaseOrder: `PO/${nomor}`,
+      namaPemasok: 'Pemasok Uji',
+      biayaPengirimanIDR: ongkir,
+      statusMatching: 'Cocok',
+      baris: [{
+        kodeSKU: 'SKU-VALUASI-UJI',
+        namaAlkes: 'Produk Uji',
+        nomorBatch: batch,
+        tanggalKedaluwarsa: '2028-01-15',
+        qtyDipesan: qty,
+        qtyDiterima: qty,
+        qtyDitolak: 0,
+        satuan: 'Unit',
+        binTujuanId: bin.id,
+        alasanPenolakan: '',
+        hargaBeliUnitIDR: harga
+      }],
+      hasilQCMasuk: 'Lolos (Released)',
+      butuhUjiFungsi: false,
+      hasilUjiFungsi: 'Lolos Parameter Klinis',
+      nomorLaporanQC: '',
+      labelDicetak: false,
+      rfidDitempel: false,
+      petugas: 'Kepala Gudang',
+      catatan: ''
+    });
+
+    const pertama = buatDokumen('001', 'BATCH-VALUASI-01', 10, 100, 50_000);
+    db.saveTerimaBarang([pertama]);
+    expect(db.releasePenerimaanKeStok(pertama.id).boleh).toBe(true);
+
+    const kedua = buatDokumen('002', 'BATCH-VALUASI-02', 10, 300, 75_000);
+    db.saveTerimaBarang([kedua, pertama]);
+    expect(db.releasePenerimaanKeStok(kedua.id).boleh).toBe(true);
+
+    const valuasi = db.getValuasiBatch().filter((item) => item.kodeSKU === 'SKU-VALUASI-UJI');
+    expect(valuasi.map((item) => item.nilaiPerUnit)).toEqual([200, 200]);
+    expect(valuasi.every((item) => item.asal === 'ASLI' && item.metode === 'Rata-rata Tertimbang')).toBe(true);
+  });
+});
+
 describe('db.purgeDummyData() & db.pulihkanDataDummy() — isolasi localStorage end-to-end', () => {
   const originalLocalStorage = globalThis.localStorage;
 
@@ -214,6 +389,7 @@ describe('db.purgeDummyData() & db.pulihkanDataDummy() — isolasi localStorage 
       configurable: true,
       writable: true
     });
+
   });
 
   afterEach(() => {
@@ -471,7 +647,8 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
   it('mapSyncKeyToResource, canWriteSyncKey, dan canDeleteSyncKey menegakkan batas RBAC dengan tepat', () => {
     expect(mapSyncKeyToResource('izin_edar')).toBe('ra-pjt');
     expect(mapSyncKeyToResource('keuangan_jurnal')).toBe('finance-akuntansi');
-    expect(mapSyncKeyToResource('gudang_pergerakan')).toBe('gudang-logistik');
+    expect(mapSyncKeyToResource('gudang_pergerakan')).toBe('gudang-mutasi');
+    expect(mapSyncKeyToResource('gudang_penerimaan')).toBe('gudang-penerimaan');
     expect(mapSyncKeyToResource('hris_karyawan')).toBe('hrd-pelatihan');
     expect(mapSyncKeyToResource('website_published')).toBe('website');
     expect(mapSyncKeyToResource('sistem_data_manifest')).toBe('it-traceability');
@@ -482,14 +659,16 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
       description: 'Hanya baca dan tambah data gudang tanpa hapus atau terbit situs',
       isSystem: false,
       permissions: {
-        'gudang-logistik': ['view', 'create'],
+        'gudang-logistik': ['view'],
+        'gudang-mutasi': ['view', 'create'],
         website: ['view', 'update']
       },
       updatedAt: '2026-11-15T00:00:00.000Z'
     };
 
-    // Boleh tulis modul gudang & kunci sistem otomatis (audit_trail, sistem_data_manifest)
+    // Write stock requires the dedicated mutation permission; system keys stay automatic.
     expect(canWriteSyncKey(roleGudangTerbatas, 'stok_gudang')).toBe(true);
+    expect(canWriteSyncKey(roleGudangTerbatas, 'gudang_penerimaan')).toBe(false);
     expect(canWriteSyncKey(roleGudangTerbatas, 'audit_trail')).toBe(true);
     expect(canWriteSyncKey(roleGudangTerbatas, 'sistem_data_manifest')).toBe(true);
 
@@ -497,9 +676,16 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
     expect(canWriteSyncKey(roleGudangTerbatas, 'website_draft')).toBe(true);
     expect(canWriteSyncKey(roleGudangTerbatas, 'website_published')).toBe(false);
 
-    // Tidak boleh tulis modul keuangan maupun menghapus key gudang jika hanya punya ['read', 'create']
+    // Tidak boleh tulis modul keuangan maupun menghapus key gudang jika hanya punya ['view', 'create']
     expect(canWriteSyncKey(roleGudangTerbatas, 'keuangan_jurnal')).toBe(false);
     expect(canDeleteSyncKey(roleGudangTerbatas, 'stok_gudang')).toBe(false);
+
+    const qcRole: RoleDefinition = {
+      ...roleGudangTerbatas,
+      permissions: { 'gudang-penerimaan': ['view', 'update'] }
+    };
+    expect(canWriteSyncKey(qcRole, 'gudang_penerimaan')).toBe(true);
+    expect(canDeleteSyncKey(qcRole, 'gudang_penerimaan')).toBe(false);
   });
 
   it('menonaktifkan koleksi RBAC lama agar akun dan role hanya tersimpan di RBAC server', () => {

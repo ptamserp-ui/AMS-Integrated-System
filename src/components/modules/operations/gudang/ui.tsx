@@ -80,6 +80,28 @@ export function identitasPeranGudang(role: UserRole): {
   }
 }
 
+export type AksiGudang =
+  | 'catat-penerimaan'
+  | 'input-qc'
+  | 'posting-inbound'
+  | 'mutasi-bin'
+  | 'kunci-stok'
+  | 'rilis-karantina';
+
+export function bolehAksiGudang(role: UserRole, aksi: AksiGudang): boolean {
+  switch (aksi) {
+    case 'catat-penerimaan':
+    case 'posting-inbound':
+    case 'mutasi-bin':
+    case 'kunci-stok':
+      return role === 'kepala_gudang';
+    case 'input-qc':
+      return role === 'qc_officer';
+    case 'rilis-karantina':
+      return role === 'pjt' || role === 'qa_manager';
+  }
+}
+
 export function toneStatusStok(status?: StatusStokFisik): Tone {
   switch (status ?? 'AVAILABLE') {
     case 'AVAILABLE':

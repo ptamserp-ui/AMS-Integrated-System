@@ -98,6 +98,7 @@ import {
   nilaiUmurStok,
   patchKunciStok,
   statusUnitStok,
+  stokBebas,
   susunRutePicking,
   tambahJejakPergerakan,
   tandaiGagalLkpp,
@@ -108,6 +109,7 @@ import {
   type PeriodeEReport
 } from '../utils/gudang';
 import {
+  hitungRataRataTertimbangSku,
   type PenyimpanganJurnal,
   type RancanganJurnal,
   susunJurnalBerantai,
@@ -3034,8 +3036,28 @@ class AMSDatabaseManager {
     const sumber = current.find((s) => s.id === id);
     const binTujuan = this.getLokasiBin().find((b) => b.id === binTujuanId);
     if (!sumber || !binTujuan) return { boleh: false, keterangan: 'Kartu stok atau bin tujuan tidak dikenal' };
-    const unit = Math.min(Math.max(jumlah, 0), sumber.jumlahStok);
-    if (unit <= 0) return { boleh: false, keterangan: 'Jumlah pemindahan nol atau stok habis' };
+    if (sumber.binId === binTujuanId) return { boleh: false, keterangan: 'Bin tujuan sama dengan bin asal' };
+    if (binTujuan.zonaSuhu !== sumber.zonaSuhu) {
+      return { boleh: false, keterangan: `Zona bin tujuan ${binTujuan.zonaSuhu} tidak sesuai kebutuhan stok ${sumber.zonaSuhu}` };
+    }
+    if (binTujuan.satuan !== sumber.satuan) {
+      return { boleh: false, keterangan: `Satuan bin tujuan ${binTujuan.satuan} tidak sesuai satuan stok ${sumber.satuan}` };
+    }
+    if (!Number.isFinite(jumlah) || jumlah <= 0) {
+      return { boleh: false, keterangan: 'Jumlah pemindahan harus lebih besar dari nol' };
+    }
+    const tersedia = stokBebas(sumber);
+    if (jumlah > tersedia) {
+      return { boleh: false, keterangan: `Jumlah pemindahan ${jumlah} melebihi stok bebas ${tersedia} ${sumber.satuan}` };
+    }
+    const terpakaiDiTujuan = current
+      .filter((s) => s.binId === binTujuanId)
+      .reduce((total, s) => total + s.jumlahStok, 0);
+    const sisaKapasitas = binTujuan.kapasitas - terpakaiDiTujuan;
+    if (jumlah > sisaKapasitas) {
+      return { boleh: false, keterangan: `Jumlah pemindahan ${jumlah} melebihi sisa kapasitas bin ${sisaKapasitas} ${binTujuan.satuan}` };
+    }
+    const unit = jumlah;
 
     const sasaran = current.find((s) => s.kodeSKU === sumber.kodeSKU && s.nomorBatch === sumber.nomorBatch && s.binId === binTujuanId);
     sumber.jumlahStok -= unit;
@@ -3146,7 +3168,8 @@ class AMSDatabaseManager {
     if (dokumen.hasilQCMasuk === 'Tolak (Rejected)')
       return { boleh: false, keterangan: 'QC masuk menolak barang — kembalikan ke pemasok, jangan posting ke rak', barisDiposting: 0, binMeluap: [] };
 
-    const daftarStok = this.getStokGudang().map((s) => ({ ...s }));
+    const stokSaatIni = this.getStokGudang().map((s) => ({ ...s }));
+    const daftarStok = stokSaatIni.map((s) => ({ ...s }));
     const daftarBin = this.getLokasiBin();
     const konfigurasi = this.getKonfigurasiGudang();
 
@@ -3255,10 +3278,117 @@ class AMSDatabaseManager {
     });
 
     if (barisDiposting === 0) return { boleh: false, keterangan: 'Tidak ada baris dengan qtyDiterima > 0 dan bin tujuan dikenal', barisDiposting, binMeluap: [] };
+    const valuasiAwal = this.getValuasiBatch();
+    const valuasiBaru = [...valuasiAwal];
+    const barisPerSku = new Map<string, typeof dokumen.baris>();
+    for (const baris of dokumen.baris) {
+      if (baris.qtyDiterima <= 0) continue;
+      const grup = barisPerSku.get(baris.kodeSKU) ?? [];
+      grup.push(baris);
+      barisPerSku.set(baris.kodeSKU, grup);
+    }
+
+    const skuTanpaDasarBiaya: string[] = [];
+    for (const [kodeSKU, barisMasuk] of barisPerSku) {
+      const rataRata = hitungRataRataTertimbangSku({
+        kodeSKU,
+        stokSaatIni,
+        daftarValuasi: valuasiAwal,
+        barangMasuk: barisMasuk.map((baris) => ({
+          qty: baris.qtyDiterima,
+          hargaBeliUnitIDR: baris.hargaBeliUnitIDR ?? 0
+        }))
+      });
+      if (rataRata.nilaiPerUnit === null) {
+        skuTanpaDasarBiaya.push(`${kodeSKU} (${rataRata.qtyTanpaDasar} unit tanpa dasar biaya aktual)`);
+        const batchMasuk = new Map<string, typeof barisMasuk>();
+        for (const baris of barisMasuk) {
+          const grup = batchMasuk.get(baris.nomorBatch) ?? [];
+          grup.push(baris);
+          batchMasuk.set(baris.nomorBatch, grup);
+        }
+        for (const [nomorBatch, barisBatch] of batchMasuk) {
+          if (barisBatch.some((baris) => !(baris.hargaBeliUnitIDR && baris.hargaBeliUnitIDR > 0))) continue;
+          if (stokSaatIni.some((stok) => stok.kodeSKU === kodeSKU && stok.nomorBatch === nomorBatch)) continue;
+          const qtyBatch = barisBatch.reduce((total, baris) => total + baris.qtyDiterima, 0);
+          if (qtyBatch <= 0) continue;
+          const nilaiBatch = barisBatch.reduce(
+            (total, baris) => total + baris.qtyDiterima * (baris.hargaBeliUnitIDR ?? 0),
+            0
+          );
+          const stokBatch = daftarStok.find((stok) => stok.kodeSKU === kodeSKU && stok.nomorBatch === nomorBatch);
+          if (!stokBatch) continue;
+          const index = valuasiBaru.findIndex(
+            (item) => item.kodeSKU === kodeSKU && item.nomorBatch === nomorBatch
+          );
+          const valuasiLama = index >= 0 ? valuasiBaru[index] : undefined;
+          const dasarAktual: ValuasiBatch = {
+            nomorBatch,
+            kodeSKU,
+            namaAlkes: stokBatch.namaAlkes,
+            tanggalProduksi: stokBatch.tanggalProduksi ?? stokBatch.tanggalMasuk,
+            tanggalKedaluwarsa: stokBatch.tanggalKedaluwarsa,
+            qtyTercatat: qtyBatch,
+            satuan: stokBatch.satuan,
+            nilaiPerUnit: Math.round(nilaiBatch / qtyBatch),
+            metode: 'Harga Beli Aktual',
+            sumberBiaya: 'Purchase Order',
+            rujukanSumber: `${dokumen.nomorPurchaseOrder} / ${dokumen.nomorTerima}`,
+            asal: 'ASLI',
+            tercatatPada: waktu.toISOString().split('T')[0]
+          };
+          if (valuasiLama?.asal === 'ASLI') continue;
+          if (index >= 0) valuasiBaru[index] = dasarAktual;
+          else valuasiBaru.push(dasarAktual);
+        }
+        continue;
+      }
+
+      const batchSku = new Map<string, StokGudang>();
+      daftarStok
+        .filter((stok) => stok.kodeSKU === kodeSKU && stok.jumlahStok > 0)
+        .forEach((stok) => batchSku.set(stok.nomorBatch, stok));
+      for (const stok of batchSku.values()) {
+        const index = valuasiBaru.findIndex(
+          (item) => item.kodeSKU === kodeSKU && item.nomorBatch === stok.nomorBatch
+        );
+        const valuasiLama = index >= 0 ? valuasiBaru[index] : undefined;
+        const baru: ValuasiBatch = {
+          nomorBatch: stok.nomorBatch,
+          kodeSKU,
+          namaAlkes: stok.namaAlkes,
+          tanggalProduksi: stok.tanggalProduksi ?? stok.tanggalMasuk,
+          tanggalKedaluwarsa: stok.tanggalKedaluwarsa,
+          qtyTercatat: valuasiLama?.qtyTercatat ?? stok.jumlahStok,
+          satuan: stok.satuan,
+          nilaiPerUnit: rataRata.nilaiPerUnit,
+          metode: 'Rata-rata Tertimbang',
+          sumberBiaya: valuasiLama?.sumberBiaya ?? 'Purchase Order',
+          rujukanSumber: valuasiLama?.rujukanSumber ?? `${dokumen.nomorPurchaseOrder} / ${dokumen.nomorTerima}`,
+          asal: 'ASLI',
+          tercatatPada: waktu.toISOString().split('T')[0]
+        };
+        if (index >= 0) valuasiBaru[index] = baru;
+        else valuasiBaru.push(baru);
+      }
+    }
+
     this.saveStokGudang(daftarStok);
+    if (valuasiBaru.length !== valuasiAwal.length || valuasiBaru.some((item, index) => item !== valuasiAwal[index])) {
+      this.saveValuasiBatch(valuasiBaru);
+    }
     const binMeluap = this.sinkronkanIsiBin();
     this.ubahTerimaBarang(id, { sudahDipostingKeStok: true }, `Posting ${barisDiposting} baris penerimaan ke kartu stok`);
-    return { boleh: true, keterangan: `${barisDiposting} baris masuk rak${binMeluap.length ? ` — peringatan kapasitas: ${binMeluap.join('; ')}` : ''}`, barisDiposting, binMeluap };
+    const peringatanBiaya = skuTanpaDasarBiaya.length
+      ? ` Rata-rata tertimbang belum diperbarui untuk ${skuTanpaDasarBiaya.join(', ')} karena stok atau baris penerimaan belum seluruhnya memiliki dasar biaya ASLI.`
+      : ' Rata-rata tertimbang IDR diperbarui tanpa memasukkan ongkos pengiriman.';
+    return {
+      boleh: true,
+      keterangan: `${barisDiposting} baris masuk rak${binMeluap.length ? ` — peringatan kapasitas: ${binMeluap.join('; ')}` : ''}.${peringatanBiaya}`,
+      barisDiposting,
+      binMeluap,
+      skuTanpaDasarBiaya
+    };
   }
 
   // Tab 7 — surat jalan (outbound)

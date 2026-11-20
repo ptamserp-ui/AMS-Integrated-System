@@ -520,6 +520,7 @@ export default function PersediaanTab({
                 <select value={formDasar.metode ?? 'FIFO'} onChange={(e) => setFormDasar({ ...formDasar, metode: e.target.value as ValuasiBatch['metode'] })} className={`${inputClass} bg-white`}>
                   <option value="FIFO">FIFO</option>
                   <option value="Rata-rata Tertimbang">Rata-rata Tertimbang</option>
+                  <option value="Harga Beli Aktual">Harga Beli Aktual (penerimaan)</option>
                 </select>
               </div>
             </div>

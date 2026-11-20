@@ -276,7 +276,7 @@ export default function ExecutiveOverview({
               Executive Dashboard & Pemantauan Divisi
             </h1>
             <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
-              Pusat komando eksekutif dewan direksi untuk memantau performa bisnis, kepatuhan regulasi CDAKB & ISO 13485, stabilitas rantai dingin logistik, serta laporan operasional dari 13 divisi secara langsung.
+              Pusat komando eksekutif untuk memantau performa bisnis dan empat divisi utama: Commercial, Operations, Finance & Accounting, serta Support.
             </p>
           </div>
 
@@ -530,17 +530,17 @@ export default function ExecutiveOverview({
               Laporan Kinerja & Status per Divisi Perusahaan
             </h3>
             <p className="text-xs text-slate-500">
-              Ringkasan operasional real-time dari setiap departemen fungsional PT Anugrahmitra Selaras
+              Ringkasan real-time beberapa fungsi utama di dalam empat divisi perusahaan
             </p>
           </div>
           <span className="text-xs font-bold px-3 py-1 bg-blue-100 text-blue-800 rounded-full">
-            7 Divisi Utama Dipantau
+            4 Divisi Utama
           </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           
-          {/* Divisi 1: Commercial / Sales & e-Katalog LKPP */}
+          {/* Fungsi Commercial: Sales & e-Katalog LKPP */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('sales-marketing')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -550,7 +550,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-blue-100 text-blue-800">
-                  Divisi Komersial & LKPP
+                  Commercial · Sales & Marketing
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Normal Aktif" />
               </div>
@@ -580,7 +580,7 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          {/* Divisi 2: Warehouse & Logistics (CDAKB) */}
+          {/* Fungsi Operations: Warehouse & Logistics */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('gudang-logistik')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -590,7 +590,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-amber-100 text-amber-800">
-                  Divisi Operasional & CDAKB
+                  Operations · Logistics & Warehouse
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="Normal Aktif" />
               </div>
@@ -620,7 +620,7 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          {/* Divisi 3: Regulatory Affairs & PJT */}
+          {/* Fungsi Commercial: Regulatory Affairs & PJT */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('ra-pjt')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -630,7 +630,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-indigo-100 text-indigo-800">
-                  Regulasi & Kepatuhan
+                  Commercial · Regulatory
                 </span>
                 <span className={`w-2 h-2 rounded-full ${niePerluPerpanjangan.length > 0 ? 'bg-amber-500' : 'bg-emerald-500'}`} />
               </div>
@@ -662,7 +662,7 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          {/* Divisi 4: Quality Assurance & ISO 13485 */}
+          {/* Fungsi Commercial: Quality Assurance & ISO 13485 */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('qa-mutu')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -672,7 +672,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-purple-100 text-purple-800">
-                  Sistem Manajemen Mutu
+                  Commercial · Quality Assurance
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
               </div>
@@ -702,7 +702,7 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          {/* Divisi 5: Manufaktur CPAKB */}
+          {/* Fungsi Operations: Manufacturing CPAKB */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('produksi-cpakb')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -712,7 +712,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-emerald-100 text-emerald-800">
-                  Produksi & CPAKB
+                  Operations · Manufacturing
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
               </div>
@@ -742,7 +742,7 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          {/* Divisi 6: Finance & Accounting */}
+          {/* Divisi Finance & Accounting */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('finance-akuntansi')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -752,7 +752,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-cyan-100 text-cyan-800">
-                  Keuangan & Pajak
+                  Finance & Accounting
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
               </div>
@@ -782,7 +782,7 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          {/* Divisi 7: HRD & Payroll */}
+          {/* Fungsi Support: HRD & General Affairs */}
           <div 
             onClick={() => bukaModulJikaDiizinkan('hrd-pelatihan')}
             className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-xs transition-all group flex flex-col justify-between ${
@@ -792,7 +792,7 @@ export default function ExecutiveOverview({
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="px-2.5 py-1 rounded-full text-2xs font-bold bg-rose-100 text-rose-800">
-                  Sumber Daya Manusia
+                  Support · HRD & GA
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
               </div>
@@ -818,6 +818,22 @@ export default function ExecutiveOverview({
                 <>Buka Modul HRIS <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" /></>
               ) : (
                 <span className="text-slate-500 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Akses Terbatas</span>
+              )}
+            </div>
+            <div className="mt-2 text-right">
+              {bolehAksesModul('it-traceability', aksesEfektif) ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    bukaModulJikaDiizinkan('it-traceability');
+                  }}
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                >
+                  Buka IT Hub <ArrowRight className="inline w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <span className="text-2xs text-slate-400">IT Hub · akses terbatas</span>
               )}
             </div>
           </div>

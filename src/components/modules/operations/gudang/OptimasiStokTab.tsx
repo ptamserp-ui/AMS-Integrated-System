@@ -11,6 +11,7 @@ import {
   daftarStokPerluKunciAgeing,
   hitungReorderPoint,
   nilaiUmurStok,
+  umurStokHari,
   statusTerkunci,
   statusUnitStok,
   stokBebas
@@ -141,6 +142,7 @@ export default function OptimasiStokTab({
       .map((s) => ({
         stok: s,
         umur: nilaiUmurStok(s, konfigurasi, dariAcuan),
+        umurSejakMasuk: umurStokHari(s.tanggalMasuk, dariAcuan),
         statusFisik: statusUnitStok(s)
       }))
       .sort((a, b) => a.umur.sisaHari - b.umur.sisaHari);
@@ -520,6 +522,7 @@ export default function OptimasiStokTab({
                 <th className="py-3 px-3.5">Batch &amp; Nama Alkes</th>
                 <th className="py-3 px-3.5">Lokasi Bin</th>
                 <th className="py-3 px-3.5">Qty Stok</th>
+                <th className="py-3 px-3.5">Umur sejak Masuk</th>
                 <th className="py-3 px-3.5">Kedaluwarsa &amp; Sisa Hari</th>
                 <th className="py-3 px-3.5">Status Kartu</th>
                 <th className="py-3 px-3.5">Rekomendasi Tindakan</th>
@@ -527,7 +530,7 @@ export default function OptimasiStokTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {sebaranUmur.slice(0, 12).map(({ stok, umur, statusFisik }) => {
+              {sebaranUmur.slice(0, 12).map(({ stok, umur, umurSejakMasuk, statusFisik }) => {
                 const terkunci = statusTerkunci(statusFisik);
                 return (
                   <tr key={stok.id} className="hover:bg-slate-50">
@@ -540,6 +543,9 @@ export default function OptimasiStokTab({
                     </td>
                     <td className="py-3 px-3.5 font-bold tabular-nums text-slate-900">
                       {stok.jumlahStok} {stok.satuan}
+                    </td>
+                    <td className="py-3 px-3.5 font-mono tabular-nums text-slate-700">
+                      {umurSejakMasuk === null ? 'Tanggal masuk tidak valid' : `${umurSejakMasuk} hari`}
                     </td>
                     <td className="py-3 px-3.5 font-mono tabular-nums">
                       <div className="text-slate-900">{stok.tanggalKedaluwarsa}</div>

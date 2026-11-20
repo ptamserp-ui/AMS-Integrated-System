@@ -505,6 +505,47 @@ export function nilaiPersediaanPerBets(params: { daftarStok: StokGudang[]; dafta
   };
 }
 
+export function hitungRataRataTertimbangSku(params: {
+  kodeSKU: string;
+  stokSaatIni: StokGudang[];
+  daftarValuasi: ValuasiBatch[];
+  barangMasuk: Array<{ qty: number; hargaBeliUnitIDR: number }>;
+}): { nilaiPerUnit: number | null; qtyTanpaDasar: number } {
+  const valuasi = new Map(
+    params.daftarValuasi.map((item) => [`${item.kodeSKU}|${item.nomorBatch}`, item])
+  );
+  let qtyTotal = 0;
+  let nilaiTotal = 0;
+  let qtyTanpaDasar = 0;
+
+  params.stokSaatIni
+    .filter((stok) => stok.kodeSKU === params.kodeSKU && stok.jumlahStok > 0)
+    .forEach((stok) => {
+      const dasar = valuasi.get(`${stok.kodeSKU}|${stok.nomorBatch}`);
+      if (!dasar || dasar.asal !== 'ASLI' || !(dasar.nilaiPerUnit > 0)) {
+        qtyTanpaDasar += stok.jumlahStok;
+        return;
+      }
+      qtyTotal += stok.jumlahStok;
+      nilaiTotal += stok.jumlahStok * dasar.nilaiPerUnit;
+    });
+
+  for (const masuk of params.barangMasuk) {
+    if (!(masuk.qty > 0)) continue;
+    if (!(masuk.hargaBeliUnitIDR > 0) || !Number.isFinite(masuk.hargaBeliUnitIDR)) {
+      qtyTanpaDasar += masuk.qty;
+      continue;
+    }
+    qtyTotal += masuk.qty;
+    nilaiTotal += masuk.qty * masuk.hargaBeliUnitIDR;
+  }
+
+  if (qtyTanpaDasar > 0 || qtyTotal === 0) {
+    return { nilaiPerUnit: null, qtyTanpaDasar };
+  }
+  return { nilaiPerUnit: Math.round(nilaiTotal / qtyTotal), qtyTanpaDasar: 0 };
+}
+
 export function rancangJurnalWriteOff(params: {
   valuasi: ValuasiBatch;
   qty: number;

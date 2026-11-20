@@ -42,6 +42,13 @@ function selisihHariDari(terhadap: string, dari: Date) {
   return Math.round((akhir - Date.UTC(tahun, bulan - 1, hari)) / MS_PER_HARI);
 }
 
+export function umurStokHari(tanggalMasuk: string, dari: Date = new Date()): number | null {
+  const masuk = new Date(`${tanggalMasuk}T00:00:00Z`).getTime();
+  if (Number.isNaN(masuk)) return null;
+  const [tahun, bulan, hari] = tanggalHari(dari).split('-').map(Number);
+  return Math.max(0, Math.floor((Date.UTC(tahun, bulan - 1, hari) - masuk) / MS_PER_HARI));
+}
+
 function waktuLabel(dari: Date) {
   return `${tanggalHari(dari)} ${dari.toISOString().slice(11, 16)}`;
 }

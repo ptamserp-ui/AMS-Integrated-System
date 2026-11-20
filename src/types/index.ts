@@ -1,4 +1,4 @@
-export type DivisionId = 'regulatory' | 'operations' | 'commercial' | 'supporting';
+export type DivisionId = 'commercial' | 'operations' | 'finance' | 'support';
 
 export type ModuleId =
   // 1. Regulatory Affairs
@@ -337,6 +337,7 @@ export interface BarisTerima {
   satuan: string;
   binTujuanId: string;
   alasanPenolakan: string;
+  hargaBeliUnitIDR?: number;
   // --- inv_batches: tanggal produksi & tautan CoA/CoC untuk audit ISO 13485 ---
   tanggalProduksi?: string;
   coaUrl?: string;
@@ -358,6 +359,7 @@ export interface TerimaBarang {
   purchaseOrderId: string;
   nomorPurchaseOrder: string;
   namaPemasok: string;
+  biayaPengirimanIDR?: number;
   statusMatching: StatusPencocokanTerima;
   baris: BarisTerima[];
   hasilQCMasuk: InspeksiQC['hasilPemeriksaan'];
@@ -868,7 +870,7 @@ export interface ValuasiBatch {
   qtyTercatat: number;
   satuan: string;
   nilaiPerUnit: number;
-  metode: 'FIFO' | 'Rata-rata Tertimbang';
+  metode: 'FIFO' | 'Rata-rata Tertimbang' | 'Harga Beli Aktual';
   sumberBiaya: 'Purchase Order' | 'BMR Produksi' | 'Taksiran Manajemen';
   rujukanSumber: string;
   asal: 'DUMMY' | 'ASLI';
@@ -1930,6 +1932,8 @@ export type RbacResourceId =
   | ModuleId
   | 'overview'
   | 'website'
+  | 'gudang-penerimaan'
+  | 'gudang-mutasi'
   | 'rbac-admin'
   | 'audit-trail';
 

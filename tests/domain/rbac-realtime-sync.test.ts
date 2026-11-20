@@ -21,6 +21,30 @@ afterEach(() => {
 });
 
 describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Login Internet Real-Time', () => {
+  it('memberi hak write gudang berdasarkan tugas dan memigrasikan role sistem lama secara aman', () => {
+    const dataDir = createTempDataDir();
+    const initial = new ServerRbacStore(dataDir);
+    const roles = Object.fromEntries(initial.listRoles().map((role) => [role.id, role]));
+
+    expect(roles.kepala_gudang?.permissions['gudang-penerimaan']).toEqual(['view', 'create', 'update']);
+    expect(roles.kepala_gudang?.permissions['gudang-mutasi']).toEqual(['view', 'create', 'update']);
+    expect(roles.qc_officer?.permissions['gudang-penerimaan']).toEqual(['view', 'update']);
+    expect(roles.qc_officer?.permissions['gudang-mutasi']).toEqual(['view']);
+    expect(roles.qa_manager?.permissions['gudang-mutasi']).toEqual(['view', 'update', 'approve']);
+
+    const file = path.join(dataDir, 'rbac-db.json');
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { roles: Array<{ id: string; permissions: Record<string, string[]> }> };
+    for (const role of saved.roles) {
+      delete role.permissions['gudang-penerimaan'];
+      delete role.permissions['gudang-mutasi'];
+    }
+    fs.writeFileSync(file, JSON.stringify(saved), 'utf8');
+
+    const migrated = Object.fromEntries(new ServerRbacStore(dataDir).listRoles().map((role) => [role.id, role]));
+    expect(migrated.kepala_gudang?.permissions['gudang-mutasi']).toEqual(['view', 'create', 'update']);
+    expect(migrated.qc_officer?.permissions['gudang-mutasi']).toEqual(['view']);
+  });
+
   it('akun & peran baru yang diinput admin langsung persisten dan bisa dipakai login dari IP internet lain', () => {
     const dataDir = createTempDataDir();
     const rbac = new ServerRbacStore(dataDir);

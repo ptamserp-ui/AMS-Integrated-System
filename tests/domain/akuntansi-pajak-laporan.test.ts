@@ -13,6 +13,7 @@ import {
   gerbangPenagihanCdakb,
   gerbangPeriodeBuku,
   hitungLandedCostImpor,
+  hitungRataRataTertimbangSku,
   nilaiPersediaanPerBets,
   rancangJurnalFaktur,
   rancangJurnalLandedCost,
@@ -358,6 +359,33 @@ describe('laporan benih — angka yang dilihat pemilik di tab Laporan', () => {
     expect(valuasi.betsTanpaDasarBiaya).toEqual(['BETS-TANPA-BIAYA']);
     expect(valuasi.baris[0].nilaiPerUnit).toBeNull();
     expect(valuasi.baris[0].catatan).toContain('Belum ada dasar biaya');
+  });
+
+  it('moving weighted average memakai dasar ASLI dan harga beli masuk, tetapi menolak stok lama DUMMY', () => {
+    const valuasiAsli = (nomorBatch: string, nilaiPerUnit: number) => ({
+      ...INITIAL_VALUASI_BATCH[0],
+      kodeSKU: 'SKU-UJI',
+      nomorBatch,
+      nilaiPerUnit,
+      asal: 'ASLI' as const
+    });
+    const stokAktual = [
+      stok({ kodeSKU: 'SKU-UJI', nomorBatch: 'BATCH-A', jumlahStok: 10 }),
+      stok({ kodeSKU: 'SKU-UJI', nomorBatch: 'BATCH-B', jumlahStok: 5 })
+    ];
+    expect(hitungRataRataTertimbangSku({
+      kodeSKU: 'SKU-UJI',
+      stokSaatIni: stokAktual,
+      daftarValuasi: [valuasiAsli('BATCH-A', 100), valuasiAsli('BATCH-B', 200)],
+      barangMasuk: [{ qty: 5, hargaBeliUnitIDR: 300 }]
+    })).toEqual({ nilaiPerUnit: 175, qtyTanpaDasar: 0 });
+
+    expect(hitungRataRataTertimbangSku({
+      kodeSKU: 'SKU-UJI',
+      stokSaatIni: [stokAktual[0]],
+      daftarValuasi: [{ ...valuasiAsli('BATCH-A', 100), asal: 'DUMMY' }],
+      barangMasuk: [{ qty: 5, hargaBeliUnitIDR: 300 }]
+    })).toEqual({ nilaiPerUnit: null, qtyTanpaDasar: 10 });
   });
 });
 

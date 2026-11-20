@@ -18,45 +18,40 @@ import {
   Menu,
   X,
   ChevronDown,
-  ChevronRight,
   LayoutGrid,
   CloudCheck,
   Printer,
   Search,
   QrCode,
-  UserCheck,
   KeyRound,
   ShieldCheck,
   Shield,
   Crown,
   UserCog,
   LogOut,
-  FileText,
   Smartphone
 } from 'lucide-react';
-import { AksesEfektif, ModuleId, UserRole } from '../../types';
+import { AksesEfektif, DivisionId, ModuleId, UserRole } from '../../types';
 import LogoAplikasi from '../common/LogoAplikasi';
 import { db } from '../../services/pocketbase';
 import { gantiKataSandiServer, punyaIzin, type SesiLogin } from '../../utils/autentikasi';
 import { bolehAksesModul, SEMUA_ID_MODUL } from '../../utils/hakAkses';
 import type { ITSubTabId } from '../modules/supporting/ITModule';
-import type { SalesTab } from '../modules/commercial/SalesModule';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { MobilePreviewModal } from '../mobile/MobilePreviewModal';
 
 export type Tone = 'slate' | 'amber' | 'indigo' | 'blue' | 'emerald' | 'rose';
-export type SubMenuKey = 'Regulatory Affairs' | 'Operations & Technical' | 'Sales & Marketing' | 'Supporting System';
-export type NavId = ModuleId | 'overview' | 'website';
+export type NavId = ModuleId | DivisionId | 'overview' | 'website';
 
-/** Menu utama, kiri ke kanan: tab langsung diselingi dropdown per divisi */
-export type MainMenuItem = { kind: 'tab'; id: NavId } | { kind: 'submenu'; key: SubMenuKey };
+/** Menu utama hanya menampilkan pintu masuk divisi dan tab penting. */
+export type MainMenuItem = { kind: 'tab'; id: ModuleId | 'overview' | 'website' } | { kind: 'division'; id: DivisionId };
 
 export interface TabDef {
-  id: NavId;
+  id: ModuleId | 'overview' | 'website';
   label: string;
   short: string;
   icon: React.ComponentType<{ className?: string }>;
-  group?: SubMenuKey;
+  group?: DivisionId;
   badge?: string;
 }
 
@@ -66,61 +61,52 @@ const TONE_ICON = 'text-slate-500';
 
 const TONE_HOVER = 'hover:bg-slate-200 hover:text-slate-900';
 
-const TONE_DOT: Record<Tone, string> = {
-  slate: 'bg-slate-400',
-  amber: 'bg-amber-500',
-  indigo: 'bg-indigo-500',
-  blue: 'bg-blue-500',
-  emerald: 'bg-emerald-500',
-  rose: 'bg-rose-500',
-};
-
-const SUBMENU_ORDER: SubMenuKey[] = [
-  'Regulatory Affairs',
-  'Operations & Technical',
-  'Sales & Marketing',
-  'Supporting System'
+export const DIVISION_ORDER: DivisionId[] = [
+  'commercial',
+  'operations',
+  'finance',
+  'support'
 ];
 
-const SUBMENU_TONE: Record<SubMenuKey, Tone> = {
-  'Regulatory Affairs': 'blue',
-  'Operations & Technical': 'amber',
-  'Sales & Marketing': 'emerald',
-  'Supporting System': 'indigo'
+export const DIVISION_LABELS: Record<DivisionId, string> = {
+  commercial: 'Commercial',
+  operations: 'Operations',
+  finance: 'Finance & Accounting',
+  support: 'Support'
 };
 
 export const MAIN_MENU: MainMenuItem[] = [
   { kind: 'tab', id: 'website' },
-  { kind: 'submenu', key: 'Regulatory Affairs' },
-  { kind: 'submenu', key: 'Operations & Technical' },
-  { kind: 'submenu', key: 'Sales & Marketing' },
-  { kind: 'submenu', key: 'Supporting System' },
+  { kind: 'division', id: 'commercial' },
+  { kind: 'division', id: 'operations' },
+  { kind: 'division', id: 'finance' },
+  { kind: 'division', id: 'support' },
   { kind: 'tab', id: 'overview' }
 ];
 
 export const ALL_TABS: TabDef[] = [
   { id: 'website', label: 'Website', short: 'Website', icon: Globe, badge: 'SEGERA' },
 
-  { id: 'ra-pjt', label: 'Regulatory Affairs (RA) & Penanggung Jawab Teknis (PJT)', short: 'Izin Edar', icon: Building2, group: 'Regulatory Affairs', badge: 'WAJIB' },
-  { id: 'qa-mutu', label: 'Quality Assurance (QA) / Pemastian Mutu', short: 'QA', icon: Award, group: 'Regulatory Affairs', badge: 'ISO' },
-  { id: 'qc-inspeksi', label: 'Quality Control (QC) / Pengawasan Mutu', short: 'QC', icon: CheckCircle2, group: 'Regulatory Affairs', badge: 'RILIS' },
-  { id: 'pms-vigilance', label: 'Post-Market Surveillance (PMS) / Vigilance', short: 'KTD', icon: AlertTriangle, group: 'Regulatory Affairs', badge: 'KTD' },
+  { id: 'sales-marketing', label: 'Sales & Marketing', short: 'Sales', icon: TrendingUp, group: 'commercial', badge: 'LKPP' },
+  { id: 'purchasing-procurement', label: 'Purchasing & Procurement', short: 'Beli', icon: ShoppingCart, group: 'commercial' },
+  { id: 'ra-pjt', label: 'Regulatory Affairs (RA) & Penanggung Jawab Teknis (PJT)', short: 'Izin Edar', icon: Building2, group: 'commercial', badge: 'WAJIB' },
+  { id: 'qa-mutu', label: 'Quality Assurance (QA) / Pemastian Mutu', short: 'QA', icon: Award, group: 'commercial', badge: 'ISO' },
+  { id: 'pms-vigilance', label: 'Post-Market Surveillance (PMS) / Vigilance', short: 'KTD', icon: AlertTriangle, group: 'commercial', badge: 'KTD' },
 
-  { id: 'gudang-logistik', label: 'Warehouse & Logistics', short: 'Gudang', icon: Warehouse, group: 'Operations & Technical', badge: 'CDAKB' },
-  { id: 'teknisi-service', label: 'After-Sales Service', short: 'Teknisi', icon: Wrench, group: 'Operations & Technical' },
-  { id: 'produksi-cpakb', label: 'Manufacture', short: 'CPAKB', icon: Factory, group: 'Operations & Technical', badge: 'BMR' },
-  { id: 'purchasing-procurement', label: 'Purchasing & Procurement', short: 'Beli', icon: ShoppingCart, group: 'Operations & Technical' },
+  { id: 'gudang-logistik', label: 'Logistics & Warehouse', short: 'Gudang', icon: Warehouse, group: 'operations', badge: 'CDAKB' },
+  { id: 'qc-inspeksi', label: 'Quality Control (QC) / Inspeksi Teknis', short: 'QC', icon: CheckCircle2, group: 'operations', badge: 'RILIS' },
+  { id: 'teknisi-service', label: 'Technical & After-Sales Service', short: 'Teknisi', icon: Wrench, group: 'operations' },
+  { id: 'produksi-cpakb', label: 'Manufacturing', short: 'CPAKB', icon: Factory, group: 'operations', badge: 'BMR' },
 
-  { id: 'sales-marketing', label: 'Sales & e-Katalog LKPP', short: 'e-Katalog', icon: TrendingUp, group: 'Sales & Marketing', badge: 'LKPP' },
+  { id: 'finance-akuntansi', label: 'Finance & Accounting', short: 'Finance', icon: Coins, group: 'finance', badge: 'PPN 11%' },
 
-  { id: 'hrd-pelatihan', label: 'Human Resources & Development (HRD)', short: 'HRD', icon: Users, group: 'Supporting System' },
-  { id: 'finance-akuntansi', label: 'Finance & Accounting', short: 'Pajak', icon: Coins, group: 'Supporting System', badge: 'PPN 11%' },
-  { id: 'it-traceability', label: 'Information Technology (IT)', short: 'IT Hub', icon: Cpu, group: 'Supporting System', badge: 'CADDY' },
+  { id: 'hrd-pelatihan', label: 'HRD & General Affairs (GA)', short: 'HRD & GA', icon: Users, group: 'support' },
+  { id: 'it-traceability', label: 'Information Technology (IT)', short: 'IT Hub', icon: Cpu, group: 'support', badge: 'CADDY' },
 
   { id: 'overview', label: 'Executive Overview', short: 'Overview', icon: LayoutDashboard, badge: 'Cockpit' },
 ];
 
-const BOTTOM_PRIORITY: NavId[] = [
+const BOTTOM_PRIORITY: Array<ModuleId | 'overview'> = [
   'overview',
   'ra-pjt',
   'gudang-logistik',
@@ -212,10 +198,7 @@ interface NavbarProps {
   onOpenTraceability: () => void;
   onKeluar: () => void;
   aksesAktif?: AksesEfektif;
-  itSubTab?: ITSubTabId;
   onITNavigate?: (sub: ITSubTabId) => void;
-  salesSubTab?: SalesTab;
-  onSalesNavigate?: (sub: SalesTab) => void;
 }
 
 export default function Navbar({
@@ -227,10 +210,7 @@ export default function Navbar({
   onOpenTraceability,
   onKeluar,
   aksesAktif,
-  itSubTab = 'traceability',
   onITNavigate,
-  salesSubTab = 'order',
-  onSalesNavigate
 }: NavbarProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobilePreview, setShowMobilePreview] = useState(
@@ -259,8 +239,6 @@ export default function Navbar({
     }
   };
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [openMenu, setOpenMenu] = useState<SubMenuKey | null>(null);
-  const [openGroup, setOpenGroup] = useState<SubMenuKey | null>(null);
   const [connStatus, setConnStatus] = useState(db.getConnectionStatus());
 
   useEffect(() => {
@@ -274,7 +252,6 @@ export default function Navbar({
     setCurrentTab(id);
     setDrawerOpen(false);
     setShowUserMenu(false);
-    setOpenMenu(null);
     try {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch {
@@ -287,7 +264,6 @@ export default function Navbar({
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setDrawerOpen(false);
-      setOpenMenu(null);
       setShowUserMenu(false);
     };
     window.addEventListener('keydown', onKey);
@@ -313,6 +289,8 @@ export default function Navbar({
   );
 
   const activeTabDef = ALL_TABS.find((t) => t.id === currentTab);
+  const activeDivision = DIVISION_ORDER.find((id) => id === currentTab);
+  const activeTabLabel = activeTabDef?.label || (activeDivision && DIVISION_LABELS[activeDivision]) || 'Ikhtisar';
 
   const bottomTabs = useMemo(
     () =>
@@ -323,28 +301,12 @@ export default function Navbar({
   );
 
   const subMenuMap = useMemo(() => {
-    const map = {} as Record<SubMenuKey, TabDef[]>;
-    SUBMENU_ORDER.forEach((key) => {
-      map[key] = ALL_TABS.filter((t) => t.group === key && bolehAksesModul(t.id, aksesEfektif));
+    const map = {} as Record<DivisionId, TabDef[]>;
+    DIVISION_ORDER.forEach((id) => {
+      map[id] = ALL_TABS.filter((t) => t.group === id && bolehAksesModul(t.id, aksesEfektif));
     });
     return map;
   }, [aksesEfektif]);
-
-  const goITSub = (sub: ITSubTabId) => {
-    onITNavigate?.(sub);
-    go('it-traceability');
-  };
-
-  const goSalesSub = (sub: SalesTab) => {
-    onSalesNavigate?.(sub);
-    go('sales-marketing');
-  };
-
-  /* Buka grup yang memuat modul aktif saat drawer dibuka */
-  useEffect(() => {
-    if (!drawerOpen) return;
-    if (activeTabDef?.group) setOpenGroup(activeTabDef.group);
-  }, [drawerOpen, activeTabDef]);
 
   return (
     <header className="no-print sticky top-0 z-40 bg-white border-b border-slate-200 shadow-[0_1px_2px_rgba(15,23,42,0.06)] print:shadow-none">
@@ -379,7 +341,7 @@ export default function Navbar({
             </p>
             {/* Judul tab aktif pada mobile */}
             <p className="text-2xs font-semibold text-blue-600 truncate whitespace-nowrap sm:hidden">
-              {activeTabDef?.label || 'Ikhtisar'}
+              {activeTabLabel}
             </p>
           </div>
         </button>
@@ -527,7 +489,10 @@ export default function Navbar({
                   {sesi && punyaIzin(sesi, 'rbac-admin', 'view') && (
                     <button
                       type="button"
-                      onClick={() => goITSub('user-roles')}
+                      onClick={() => {
+                        onITNavigate?.('user-roles');
+                        go('it-traceability');
+                      }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-700 hover:bg-blue-50 cursor-pointer"
                     >
                       <UserCog className="w-3.5 h-3.5" />
@@ -557,15 +522,8 @@ export default function Navbar({
 
       </div>
 
-      {/* ================= STRIP TAB HORIZONTAL (DESKTOP BEJO STYLE) ================= */}
+      {/* ================= NAVIGASI UTAMA DESKTOP ================= */}
       <nav className="hidden lg:flex w-full max-w-[1440px] mx-auto px-3 sm:px-5 pb-2 -mt-0.5 gap-1">
-
-        {/* Scrim tunggal: di bawah semua pemicu agar dropdown bisa berpindah langsung */}
-        {openMenu && (
-          <div className="fixed inset-0 z-0 cursor-default" onClick={() => setOpenMenu(null)} />
-        )}
-
-        {/* Menu utama: tab langsung + dropdown per divisi, sesuai urutan MAIN_MENU */}
         {MAIN_MENU.map((entry) => {
           if (entry.kind === 'tab') {
             if (!bolehAksesModul(entry.id, aksesEfektif)) return null;
@@ -597,109 +555,23 @@ export default function Navbar({
             );
           }
 
-          const { key } = entry;
-          const items = subMenuMap[key];
+          const items = subMenuMap[entry.id];
           if (items.length === 0) return null;
-          const containsActive = items.some((t) => t.id === currentTab);
-          const isOpen = openMenu === key;
+          const Icon = items[0].icon;
+          const isActive = currentTab === entry.id || items.some((tab) => tab.id === currentTab);
           return (
-            <div key={key} className="relative shrink-0 z-50">
-              <button
-                type="button"
-                onClick={() => setOpenMenu(isOpen ? null : key)}
-                aria-expanded={isOpen}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                  containsActive || isOpen ? `${TONE_ACTIVE} shadow-xs` : `text-slate-600 ${TONE_HOVER}`
-                }`}
-              >
-                <span>{key}</span>
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isOpen && (
-                <div className="absolute left-0 top-full mt-1.5 w-[340px] max-w-[calc(100vw-2rem)] bg-white rounded-xl shadow-xl border border-slate-200 py-1.5 z-50">
-                  <p className="px-3 pt-1 pb-1.5 text-2xs font-bold uppercase tracking-[0.14em] text-slate-400">
-                    {key}
-                  </p>
-                  {items.map((tab) => {
-                    const Icon = tab.icon;
-                    const isIT = tab.id === 'it-traceability';
-                    const isSales = tab.id === 'sales-marketing';
-                    const isSalesCrmSub = salesSubTab === 'crm' || salesSubTab === 'quotation';
-                    const isActive = isIT
-                      ? currentTab === 'it-traceability' && itSubTab !== 'user-roles'
-                      : isSales
-                        ? currentTab === 'sales-marketing' && !isSalesCrmSub
-                        : currentTab === tab.id;
-                    const isUserRolesActive = currentTab === 'it-traceability' && itSubTab === 'user-roles';
-                    const isCrmQuotationActive = currentTab === 'sales-marketing' && isSalesCrmSub;
-                    return (
-                      <div key={tab.id}>
-                        <button
-                          type="button"
-                          onClick={() => (isIT ? goITSub('traceability') : isSales ? goSalesSub('order') : go(tab.id))}
-                          className={`w-full text-left px-3 py-2 flex items-start gap-2.5 text-xs font-semibold transition-colors cursor-pointer ${
-                            isActive ? 'bg-slate-100 text-slate-900' : 'text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${TONE_ICON}`} />
-                          <span className="flex-1 leading-snug">{tab.label}</span>
-                          {tab.badge && (
-                            <span className="shrink-0 text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold bg-slate-200 text-slate-600">
-                              {tab.badge}
-                            </span>
-                          )}
-                        </button>
-                        {isIT && (!sesi || punyaIzin(sesi, 'rbac-admin', 'view')) && (
-                          <button
-                            type="button"
-                            onClick={() => goITSub('user-roles')}
-                            className={`w-full text-left pl-9 pr-3 py-2 flex items-start gap-2 text-xs font-semibold transition-colors cursor-pointer border-l-2 ml-4 ${
-                              isUserRolesActive
-                                ? 'bg-slate-100 text-slate-900 border-blue-600'
-                                : 'text-slate-600 hover:bg-slate-50 border-slate-200'
-                            }`}
-                          >
-                            <UserCheck className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${TONE_ICON}`} />
-                            <div className="flex-1 leading-snug">
-                              <div>User Account & Roles</div>
-                              <div className="text-2xs font-normal text-slate-500">
-                                Buat akun, tetapkan role, & checklist modul
-                              </div>
-                            </div>
-                            <span className="shrink-0 text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold bg-blue-100 text-blue-700">
-                              RBAC
-                            </span>
-                          </button>
-                        )}
-                        {isSales && (
-                          <button
-                            type="button"
-                            onClick={() => goSalesSub('quotation')}
-                            className={`w-full text-left pl-9 pr-3 py-2 flex items-start gap-2 text-xs font-semibold transition-colors cursor-pointer border-l-2 ml-4 ${
-                              isCrmQuotationActive
-                                ? 'bg-slate-100 text-slate-900 border-emerald-600'
-                                : 'text-slate-600 hover:bg-slate-50 border-slate-200'
-                            }`}
-                          >
-                            <FileText className={`w-3.5 h-3.5 mt-0.5 shrink-0 ${TONE_ICON}`} />
-                            <div className="flex-1 leading-snug">
-                              <div>CRM Marketing &amp; Quotation</div>
-                              <div className="text-2xs font-normal text-slate-500">
-                                Prospek CRM &amp; terbitkan penawaran PDF A4
-                              </div>
-                            </div>
-                            <span className="shrink-0 text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold bg-emerald-100 text-emerald-700">
-                              CRM
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => go(entry.id)}
+              aria-current={currentTab === entry.id ? 'page' : undefined}
+              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                isActive ? `${TONE_ACTIVE} shadow-xs` : `text-slate-600 ${TONE_HOVER}`
+              }`}
+            >
+              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : TONE_ICON}`} />
+              <span>{DIVISION_LABELS[entry.id]}</span>
+            </button>
           );
         })}
       </nav>
@@ -765,109 +637,26 @@ export default function Navbar({
                   );
                 }
 
-                const { key } = entry;
-                const items = subMenuMap[key];
+                const items = subMenuMap[entry.id];
                 if (items.length === 0) return null;
-                const tone = SUBMENU_TONE[key];
-                const isOpen = openGroup === key;
-                const containsActive = items.some((t) => t.id === currentTab);
+                const Icon = items[0].icon;
+                const isActive = currentTab === entry.id || items.some((tab) => tab.id === currentTab);
                 return (
-                  <div key={key}>
-                    <button
-                      type="button"
-                      onClick={() => setOpenGroup(isOpen ? null : key)}
-                      aria-expanded={isOpen}
-                      className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors active:bg-slate-100 ${
-                        containsActive && !isOpen ? 'bg-slate-100' : ''
-                      }`}
-                    >
-                      <span className={`w-2 h-2 shrink-0 rounded-full ${TONE_DOT[tone]}`} />
-                      <span className="flex-1 text-base font-semibold truncate text-slate-700">
-                        {key}
-                      </span>
-                      <span className="shrink-0 text-2xs font-mono text-slate-400">{items.length}</span>
-                      <ChevronRight className={`w-4 h-4 shrink-0 text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                    </button>
-
-                    {isOpen && (
-                      <div className="mt-1 mb-1.5 ml-3 pl-3 border-l border-slate-200 space-y-1">
-                        {items.map((tab) => {
-                          const Icon = tab.icon;
-                          const isIT = tab.id === 'it-traceability';
-                          const isSales = tab.id === 'sales-marketing';
-                          const isSalesCrmSub = salesSubTab === 'crm' || salesSubTab === 'quotation';
-                          const isActive = isIT
-                            ? currentTab === 'it-traceability' && itSubTab !== 'user-roles'
-                            : isSales
-                              ? currentTab === 'sales-marketing' && !isSalesCrmSub
-                              : currentTab === tab.id;
-                          const isUserRolesActive = currentTab === 'it-traceability' && itSubTab === 'user-roles';
-                          const isCrmQuotationActive = currentTab === 'sales-marketing' && isSalesCrmSub;
-                          return (
-                            <div key={tab.id} className="space-y-1">
-                              <button
-                                type="button"
-                                onClick={() => (isIT ? goITSub('traceability') : isSales ? goSalesSub('order') : go(tab.id))}
-                                className={`w-full flex items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors ${
-                                  isActive ? TONE_ACTIVE : 'text-slate-700 active:bg-slate-100'
-                                }`}
-                              >
-                                <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${isActive ? 'text-white' : TONE_ICON}`} />
-                                <span className="flex-1 text-sm font-semibold leading-snug">{tab.label}</span>
-                                {tab.badge && (
-                                  <span
-                                    className={`shrink-0 text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                                      isActive ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-600'
-                                    }`}
-                                  >
-                                    {tab.badge}
-                                  </span>
-                                )}
-                              </button>
-                              {isIT && (!sesi || punyaIzin(sesi, 'rbac-admin', 'view')) && (
-                                <button
-                                  type="button"
-                                  onClick={() => goITSub('user-roles')}
-                                  className={`w-full flex items-center gap-2 rounded-xl pl-7 pr-2.5 py-2 text-left transition-colors ${
-                                    isUserRolesActive ? TONE_ACTIVE : 'text-slate-600 active:bg-slate-100'
-                                  }`}
-                                >
-                                  <UserCheck className={`w-3.5 h-3.5 shrink-0 ${isUserRolesActive ? 'text-white' : TONE_ICON}`} />
-                                  <span className="flex-1 text-xs font-semibold leading-snug">User Account & Roles</span>
-                                  <span
-                                    className={`shrink-0 text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                                      isUserRolesActive ? 'bg-white/25 text-white' : 'bg-blue-100 text-blue-700'
-                                    }`}
-                                  >
-                                    RBAC
-                                  </span>
-                                </button>
-                              )}
-                              {isSales && (
-                                <button
-                                  type="button"
-                                  onClick={() => goSalesSub('quotation')}
-                                  className={`w-full flex items-center gap-2 rounded-xl pl-7 pr-2.5 py-2 text-left transition-colors ${
-                                    isCrmQuotationActive ? TONE_ACTIVE : 'text-slate-600 active:bg-slate-100'
-                                  }`}
-                                >
-                                  <FileText className={`w-3.5 h-3.5 shrink-0 ${isCrmQuotationActive ? 'text-white' : TONE_ICON}`} />
-                                  <span className="flex-1 text-xs font-semibold leading-snug">CRM Marketing &amp; Quotation</span>
-                                  <span
-                                    className={`shrink-0 text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                                      isCrmQuotationActive ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-700'
-                                    }`}
-                                  >
-                                    CRM
-                                  </span>
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    key={entry.id}
+                    type="button"
+                    onClick={() => go(entry.id)}
+                    aria-current={currentTab === entry.id ? 'page' : undefined}
+                    className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${
+                      isActive ? TONE_ACTIVE : 'text-slate-700 active:bg-slate-100'
+                    }`}
+                  >
+                    <Icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-white' : TONE_ICON}`} />
+                    <span className="flex-1 text-base font-semibold truncate">{DIVISION_LABELS[entry.id]}</span>
+                    <span className={`shrink-0 text-2xs ${isActive ? 'text-slate-200' : 'text-slate-400'}`}>
+                      {items.length} modul
+                    </span>
+                  </button>
                 );
               })}
             </div>

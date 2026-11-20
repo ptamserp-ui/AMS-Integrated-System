@@ -44,7 +44,9 @@ export function mapSyncKeyToResource(key: string): RbacResourceId {
   }
   if (key === 'inspeksi_qc') return 'qc-inspeksi';
   if (key === 'laporan_ktd' || key === 'penarikan_produk') return 'pms-vigilance';
-  if (key === 'stok_gudang' || key === 'log_suhu' || key === 'pest_control' || key.startsWith('gudang_')) {
+  if (key === 'gudang_penerimaan') return 'gudang-penerimaan';
+  if (key === 'stok_gudang' || key === 'gudang_pergerakan') return 'gudang-mutasi';
+  if (key === 'log_suhu' || key === 'pest_control' || key.startsWith('gudang_')) {
     return 'gudang-logistik';
   }
   if (key === 'layanan_teknis') return 'teknisi-service';
@@ -101,6 +103,9 @@ export function canDeleteSyncKey(role: RoleDefinition, key: string): boolean {
   const resource = mapSyncKeyToResource(key);
   const perms = role.permissions[resource];
   if (!Array.isArray(perms)) return false;
+  if (['gudang_penerimaan', 'stok_gudang', 'gudang_pergerakan'].includes(key)) {
+    return perms.includes('delete');
+  }
   return perms.includes('delete') || perms.includes('update') || perms.includes('publish');
 }
 

@@ -19,7 +19,7 @@ import {
   Tag
 } from 'lucide-react';
 import { Badge, Modal, Panel, Stat, chipFilter, inputClass, labelClass, tombolPrimerGudang, tombolSekunder, type Tone } from '../../../ui';
-import { identitasPeranGudang, waktuMutasiMonoton } from './ui';
+import { bolehAksiGudang, identitasPeranGudang, waktuMutasiMonoton } from './ui';
 
 interface Props {
   currentRole: UserRole;
@@ -40,6 +40,9 @@ const toneQc = (st: TerimaBarang['hasilQCMasuk']): Tone => {
   if (st === 'Karantina (Hold)') return 'amber';
   return 'rose';
 };
+
+const formatIDR = (nilai: number) =>
+  new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(nilai);
 
 export default function PenerimaanInboundTab({
   currentRole,
@@ -101,6 +104,8 @@ export default function PenerimaanInboundTab({
     qtyDipesan: 10,
     qtyDiterima: 10,
     qtyDitolak: 0,
+    hargaBeliUnitIDR: 0,
+    biayaPengirimanIDR: 0,
     satuan: 'Unit',
     butuhUjiFungsi: true,
     hasilUjiFungsi: 'Belum Diuji' as TerimaBarang['hasilUjiFungsi'],
@@ -123,6 +128,10 @@ export default function PenerimaanInboundTab({
   });
 
   const identitas = identitasPeranGudang(currentRole);
+  const bolehCatatPenerimaan = bolehAksiGudang(currentRole, 'catat-penerimaan');
+  const bolehInputQc = bolehAksiGudang(currentRole, 'input-qc');
+  const bolehPostingInbound = bolehAksiGudang(currentRole, 'posting-inbound');
+  const bolehPutusKarantina = bolehAksiGudang(currentRole, 'rilis-karantina');
 
   const segarkan = () => {
     onPerubahanData();
@@ -153,6 +162,21 @@ export default function PenerimaanInboundTab({
 
   const simpanDokumenInbound = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!bolehCatatPenerimaan) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya Kepala Gudang yang dapat mencatat penerimaan barang.' });
+      return;
+    }
+    if (
+      Number(formBaru.qtyDiterima) > 0 &&
+      (!Number.isFinite(formBaru.hargaBeliUnitIDR) || formBaru.hargaBeliUnitIDR <= 0)
+    ) {
+      setPesan({ tipe: 'tolak', teks: 'Masukkan harga beli aktual per unit dalam IDR untuk menghitung moving weighted average.' });
+      return;
+    }
+    if (!Number.isFinite(formBaru.biayaPengirimanIDR) || formBaru.biayaPengirimanIDR < 0) {
+      setPesan({ tipe: 'tolak', teks: 'Biaya pengiriman harus berupa angka IDR yang valid dan tidak negatif.' });
+      return;
+    }
     if (rekomendasiPutAway.penolakan || !rekomendasiPutAway.bin) {
       setPesan({
         tipe: 'tolak',
@@ -180,6 +204,7 @@ export default function PenerimaanInboundTab({
       purchaseOrderId: po?.id ?? formBaru.purchaseOrderId,
       nomorPurchaseOrder: po?.nomorPO ?? 'PO-MANUAL',
       namaPemasok: po?.namaPemasok ?? 'Pemasok Terkualifikasi',
+      biayaPengirimanIDR: formBaru.biayaPengirimanIDR,
       statusMatching,
       baris: [
         {
@@ -190,6 +215,7 @@ export default function PenerimaanInboundTab({
           qtyDipesan: Number(formBaru.qtyDipesan),
           qtyDiterima: Number(formBaru.qtyDiterima),
           qtyDitolak: Number(formBaru.qtyDitolak),
+          hargaBeliUnitIDR: formBaru.hargaBeliUnitIDR,
           satuan: formBaru.satuan,
           binTujuanId: rekomendasiPutAway.bin.id,
           tanggalProduksi: formBaru.tanggalProduksi || undefined,
@@ -222,6 +248,10 @@ export default function PenerimaanInboundTab({
 
   const simpanEvaluasiQc = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!bolehInputQc) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya QC Officer yang dapat mencatat hasil QC incoming.' });
+      return;
+    }
     if (!targetQc) return;
     db.ubahTerimaBarang(
       targetQc.id,
@@ -240,6 +270,10 @@ export default function PenerimaanInboundTab({
   };
 
   const rilisKeStok = (dok: TerimaBarang) => {
+    if (!bolehPostingInbound) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya Kepala Gudang yang dapat memposting penerimaan ke kartu stok.' });
+      return;
+    }
     // Penjaga §1 Tab 6: Jumlah diterima ≠ jumlah PO → status "Selisih Jumlah" tidak bisa release
     if (dok.statusMatching !== 'Cocok') {
       setPesan({
@@ -272,6 +306,10 @@ export default function PenerimaanInboundTab({
   };
 
   const putusPjt = (stok: StokGudang, putusan: 'RELEASE' | 'REJECT') => {
+    if (!bolehPutusKarantina) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya PJT atau QA Manager yang dapat memutuskan rilis karantina.' });
+      return;
+    }
     const hasil = db.putusanPjtKarantina(
       stok.id,
       putusan,
@@ -283,6 +321,10 @@ export default function PenerimaanInboundTab({
   };
 
   const cetakLabelDokumen = (dok: TerimaBarang) => {
+    if (!bolehCatatPenerimaan) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya Kepala Gudang yang dapat mencetak label penerimaan.' });
+      return;
+    }
     db.ubahTerimaBarang(
       dok.id,
       { labelDicetak: true, rfidDitempel: true },
@@ -370,10 +412,12 @@ export default function PenerimaanInboundTab({
                 </button>
               ))}
             </div>
-            <button type="button" onClick={() => setModalBaru(true)} className={tombolPrimerGudang}>
-              <Plus className="w-4 h-4" />
-              Catat Penerimaan PO
-            </button>
+            {bolehCatatPenerimaan && (
+              <button type="button" onClick={() => setModalBaru(true)} className={tombolPrimerGudang}>
+                <Plus className="w-4 h-4" />
+                Catat Penerimaan PO
+              </button>
+            )}
           </>
         }
       >
@@ -396,6 +440,9 @@ export default function PenerimaanInboundTab({
                     <div className="font-mono font-bold text-amber-900">{t.nomorTerima}</div>
                     <div className="text-2xs font-mono text-slate-600">{t.nomorPurchaseOrder}</div>
                     <div className="text-2xs text-slate-500">{t.namaPemasok} · {t.tanggalTerima}</div>
+                    <div className="text-2xs text-slate-500">
+                      Ongkir (terpisah dari nilai stok): {t.biayaPengirimanIDR === undefined ? 'Belum dicatat' : formatIDR(t.biayaPengirimanIDR)}
+                    </div>
                   </td>
                   <td className="py-3 px-4 space-y-1.5">
                     {t.baris.map((b) => (
@@ -406,6 +453,9 @@ export default function PenerimaanInboundTab({
                         </div>
                         <div className="text-2xs text-slate-700 tabular-nums">
                           PO: <strong>{b.qtyDipesan}</strong> · Diterima: <strong>{b.qtyDiterima}</strong> · Ditolak: <strong className={b.qtyDitolak > 0 ? 'text-rose-700' : ''}>{b.qtyDitolak}</strong> {b.satuan}
+                        </div>
+                        <div className="text-2xs text-slate-600 tabular-nums">
+                          Harga beli/unit: {b.hargaBeliUnitIDR ? formatIDR(b.hargaBeliUnitIDR) : 'Belum tercatat'}
                         </div>
                         {(b.tanggalProduksi || b.coaUrl || (b.daftarSerial?.length ?? 0) > 0) && (
                           <div className="text-2xs text-slate-500 font-mono">
@@ -444,37 +494,41 @@ export default function PenerimaanInboundTab({
                   </td>
                   <td className="py-3 px-4 text-right">
                     <div className="inline-flex items-center gap-1.5 flex-wrap justify-end">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTargetQc(t);
-                          setFormQc({
-                            statusMatching: t.statusMatching,
-                            hasilQCMasuk: t.hasilQCMasuk,
-                            hasilUjiFungsi: t.hasilUjiFungsi,
-                            nomorLaporanQC: t.nomorLaporanQC,
-                            catatan: t.catatan
-                          });
-                        }}
-                        className={tombolSekunder}
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          <ClipboardCheck className="w-3 h-3" />
-                          QC
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => cetakLabelDokumen(t)}
-                        className={tombolSekunder}
-                        title="Cetak Label Barcode/QR & Tandai RFID"
-                      >
-                        <span className="inline-flex items-center gap-1">
-                          <Printer className="w-3 h-3" />
-                          Label
-                        </span>
-                      </button>
-                      {!t.sudahDipostingKeStok && (
+                      {bolehInputQc && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTargetQc(t);
+                            setFormQc({
+                              statusMatching: t.statusMatching,
+                              hasilQCMasuk: t.hasilQCMasuk,
+                              hasilUjiFungsi: t.hasilUjiFungsi,
+                              nomorLaporanQC: t.nomorLaporanQC,
+                              catatan: t.catatan
+                            });
+                          }}
+                          className={tombolSekunder}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            <ClipboardCheck className="w-3 h-3" />
+                            QC
+                          </span>
+                        </button>
+                      )}
+                      {bolehCatatPenerimaan && (
+                        <button
+                          type="button"
+                          onClick={() => cetakLabelDokumen(t)}
+                          className={tombolSekunder}
+                          title="Cetak Label Barcode/QR & Tandai RFID"
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            <Printer className="w-3 h-3" />
+                            Label
+                          </span>
+                        </button>
+                      )}
+                      {!t.sudahDipostingKeStok && bolehPostingInbound && (
                         <button
                           type="button"
                           onClick={() => rilisKeStok(t)}
@@ -728,6 +782,36 @@ export default function PenerimaanInboundTab({
                 </select>
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Harga Beli Aktual per Unit (IDR)</label>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  required={formBaru.qtyDiterima > 0}
+                  value={formBaru.hargaBeliUnitIDR}
+                  onChange={(e) => setFormBaru({ ...formBaru, hargaBeliUnitIDR: Number(e.target.value) })}
+                  className={`${inputClass} tabular-nums`}
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Biaya Pengiriman (IDR, dicatat terpisah)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  required
+                  value={formBaru.biayaPengirimanIDR}
+                  onChange={(e) => setFormBaru({ ...formBaru, biayaPengirimanIDR: Number(e.target.value) })}
+                  className={`${inputClass} tabular-nums`}
+                />
+              </div>
+            </div>
+            <p className="text-2xs text-slate-500">
+              Nilai persediaan memakai harga beli aktual; ongkir hanya dicatat sebagai biaya pengiriman dan tidak dikapitalisasi.
+            </p>
 
             <div className="grid grid-cols-2 gap-3">
               <div>

@@ -4,6 +4,7 @@ import {
   deteksiExcursiRantaiDingin,
   hitungReorderPoint,
   nilaiUmurStok,
+  umurStokHari,
   tentukanTempatSimpan,
   validasiPemindaian,
 } from '../../src/utils/gudang';
@@ -63,6 +64,11 @@ describe('hitungReorderPoint — aturan 5 (ROP = rataRataHari × leadTimeHari + 
 });
 
 describe('nilaiUmurStok + daftarStokPerluKunciAgeing — aturan 6 (ambang kunci ED 60 hari)', () => {
+  it('umur sejak masuk dibedakan dari sisa hari menuju ED', () => {
+    expect(umurStokHari('2024-06-01', ACUAN)).toBe(14);
+    expect(umurStokHari('', ACUAN)).toBeNull();
+  });
+
   it('pelabelan 60/180 hari dan keputusan perluKunci (< umurKunciEdHari)', () => {
     expect(nilaiUmurStok({ tanggalKedaluwarsa: '2024-01-01' }, KONFIG, ACUAN)).toMatchObject({
       label: 'Kedaluwarsa',

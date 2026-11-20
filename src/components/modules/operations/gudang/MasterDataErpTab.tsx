@@ -111,6 +111,23 @@ export default function MasterDataErpTab({ dariAcuan }: Props) {
   );
 
   const mitraTanpaKode = mitraList.filter((m) => !m.kodeSaranaKemenkes);
+  const jumlahPerSku = new Map<string, number>();
+  izinList.forEach((produk) => {
+    const sku = produk.skuCode?.trim();
+    if (sku) jumlahPerSku.set(sku, (jumlahPerSku.get(sku) ?? 0) + 1);
+  });
+  const masalahMasterProduk = (produk: IzinEdarAlkes) => {
+    const masalah: string[] = [];
+    const sku = produk.skuCode?.trim();
+    if (!sku) masalah.push('Kode SKU');
+    else if ((jumlahPerSku.get(sku) ?? 0) > 1) masalah.push('SKU duplikat');
+    if (!produk.nomorIzinEdar.trim()) masalah.push('NIE');
+    if (!produk.kondisiSimpan) masalah.push('Kondisi simpan');
+    if (produk.suhuMinC === undefined || produk.suhuMaxC === undefined) masalah.push('Rentang suhu');
+    if (!produk.tipeLacak) masalah.push('Tipe lacak');
+    return masalah;
+  };
+  const produkMasterKurangLengkap = izinList.filter((produk) => masalahMasterProduk(produk).length > 0);
 
   return (
     <div className="space-y-5">
@@ -139,6 +156,12 @@ export default function MasterDataErpTab({ dariAcuan }: Props) {
           hint="Kolom Kode Sarana/Wilayah e-Report akan kosong"
           tone={mitraTanpaKode.length > 0 ? 'amber' : 'emerald'}
         />
+        <Stat
+          label="Master Produk Perlu Dilengkapi"
+          value={produkMasterKurangLengkap.length}
+          hint="SKU unik, NIE, kondisi/rentang suhu, dan tipe lacak"
+          tone={produkMasterKurangLengkap.length > 0 ? 'amber' : 'emerald'}
+        />
       </div>
 
       {/* mst_products */}
@@ -156,12 +179,14 @@ export default function MasterDataErpTab({ dariAcuan }: Props) {
                 <th className="py-3 px-4">Syarat Simpan</th>
                 <th className="py-3 px-4">Tipe Lacak</th>
                 <th className="py-3 px-4">Status Blokir</th>
+                <th className="py-3 px-4">Kelengkapan Master</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {izinList.map((i) => {
                 const format = validasiFormatNIE(i.nomorIzinEdar);
                 const blokir = blokirNIEProduk(i, dariAcuan);
+                const masalah = masalahMasterProduk(i);
                 return (
                   <tr key={i.id} className="hover:bg-slate-50 align-top">
                     <td className="py-3 px-4">
@@ -199,6 +224,16 @@ export default function MasterDataErpTab({ dariAcuan }: Props) {
                         </div>
                       ) : (
                         <Badge tone="emerald">Boleh Diedarkan</Badge>
+                      )}
+                    </td>
+                    <td className="py-3 px-4">
+                      {masalah.length ? (
+                        <>
+                          <Badge tone="amber">Perlu dilengkapi</Badge>
+                          <div className="mt-1 max-w-48 text-2xs leading-snug text-amber-800">{masalah.join(' · ')}</div>
+                        </>
+                      ) : (
+                        <Badge tone="emerald">Lengkap</Badge>
                       )}
                     </td>
                   </tr>

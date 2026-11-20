@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useDbTick } from '../../../../hooks/useDbSync';
 import { db } from '../../../../services/pocketbase';
-import { HasilValidasiSO, PenjualanAlkes, SkemaHargaAlkes } from '../../../../types';
+import { HasilValidasiSO, PenjualanAlkes, SkemaHargaAlkes, StatusSuratJalan, SuratJalan } from '../../../../types';
 import {
   alokasikanFEFO,
   hargaTerkunciAktif,
@@ -61,6 +61,13 @@ const toneStatusKirim = (status: PenjualanAlkes['statusKirim']): Tone => {
   return 'amber';
 };
 
+const toneStatusSuratJalan = (status: StatusSuratJalan): Tone =>
+  status === 'Diterima Penerima'
+    ? 'emerald'
+    : status === 'Terkirim' || status === 'Dimuat'
+      ? 'blue'
+      : 'amber';
+
 const toneLimit = (status: ReturnType<typeof statusLimitKredit>['status']): Tone =>
   status === 'Diblokir' ? 'rose' : status === 'Perlu Persetujuan Manajemen' ? 'amber' : 'emerald';
 
@@ -72,7 +79,8 @@ export default function SalesOrderModule() {
     'sales_kontrak_harga',
     'izin_edar',
     'stok_gudang',
-    'sales_pengetahuan_produk'
+    'sales_pengetahuan_produk',
+    'gudang_surat_jalan'
   ]);
   const pesanan = useMemo<PenjualanAlkes[]>(() => {
     void dbTick;
@@ -97,6 +105,10 @@ export default function SalesOrderModule() {
   const stok = useMemo(() => {
     void dbTick;
     return db.getStokGudang();
+  }, [dbTick]);
+  const suratJalan = useMemo<SuratJalan[]>(() => {
+    void dbTick;
+    return db.getSuratJalan();
   }, [dbTick]);
   const produk = useMemo(() => {
     void dbTick;
@@ -167,8 +179,23 @@ export default function SalesOrderModule() {
   }, [pesanan, kataKunci, filterStatus]);
 
   const detail = pesanan.find((p) => p.id === detailId) ?? null;
+  const suratJalanPerPesanan = useMemo(() => {
+    const hasil = new Map<string, SuratJalan>();
+    suratJalan.forEach((sj) => {
+      hasil.set(sj.penjualanId, sj);
+      hasil.set(sj.nomorPesanan, sj);
+    });
+    return hasil;
+  }, [suratJalan]);
+  const detailSuratJalan = detail
+    ? suratJalanPerPesanan.get(detail.id) ?? suratJalanPerPesanan.get(detail.nomorPesanan)
+    : undefined;
   const berjalan = pesanan.filter((p) => p.statusKirim !== 'Diterima Fasyankes' && p.statusKirim !== 'Dibatalkan');
   const menungguFefo = pesanan.filter((p) => p.statusKirim === 'Menunggu Alokasi FEFO');
+  const fulfillmentAktif = suratJalan.filter((sj) =>
+    ['Antre Picking', 'Rute Tersusun', 'Sedang Picking', 'Selesai Packing', 'Dimuat'].includes(sj.status)
+  );
+  const menungguPod = suratJalan.filter((sj) => sj.status === 'Terkirim' && !sj.buktiTerimaUrl);
   const pelangganDiblokir = pelanggan.filter((c) => statusLimitKredit(c).status === 'Diblokir');
   const skemaTerpilih = skema.find((s) => s.id === ujiSkemaId);
   const ujiHasil = skemaTerpilih ? hitungDiskonKuantitas(skemaTerpilih, ujiJumlah) : null;
@@ -310,6 +337,24 @@ export default function SalesOrderModule() {
           value={pelangganDiblokir.length}
           hint="Piutang lewat jatuh tempo atau melampaui batas kredit"
           tone={pelangganDiblokir.length ? 'rose' : 'emerald'}
+        />
+        <Stat
+          label="Surat Jalan Terbit"
+          value={suratJalan.length}
+          hint={`${suratJalan.filter((sj) => sj.status === 'Diterima Penerima').length} selesai diterima`}
+          tone="blue"
+        />
+        <Stat
+          label="Fulfillment Berjalan"
+          value={fulfillmentAktif.length}
+          hint="Antre picking hingga muat armada"
+          tone={fulfillmentAktif.length ? 'amber' : 'emerald'}
+        />
+        <Stat
+          label="Menunggu Bukti Terima (POD)"
+          value={menungguPod.length}
+          hint="Pengiriman terkirim tanpa bukti penerimaan"
+          tone={menungguPod.length ? 'amber' : 'emerald'}
         />
       </div>
 
@@ -573,10 +618,13 @@ export default function SalesOrderModule() {
                 <th className="py-3 px-4">Total Nilai</th>
                 <th className="py-3 px-4">Etika Promosi</th>
                 <th className="py-3 px-4">Status Pengiriman</th>
+                <th className="py-3 px-4">Fulfillment / Surat Jalan</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {daftarTampil.map((item) => (
+              {daftarTampil.map((item) => {
+                const sj = suratJalanPerPesanan.get(item.id) ?? suratJalanPerPesanan.get(item.nomorPesanan);
+                return (
                 <tr
                   key={item.id}
                   onClick={() => { setDetailId(item.id); setTabDetail('induk'); }}
@@ -606,11 +654,23 @@ export default function SalesOrderModule() {
                   <td className="py-3 px-4">
                     <Badge tone={toneStatusKirim(item.statusKirim)}>{item.statusKirim}</Badge>
                   </td>
+                  <td className="py-3 px-4">
+                    {sj ? (
+                      <>
+                        <Badge tone={toneStatusSuratJalan(sj.status)}>{sj.status}</Badge>
+                        <div className="mt-1 text-2xs font-mono text-slate-500">{sj.nomorSuratJalan}</div>
+                        {sj.nomorLacak && <div className="text-2xs text-slate-500">Lacak: {sj.nomorLacak}</div>}
+                      </>
+                    ) : (
+                      <Badge tone="slate">Belum Terbit</Badge>
+                    )}
+                  </td>
                 </tr>
-              ))}
+                );
+              })}
               {daftarTampil.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-6 px-4 text-center text-slate-500">
+                  <td colSpan={8} className="py-6 px-4 text-center text-slate-500">
                     Tidak ada pesanan yang cocok dengan filter.
                   </td>
                 </tr>
@@ -689,6 +749,29 @@ export default function SalesOrderModule() {
                   })}
                   {detail.statusKirim === 'Dibatalkan' && <Badge tone="rose">Pesanan Dibatalkan</Badge>}
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="text-2xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Fulfillment & Proof of Delivery</div>
+                {detailSuratJalan ? (
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    {[
+                      ['Status surat jalan', detailSuratJalan.status],
+                      ['Nomor surat jalan', detailSuratJalan.nomorSuratJalan],
+                      ['Pengangkut', detailSuratJalan.pengangkut],
+                      ['Nomor lacak', detailSuratJalan.nomorLacak || 'Belum tercatat'],
+                      ['Bukti terima', detailSuratJalan.buktiTerimaUrl ? 'Tersedia' : 'Belum diunggah'],
+                      ['Penerima / tanggal POD', detailSuratJalan.namaPenerimaPod ? `${detailSuratJalan.namaPenerimaPod} · ${detailSuratJalan.tanggalPod ?? '-'}` : '-']
+                    ].map(([label, nilai]) => (
+                      <div key={label}>
+                        <dt className="text-2xs font-semibold text-slate-500">{label}</dt>
+                        <dd className="text-slate-800 font-semibold">{nilai}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <p className="text-xs text-slate-500">Surat jalan belum diterbitkan; pesanan masih berada di tahap Sales Order.</p>
+                )}
               </div>
 
               <div className="flex flex-wrap gap-2 pt-1">

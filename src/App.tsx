@@ -5,13 +5,14 @@
  */
 
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import Navbar, { type NavId } from './components/layout/Navbar';
+import Navbar, { ALL_TABS, DIVISION_ORDER, type NavId } from './components/layout/Navbar';
+import DivisionWorkspace from './components/layout/DivisionWorkspace';
 import { terapkanFaviconAplikasi, useIdentitasVisualAplikasi } from './components/common/LogoAplikasi';
 import type { SalesTab } from './components/modules/commercial/SalesModule';
 import type { ITSubTabId } from './components/modules/supporting/ITModule';
 import type { GudangTabId } from './components/modules/operations/gudang/ui';
 
-import type { AksesEfektif, ModuleNavId, RbacResourceId, UserRole } from './types';
+import type { AksesEfektif, DivisionId, ModuleNavId, RbacResourceId, UserRole } from './types';
 import { Lock, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import {
   akhiriSesi,
@@ -92,6 +93,10 @@ function modulUntukKunciSync(key: string): RbacResourceId | 'all' {
   if (key === 'sistem_data_manifest') return 'it-traceability';
   if (key === 'audit_trail') return 'audit-trail';
   return 'overview';
+}
+
+function isDivisionId(id: NavId): id is DivisionId {
+  return DIVISION_ORDER.some((division) => division === id);
 }
 
 export default function App() {
@@ -270,7 +275,16 @@ function Dasbor({
     return unsub;
   }, [activeTab]);
 
-  const bolehBukaTabAktif = bolehAksesModul(activeTab, aksesAktif);
+  const activeDivision = isDivisionId(activeTab) ? activeTab : null;
+  const bolehBukaTabAktif = isDivisionId(activeTab)
+    ? ALL_TABS.some(
+        (tab) =>
+          tab.group === activeTab &&
+          tab.id !== 'website' &&
+          tab.id !== 'overview' &&
+          bolehAksesModul(tab.id, aksesAktif)
+      )
+    : bolehAksesModul(activeTab, aksesAktif);
   const namaPelakuAktif = sesi.namaLengkap || sesi.namaPengguna;
 
   return (
@@ -305,15 +319,9 @@ function Dasbor({
         onOpenTraceability={() => setIsTraceabilityOpen(true)}
         onKeluar={onKeluar}
         aksesAktif={aksesAktif}
-        itSubTab={itSubTab}
         onITNavigate={(sub) => {
           setItSubTab(sub);
           setActiveTab('it-traceability');
-        }}
-        salesSubTab={salesSubTab}
-        onSalesNavigate={(sub) => {
-          setSalesSubTab(sub);
-          setActiveTab('sales-marketing');
         }}
       />
 
@@ -362,6 +370,14 @@ function Dasbor({
         ) : (
           <Suspense fallback={<PemuatModul />}>
           <div key={`${activeTab}-${remoteModuleVersion}`}>
+            {activeDivision && (
+              <DivisionWorkspace
+                division={activeDivision}
+                aksesAktif={aksesAktif}
+                onSelectModule={setActiveTab}
+              />
+            )}
+
             {activeTab === 'overview' && (
               <ExecutiveOverview
                 onSelectModule={(mod) => setActiveTab(mod)}

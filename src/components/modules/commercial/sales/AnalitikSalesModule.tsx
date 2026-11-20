@@ -3,6 +3,7 @@ import { useDbTick } from '../../../../hooks/useDbSync';
 import { db } from '../../../../services/pocketbase';
 import { PenjualanAlkes, PurchaseOrderAlkes } from '../../../../types';
 import { proyeksikanPermintaan, statusLimitKredit } from '../../../../utils/sales';
+import { stokBebas } from '../../../../utils/gudang';
 import {
   ChartColumn,
   Activity,
@@ -138,13 +139,21 @@ export default function AnalitikSalesModule() {
   const produkMax = perProduk[0]?.nilai ?? 1;
 
   const peramalan = useMemo(
-    () =>
-      daftarProduk.map((namaAlkes) => {
+    () => {
+      const hariIni = new Date().toISOString().split('T')[0];
+      return daftarProduk.map((namaAlkes) => {
         const stokProduk = stok
-          .filter((s) => s.namaAlkes === namaAlkes && s.tanggalKedaluwarsa >= new Date().toISOString().split('T')[0])
-          .reduce((total, s) => total + s.jumlahStok, 0);
-        return proyeksikanPermintaan(riwayat, namaAlkes, stokProduk, { leadTimeHari, safetyStockHari });
-      }),
+          .filter((s) => s.namaAlkes === namaAlkes && s.tanggalKedaluwarsa >= hariIni)
+          .reduce((total, s) => total + stokBebas(s), 0);
+        const hasil = proyeksikanPermintaan(riwayat, namaAlkes, stokProduk, { leadTimeHari, safetyStockHari });
+        const alokasiLunak30Hari = Math.ceil(hasil.permintaanHarian * 30);
+        return {
+          ...hasil,
+          alokasiLunak30Hari,
+          tersediaSetelahForecast: Math.max(stokProduk - alokasiLunak30Hari, 0)
+        };
+      });
+    },
     [daftarProduk, riwayat, stok, leadTimeHari, safetyStockHari]
   );
 
@@ -395,7 +404,9 @@ export default function AnalitikSalesModule() {
                 <th className="py-3 px-4">Tren</th>
                 <th className="py-3 px-4">Proyeksi Bulan Depan</th>
                 <th className="py-3 px-4">Titik Pesan Ulang</th>
-                <th className="py-3 px-4">Stok Aktif Sekarang</th>
+                <th className="py-3 px-4">Stok Bebas</th>
+                <th className="py-3 px-4">Alokasi Lunak 30 Hari</th>
+                <th className="py-3 px-4">Tersedia Setelah Forecast</th>
                 <th className="py-3 px-4">Status Risiko</th>
                 <th className="py-3 px-4 text-right">Aksi</th>
               </tr>
@@ -414,6 +425,8 @@ export default function AnalitikSalesModule() {
                   <td className="py-3 px-4 font-mono text-slate-700">{h.proyeksiBulanBerikutnya} unit</td>
                   <td className="py-3 px-4 font-mono text-slate-700">{h.titikPesanUlang} unit</td>
                   <td className="py-3 px-4 font-mono font-semibold text-slate-800">{h.stokSekarang} unit</td>
+                  <td className="py-3 px-4 font-mono text-slate-700">{h.alokasiLunak30Hari} unit</td>
+                  <td className="py-3 px-4 font-mono font-semibold text-slate-800">{h.tersediaSetelahForecast} unit</td>
                   <td className="py-3 px-4">
                     <Badge tone={tonePeramalan(h.status)}>
                       <Gauge className="w-3 h-3" />
@@ -442,7 +455,9 @@ export default function AnalitikSalesModule() {
 
         <p className="mt-3 text-2xs text-slate-500 leading-relaxed">
           Titik pesan ulang = permintaan harian × (lead time + safety stock). Permintaan harian memakai asumsi 26 hari
-          kerja per bulan. Stok aktif hanya menghitung batch yang belum kedaluwarsa agar sesuai prinsip FEFO CDAKB.
+          kerja per bulan. Stok bebas mengurangi reservasi SO serta mengecualikan batch terkunci/kedaluwarsa. Forecast
+          30 hari adalah alokasi lunak (bukan reservasi picking); kolom tersedia setelah forecast membantu perencanaan
+          tanpa mengubah saldo fisik.
           Data peramalan per bulan juga tersedia untuk partisi waktu pada skema PostgreSQL produksi.
         </p>
       </Panel>

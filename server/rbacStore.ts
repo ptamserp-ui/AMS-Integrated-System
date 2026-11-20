@@ -53,6 +53,8 @@ export const RBAC_RESOURCES: Array<{
   { id: 'qc-inspeksi', label: 'Quality Control (QC)', group: 'Regulatory Affairs', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'pms-vigilance', label: 'Post-Market Surveillance (PMS)', group: 'Regulatory Affairs', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'gudang-logistik', label: 'Warehouse & Logistics (CDAKB)', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
+  { id: 'gudang-penerimaan', label: 'Gudang — Penerimaan & QC Inbound', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
+  { id: 'gudang-mutasi', label: 'Gudang — Stok & Mutasi Bin', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'teknisi-service', label: 'After-Sales Service (Elektromedik)', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'produksi-cpakb', label: 'Manufacture (CPAKB)', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'purchasing-procurement', label: 'Purchasing & Procurement', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
@@ -100,7 +102,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
 }
 
 function buildDefaultRoles(now: string): RoleDefinition[] {
-  return [
+  const roles: RoleDefinition[] = [
     {
       id: 'pjt',
       name: 'Penanggung Jawab Teknis (PJT)',
@@ -305,6 +307,31 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
       }
     }
   ];
+
+  for (const role of roles) {
+    if (!role.permissions['gudang-penerimaan'] && role.permissions['gudang-logistik']?.includes('view')) {
+      role.permissions['gudang-penerimaan'] = ['view'];
+    }
+    if (!role.permissions['gudang-mutasi'] && role.permissions['gudang-logistik']?.includes('view')) {
+      role.permissions['gudang-mutasi'] = ['view'];
+    }
+  }
+
+  const permissions: Partial<Record<string, Partial<Record<'gudang-penerimaan' | 'gudang-mutasi', PermissionAction[]>>>> = {
+    pjt: { 'gudang-mutasi': ['view', 'update', 'approve'] },
+    qa_manager: { 'gudang-mutasi': ['view', 'update', 'approve'] },
+    qc_officer: { 'gudang-penerimaan': ['view', 'update'] },
+    kepala_gudang: {
+      'gudang-penerimaan': ['view', 'create', 'update'],
+      'gudang-mutasi': ['view', 'create', 'update']
+    }
+  };
+  for (const role of roles) {
+    const additions = permissions[role.id];
+    if (additions) Object.assign(role.permissions, additions);
+  }
+
+  return roles;
 }
 
 function resolveRoleByIdOrName(roles: RoleDefinition[], requested?: string): RoleDefinition | undefined {
@@ -437,6 +464,20 @@ export class ServerRbacStore {
             if (missingRoles.length > 0) {
               roles = [...roles, ...missingRoles];
               rolesBackfilled = true;
+            }
+          }
+          const defaultRolesById = new Map(defaultRolesList.map((role) => [role.id, role]));
+          for (const role of roles) {
+            const defaultPermissions = defaultRolesById.get(role.id)?.permissions;
+            const hasWarehouseView = role.permissions?.['gudang-logistik']?.includes('view');
+            for (const resource of ['gudang-penerimaan', 'gudang-mutasi'] as const) {
+              if (!role.permissions?.[resource]) {
+                const fallback = defaultPermissions?.[resource] ?? (hasWarehouseView ? ['view'] : undefined);
+                if (fallback) {
+                  role.permissions = { ...role.permissions, [resource]: [...fallback] };
+                  rolesBackfilled = true;
+                }
+              }
             }
           }
           let users = parsed.users;

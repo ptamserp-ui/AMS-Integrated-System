@@ -40,7 +40,7 @@ import {
   Wrench
 } from 'lucide-react';
 import { Badge, Modal, Panel, Stat, chipFilter, formatTanggal, inputClass, labelClass, tombolPrimerGudang, tombolSekunder, type Tone } from '../../../ui';
-import { identitasPeranGudang, toneStatusStok, waktuMutasiMonoton } from './ui';
+import { bolehAksiGudang, identitasPeranGudang, toneStatusStok, waktuMutasiMonoton } from './ui';
 
 interface Props {
   currentRole: UserRole;
@@ -159,6 +159,9 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
   const [tabDetailUnit, setTabDetailUnit] = useState<'unit' | 'rantai' | 'garansi'>('unit');
 
   const identitas = identitasPeranGudang(currentRole);
+  const bolehMutasiBin = bolehAksiGudang(currentRole, 'mutasi-bin');
+  const bolehKunciStok = bolehAksiGudang(currentRole, 'kunci-stok');
+  const bolehRilisKarantina = bolehAksiGudang(currentRole, 'rilis-karantina');
 
   const segarkan = () => {
     onPerubahanData();
@@ -197,6 +200,10 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
   // Simpan Stok Baru + Sinkronisasi Bin & Pergerakan
   const simpanStokBaru = (e: React.FormEvent) => {
     e.preventDefault();
+    if (currentRole !== 'kepala_gudang') {
+      setPesan({ tipe: 'tolak', teks: 'Hanya Kepala Gudang yang dapat menambahkan stok.' });
+      return;
+    }
     const bin = binList.find((b) => b.id === formTambah.binId);
     if (!bin) return;
     const sisaKapasitas = bin.kapasitas - bin.terpakai;
@@ -263,6 +270,10 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
 
   const eksekusiPindahBin = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!bolehMutasiBin) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya Kepala Gudang yang dapat memindahkan stok antar-bin.' });
+      return;
+    }
     if (!targetPindah || !binTujuanPindah) return;
     const binTujuan = binList.find((b) => b.id === binTujuanPindah);
     if (!binTujuan) return;
@@ -295,11 +306,15 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
       setPesan({ tipe: 'tolak', teks: 'Alasan penguncian atau rilis mutu wajib diisi untuk bukti audit CDAKB.' });
       return;
     }
-    if (targetKunci.mode === 'rilis' && !identitas.bolehVerifikasiPjt) {
+    if (targetKunci.mode === 'rilis' && !bolehRilisKarantina) {
       setPesan({
         tipe: 'tolak',
         teks: 'Penjaga Rilis Mutu: hanya peran PJT atau Manajer QA yang berwenang melepas kunci karantina ke AVAILABLE.'
       });
+      return;
+    }
+    if (targetKunci.mode === 'kunci' && !bolehKunciStok) {
+      setPesan({ tipe: 'tolak', teks: 'Hanya Kepala Gudang yang dapat mengunci stok.' });
       return;
     }
     if (targetKunci.mode === 'kunci') {
@@ -418,7 +433,7 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
             Ketertelusuran Batch, Serial & Basis Garansi ({unitList.length} SN)
           </button>
         </div>
-        {subLayar === 'kartu' && (
+        {subLayar === 'kartu' && currentRole === 'kepala_gudang' && (
           <button type="button" onClick={() => setModalTambah(true)} className={tombolPrimerGudang}>
             <Plus className="w-4 h-4" />
             Tambah Stok Alkes
@@ -585,46 +600,52 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="inline-flex items-center gap-1.5 flex-wrap justify-end">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTargetPindah(item);
-                                const kandidatBin = binList.find((b) => b.zonaSuhu === item.zonaSuhu && b.id !== item.binId);
-                                setBinTujuanPindah(kandidatBin?.id ?? binList[0]?.id ?? '');
-                                setQtyPindah(Math.min(1, item.jumlahStok));
-                              }}
-                              className={tombolSekunder}
-                              title="Pindah Rak Antar Bin"
-                            >
-                              <span className="inline-flex items-center gap-1">
-                                <ArrowLeftRight className="w-3 h-3" />
-                                Pindah
-                              </span>
-                            </button>
+                            {bolehMutasiBin && bebas > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTargetPindah(item);
+                                  const kandidatBin = binList.find((b) => b.zonaSuhu === item.zonaSuhu && b.id !== item.binId);
+                                  setBinTujuanPindah(kandidatBin?.id ?? binList[0]?.id ?? '');
+                                  setQtyPindah(Math.min(1, bebas));
+                                }}
+                                className={tombolSekunder}
+                                title="Pindah Rak Antar Bin"
+                              >
+                                <span className="inline-flex items-center gap-1">
+                                  <ArrowLeftRight className="w-3 h-3" />
+                                  Pindah
+                                </span>
+                              </button>
+                            )}
                             {terkunci ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setTargetKunci({ stok: item, mode: 'rilis' });
-                                  setAlasanKunciInput('');
-                                }}
-                                className="px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
-                              >
-                                <Unlock className="w-3 h-3" />
-                                Rilis QA
-                              </button>
+                              bolehRilisKarantina && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTargetKunci({ stok: item, mode: 'rilis' });
+                                    setAlasanKunciInput('');
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Unlock className="w-3 h-3" />
+                                  Rilis QA
+                                </button>
+                              )
                             ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setTargetKunci({ stok: item, mode: 'kunci' });
-                                  setAlasanKunciInput('');
-                                }}
-                                className="px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
-                              >
-                                <Lock className="w-3 h-3" />
-                                Kunci
-                              </button>
+                              bolehKunciStok && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTargetKunci({ stok: item, mode: 'kunci' });
+                                    setAlasanKunciInput('');
+                                  }}
+                                  className="px-2.5 py-1.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Lock className="w-3 h-3" />
+                                  Kunci
+                                </button>
+                              )
                             )}
                           </div>
                         </td>
@@ -1108,7 +1129,7 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
       {targetPindah && (
         <Modal
           judul={`Pemindahan Rak Antar Bin — ${targetPindah.nomorBatch}`}
-          keterangan={`Asal: ${targetPindah.lokasiPenyimpanan} (${targetPindah.binId ?? '-'}) · Tersedia ${targetPindah.jumlahStok} ${targetPindah.satuan}. Pemindahan mencatat satu mata rantai sha256.`}
+          keterangan={`Asal: ${targetPindah.lokasiPenyimpanan} (${targetPindah.binId ?? '-'}) · Stok bebas ${stokBebas(targetPindah)} ${targetPindah.satuan}. Pemindahan mencatat satu mata rantai sha256.`}
           onClose={() => setTargetPindah(null)}
         >
           <form onSubmit={eksekusiPindahBin} className="space-y-3 text-xs">
@@ -1133,7 +1154,7 @@ export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }:
               <input
                 type="number"
                 min={1}
-                max={targetPindah.jumlahStok}
+                max={stokBebas(targetPindah)}
                 required
                 value={qtyPindah}
                 onChange={(e) => setQtyPindah(Number(e.target.value))}
