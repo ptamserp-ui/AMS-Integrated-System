@@ -59,6 +59,7 @@ export const RBAC_RESOURCES: Array<{
   { id: 'produksi-cpakb', label: 'Manufacture (CPAKB)', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'purchasing-procurement', label: 'Purchasing & Procurement', group: 'Operations & Technical', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'sales-marketing', label: 'Sales & e-Katalog LKPP', group: 'Sales & Marketing', actions: ['view', 'create', 'update', 'publish', 'export'] },
+  { id: 'product-catalog', label: 'Product Catalog & SKU', group: 'Sales & Marketing', actions: ['view', 'create', 'update', 'export'] },
   { id: 'hrd-pelatihan', label: 'Human Resources (HRD)', group: 'Supporting System', actions: ['view', 'create', 'update', 'delete', 'approve', 'export'] },
   { id: 'finance-akuntansi', label: 'Finance & Accounting', group: 'Supporting System', actions: ['view', 'create', 'update', 'approve', 'export'] },
   { id: 'it-traceability', label: 'IT & Traceability Hub', group: 'Supporting System', actions: ['view', 'update', 'export'] },
@@ -121,6 +122,7 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
         'produksi-cpakb': ['view', 'approve', 'export'],
         'purchasing-procurement': ['view', 'approve', 'export'],
         'sales-marketing': ['view', 'create', 'update', 'publish', 'export'],
+        'product-catalog': ['view', 'create', 'update', 'export'],
         'hrd-pelatihan': ['view', 'approve', 'export'],
         'finance-akuntansi': ['view', 'export'],
         'it-traceability': ['view', 'update', 'export'],
@@ -146,6 +148,7 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
         'produksi-cpakb': ['view'],
         'purchasing-procurement': ['view'],
         'sales-marketing': ['view'],
+        'product-catalog': ['view'],
         'hrd-pelatihan': ['view'],
         'finance-akuntansi': ['view'],
         'it-traceability': ['view', 'update', 'export'],
@@ -259,6 +262,7 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
       permissions: {
         overview: ['view', 'export'],
         'sales-marketing': ['view', 'create', 'update', 'publish', 'export'],
+        'product-catalog': ['view', 'create', 'update', 'export'],
         website: ['view', 'update'],
         'gudang-logistik': ['view'],
         'finance-akuntansi': ['view']
@@ -292,6 +296,7 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
       permissions: {
         overview: ['view'],
         'sales-marketing': ['view', 'create', 'update', 'export'],
+        'product-catalog': ['view'],
         'gudang-logistik': ['view'],
         'ra-pjt': ['view']
       }
@@ -469,6 +474,10 @@ export class ServerRbacStore {
           const defaultRolesById = new Map(defaultRolesList.map((role) => [role.id, role]));
           for (const role of roles) {
             const defaultPermissions = defaultRolesById.get(role.id)?.permissions;
+            if (defaultPermissions?.['product-catalog'] && !role.permissions?.['product-catalog']) {
+              role.permissions = { ...role.permissions, 'product-catalog': [...defaultPermissions['product-catalog']] };
+              rolesBackfilled = true;
+            }
             const hasWarehouseView = role.permissions?.['gudang-logistik']?.includes('view');
             for (const resource of ['gudang-penerimaan', 'gudang-mutasi'] as const) {
               if (!role.permissions?.[resource]) {

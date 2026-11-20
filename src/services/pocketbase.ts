@@ -65,6 +65,7 @@ import {
   PesanTransaksional,
   KonfigurasiSurat,
   KonfigurasiSitus,
+  ProdukKatalog,
   GudangFisik,
   LokasiBin,
   AturanSimpan,
@@ -126,6 +127,11 @@ import {
   sinkronkanKonten,
   VERSI_KONTEN_WEBSITE
 } from '../utils/website';
+import {
+  normalisasiProdukKatalog,
+  perluMigrasiProdukBawaanCms,
+  siapkanKatalogProduk
+} from '../utils/productCatalog';
 import {
   auditOtomatisDokumenQA,
   auditOtomatisDokumenQC
@@ -2595,6 +2601,7 @@ class AMSDatabaseManager {
       daftarStok: this.getStokGudang(),
       jumlahDiminta: pesananLama.jumlah,
       namaAlkes: pesananLama.namaAlkes,
+      kodeSKU: pesananLama.kodeSKU,
       dari,
       daftarIzinEdar: this.getIzinEdar(),
       minimalUmurEdBulan: minimalUmurEdBulanEfektif(konfigurasi),
@@ -3510,6 +3517,7 @@ class AMSDatabaseManager {
       daftarStok: this.getStokGudang(),
       jumlahDiminta: pesanan.jumlah,
       namaAlkes: pesanan.namaAlkes,
+      kodeSKU: pesanan.kodeSKU,
       dari,
       daftarIzinEdar: this.getIzinEdar(),
       minimalUmurEdBulan: minimalUmurEdBulanEfektif(konfigurasi),
@@ -4111,7 +4119,8 @@ class AMSDatabaseManager {
       pengetahuanProduk: this.getPengetahuanProduk(),
       skemaHarga: this.getSkemaHarga(),
       rebate: this.getProgramRebate(),
-      garansi: this.getGaransiInstalasi()
+      garansi: this.getGaransiInstalasi(),
+      produkKatalog: this.getJson<ProdukKatalog[]>('product_catalog')?.map(normalisasiProdukKatalog) ?? undefined
     };
   }
 
@@ -4127,6 +4136,37 @@ class AMSDatabaseManager {
       pengetahuanProduk: this.getPengetahuanProduk(),
       rebate: this.getProgramRebate()
     };
+  }
+
+  public getProdukKatalog(): ProdukKatalog[] {
+    const tersimpan = this.getJson<ProdukKatalog[]>('product_catalog') ?? undefined;
+    return siapkanKatalogProduk(tersimpan);
+  }
+
+  public hasProdukKatalogTersimpan(): boolean {
+    return Array.isArray(this.getJson<ProdukKatalog[]>('product_catalog'));
+  }
+
+  public inisialisasiProdukKatalog(): ProdukKatalog[] {
+    if (this.hasProdukKatalogTersimpan()) {
+      const tersimpan = this.getJson<ProdukKatalog[]>('product_catalog') ?? [];
+      const daftar = this.getProdukKatalog();
+      const perluGantiDummy = perluMigrasiProdukBawaanCms(tersimpan);
+      if (perluGantiDummy) {
+        this.setCollection('product_catalog', daftar);
+        this.logAudit('Commercial — Product Catalog', 'Mengganti data bawaan CMS dengan 114 produk rujukan daftar harga AMS V6', 'PRODUCT-CATALOG');
+      }
+      return daftar;
+    }
+    const daftar = this.getProdukKatalog();
+    this.setCollection('product_catalog', daftar);
+    this.logAudit('Commercial — Product Catalog', 'Inisialisasi 114 produk rujukan daftar harga AMS V6', 'PRODUCT-CATALOG');
+    return daftar;
+  }
+
+  public simpanProdukKatalog(daftar: ProdukKatalog[]): void {
+    this.setCollection('product_catalog', daftar);
+    this.logAudit('Commercial — Product Catalog', 'Pembaruan master produk dan SKU', daftar[0]?.id ?? 'PRODUCT-CATALOG');
   }
 
   public getWebsiteDraft(): KonfigurasiSitus {

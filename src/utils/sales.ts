@@ -150,12 +150,14 @@ export function alokasikanFEFO(
   daftarStok: StokGudang[],
   namaAlkes: string,
   jumlahDiminta: number,
-  dari: Date = new Date()
+  dari: Date = new Date(),
+  kodeSKU?: string
 ): { usulan: { nomorBatch: string; tanggalKedaluwarsa: string; diambil: number }[]; sisaKekurangan: number; batchKedaluwarsaDilewati: number } {
   const hasil = alokasiFEFOSadarKunci({
     daftarStok,
     jumlahDiminta,
     namaAlkes,
+    kodeSKU,
     dari
   });
   return {
@@ -173,6 +175,7 @@ export function alokasikanFEFO(
 export function validasiSalesOrder(params: {
   pelanggan?: PelangganB2B;
   nomorIzinEdar: string;
+  kodeSKU?: string;
   daftarIzinEdar: IzinEdarAlkes[];
   namaAlkes: string;
   jumlah: number;
@@ -195,7 +198,7 @@ export function validasiSalesOrder(params: {
     });
   }
 
-  const alokasi = alokasikanFEFO(params.daftarStok, params.namaAlkes, params.jumlah, dari);
+  const alokasi = alokasikanFEFO(params.daftarStok, params.namaAlkes, params.jumlah, dari, params.kodeSKU);
   pemeriksaan.push({
     aturan: 'Ketersediaan Stok FEFO',
     status: alokasi.sisaKekurangan > 0 ? 'Ditolak' : 'Lolos',

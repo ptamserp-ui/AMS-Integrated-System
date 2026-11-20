@@ -47,6 +47,20 @@ describe('alokasikanFEFO — pembungkus lossy atas alokasiFEFOSadarKunci', () =>
     // batch karantina LOT-2024-SP08 tidak boleh lolos lewat pembungkus Sales sekalipun
     expect(pembungkus.usulan.some((u) => u.nomorBatch === 'LOT-2024-SP08')).toBe(false);
   });
+
+  it('tidak mencampur stok SKU lain ketika varian dipilih', () => {
+    const dasar = INITIAL_STOK_GUDANG[0];
+    if (!dasar) throw new Error('fixture stok hilang');
+    const stok: typeof INITIAL_STOK_GUDANG = [
+      { ...dasar, id: 'SKU-A', kodeSKU: 'SKU-A', namaAlkes: 'Sarung Tangan', nomorBatch: 'LOT-A', jumlahStok: 2, qtyDipesan: 0 },
+      { ...dasar, id: 'SKU-B', kodeSKU: 'SKU-B', namaAlkes: 'Sarung Tangan', nomorBatch: 'LOT-B', jumlahStok: 20, qtyDipesan: 0 }
+    ];
+
+    const hasil = alokasikanFEFO(stok, 'Sarung Tangan', 3, ACUAN_GUDANG, 'SKU-A');
+
+    expect(hasil.usulan.map((item) => item.nomorBatch)).toEqual(['LOT-A']);
+    expect(hasil.sisaKekurangan).toBe(1);
+  });
 });
 
 describe('statusLimitKredit — aturan 4.3 Credit Limit & TOP', () => {

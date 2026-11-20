@@ -351,7 +351,7 @@ function MedanGambar({
   );
 }
 
-function MedanGambarBanyak({
+export function MedanGambarBanyak({
   nilai,
   onChange,
   petunjuk

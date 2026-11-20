@@ -27,7 +27,7 @@ import {
   Trash2,
   X
 } from 'lucide-react';
-import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite } from '../../../../types';
+import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite, VarianSkuProduk } from '../../../../types';
 import { db, KOLEKSI_OPERASIONAL_SITUS } from '../../../../services/pocketbase';
 import {
   cocokKategoriProduk,
@@ -36,6 +36,7 @@ import {
   selesaikanGambar,
   slugifyWebsite
 } from '../../../../utils/website';
+import { terapkanVarianProduk } from '../../../../utils/productCatalog';
 import { IDENTITAS_RUJUKAN } from '../../../../data/websiteRujukan';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
@@ -49,6 +50,9 @@ export interface ItemRfqPublik {
   satuan: string;
   jumlah: number;
   hargaTayang?: string;
+  referensiHarga?: { id: string; en: string };
+  kodeSKU?: string;
+  varianId?: string;
 }
 
 export interface PropsKatalogProduk {
@@ -131,25 +135,7 @@ function useProdukKatalogPublik(cfg: KonfigurasiSitus, cfgAsli: KonfigurasiSitus
   return useMemo(() => {
     void versiData;
     const terselaraskan = selaraskanKontenOperasional(cfgAsli, db.getSumberOperasionalWebsite());
-    const teksAsli = new Map(cfgAsli.produk.item.map((produk) => [produk.id, produk]));
-    const teksTerjemahan = new Map(cfg.produk.item.map((produk) => [produk.id, produk]));
-    return terselaraskan.produk.item
-      .filter((produk) => produk.isActive)
-      .map((produk) => {
-        const asli = teksAsli.get(produk.id);
-        const terjemahan = teksTerjemahan.get(produk.id);
-        if (!asli || !terjemahan) return produk;
-        const spesifikasiBelumBerubah = produk.spesifikasi === asli.spesifikasi;
-        const poinJualBelumBerubah =
-          produk.poinJual.length === asli.poinJual.length &&
-          produk.poinJual.every((poin, index) => poin === asli.poinJual[index]);
-        return {
-          ...produk,
-          kategori: terjemahan.kategori,
-          spesifikasi: spesifikasiBelumBerubah ? terjemahan.spesifikasi : produk.spesifikasi,
-          poinJual: poinJualBelumBerubah ? terjemahan.poinJual : produk.poinJual
-        };
-      });
+    return terselaraskan.produk.item.filter((produk) => produk.isActive);
   }, [cfg, cfgAsli, versiData]);
 }
 
@@ -258,7 +244,7 @@ export function SeksiProdukPublik({
   const modeRingkas = typeof batasProduk === 'number';
 
   const kategoriTersedia = useMemo(() => {
-    const grupUnik = Array.from(new Set(semua.map((p) => p.kategori)));
+    const grupUnik = Array.from(new Set(semua.flatMap((p) => [p.kategori, ...(p.peruntukan ?? [])]).filter(Boolean)));
     return grupUnik.map((label) => ({
       label,
       jumlah: semua.filter((p) => cocokKategoriProduk(p, label)).length
@@ -404,6 +390,10 @@ export function SeksiProdukPublik({
   if (!cfg.produk.isActive || semua.length === 0) return null;
 
   const tanganiTambahRfq = (produk: ProdukWebsite, jumlah = 1) => {
+    if ((produk.varianSku?.length ?? 0) > 0 && !produk.varianId) {
+      setProdukDetail(produk);
+      return;
+    }
     if (onTambahRfq) {
       onTambahRfq(produk, jumlah);
     } else {
@@ -698,7 +688,7 @@ export function SeksiProdukPublik({
                     <th className="py-3 px-4">{t('Merek / Asal')}</th>
                     <th className="py-3 px-4">{t('Registrasi Kemenkes RI')}</th>
                     <th className="py-3 px-4">{t('Ketersediaan & Zona')}</th>
-                    <th className="py-3 px-4">{t('Referensi Harga')}</th>
+                    <th className="py-3 px-4">{t('Harga & Referensi')}</th>
                     <th className="py-3 px-4 text-right">{t('Aksi')}</th>
                   </tr>
                 </thead>
@@ -758,7 +748,16 @@ export function SeksiProdukPublik({
                           {p.zonaSuhu && <p className="text-2xs text-slate-500 mt-0.5">{p.zonaSuhu}</p>}
                         </td>
                         <td className="py-3.5 px-4 align-top tabular-nums">
-                          <p className="font-semibold text-slate-800">{p.hargaTayang || t('Sesuai Price List')}</p>
+                          <div className="grid min-w-[240px] grid-cols-2 gap-3">
+                            <div>
+                              <p className="text-2xs text-slate-500">{t('Harga tayang')}</p>
+                              <p className="font-semibold text-slate-800">{p.hargaTayang || t('Sesuai Price List')}</p>
+                            </div>
+                            <div>
+                              <p className="text-2xs text-slate-500">{t('Referensi')}</p>
+                              <p className="text-slate-700">{p.referensiHarga?.[bahasa] || t('Hubungi tim penjualan untuk konfirmasi')}</p>
+                            </div>
+                          </div>
                         </td>
                         <td className="py-3.5 px-4 align-top text-right whitespace-nowrap">
                           <div className="inline-flex items-center gap-1.5">
@@ -827,6 +826,9 @@ export function SeksiProdukPublik({
                         <span className="text-slate-500"> · {p.kelasRisiko}</span>
                       ) : null}
                     </p>
+                    {p.peruntukan && p.peruntukan.length > 0 && (
+                      <p className="mt-1 text-2xs text-slate-500">{p.peruntukan.join(' · ')}</p>
+                    )}
 
                     <button
                       type="button"
@@ -875,11 +877,15 @@ export function SeksiProdukPublik({
                         )}
                       </div>
 
-                      <div className="flex items-baseline justify-between gap-2 tabular-nums">
-                        <dt className="shrink-0">{t('Referensi Harga')}</dt>
-                        <dd className="text-slate-800 font-semibold text-right truncate">
-                          {p.hargaTayang || t('Sesuai Daftar Harga Resmi')}
-                        </dd>
+                      <div className="grid grid-cols-2 gap-3 tabular-nums">
+                        <div>
+                          <dt className="text-2xs">{t('Harga tayang')}</dt>
+                          <dd className="text-slate-800 font-semibold">{p.hargaTayang || t('Sesuai Daftar Harga Resmi')}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-2xs">{t('Referensi')}</dt>
+                          <dd className="text-slate-700">{p.referensiHarga?.[bahasa] || t('Hubungi tim penjualan untuk konfirmasi')}</dd>
+                        </div>
                       </div>
                     </dl>
 
@@ -1047,12 +1053,12 @@ export function SeksiProdukPublik({
             cfg={cfg}
             jumlahRfqSaatIni={petaRfq.get(produkSegar.id)?.jumlah}
             onTutup={() => setProdukDetail(null)}
-            onTambahRfq={(jumlah) => {
-              tanganiTambahRfq(produkSegar, jumlah);
+            onTambahRfq={(produk, jumlah) => {
+              tanganiTambahRfq(produk, jumlah);
             }}
-            onAjukanLangsung={(jumlah) => {
+            onAjukanLangsung={(produk, jumlah) => {
               setProdukDetail(null);
-              tanganiPenawaranLangsung(produkSegar, jumlah);
+              tanganiPenawaranLangsung(produk, jumlah);
             }}
           />
         );
@@ -1073,14 +1079,17 @@ function ModalDetailProduk({
   cfg: KonfigurasiSitus;
   jumlahRfqSaatIni?: number;
   onTutup: () => void;
-  onTambahRfq: (jumlah: number) => void;
-  onAjukanLangsung: (jumlah: number) => void;
+  onTambahRfq: (produk: ProdukWebsite, jumlah: number) => void;
+  onAjukanLangsung: (produk: ProdukWebsite, jumlah: number) => void;
 }) {
   const bahasa = useWebsiteLanguage();
   const t = (text: string) => translateWebsiteUi(text, bahasa);
   const [jumlah, setJumlah] = useState<number>(jumlahRfqSaatIni ?? 1);
   const [ditambahkan, setDitambahkan] = useState(false);
-  const nieAda = adalahNieTerdaftar(produk.nomorIzinEdar);
+  const [varianId, setVarianId] = useState(produk.varianSku?.[0]?.id ?? '');
+  const varianAktif = produk.varianSku?.find((varian) => varian.id === varianId);
+  const produkTerpilih = varianAktif ? terapkanVarianProduk(produk, varianAktif) : produk;
+  const nieAda = adalahNieTerdaftar(produkTerpilih.nomorIzinEdar);
 
   useEffect(() => {
     const padaKey = (e: KeyboardEvent) => {
@@ -1091,7 +1100,7 @@ function ModalDetailProduk({
   }, [onTutup]);
 
   const simpanKeDaftar = () => {
-    onTambahRfq(Math.max(1, jumlah));
+    onTambahRfq(produkTerpilih, Math.max(1, jumlah));
     setDitambahkan(true);
     window.setTimeout(() => setDitambahkan(false), 2000);
   };
@@ -1134,7 +1143,23 @@ function ModalDetailProduk({
         {/* Isi Modal */}
         <div className="p-5 sm:p-6 grid md:grid-cols-[0.9fr_1.1fr] gap-6">
           <div className="space-y-4">
-            <GaleriFotoProduk produk={produk} cfg={cfg} />
+            {produkTerpilih.kodeSKU && (
+              <p className="text-2xs font-mono text-slate-600">SKU: {produkTerpilih.kodeSKU}</p>
+            )}
+            {produk.varianSku && produk.varianSku.length > 1 && (
+              <label className="block text-xs font-semibold text-slate-700">
+                Pilih varian / SKU
+                <select value={varianId} onChange={(e) => setVarianId(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2">
+                  {produk.varianSku.map((varian: VarianSkuProduk) => (
+                    <option key={varian.id} value={varian.id}>
+                      {[varian.tipeModel, varian.kodeSKU].filter(Boolean).join(' · ') || `Varian ${varian.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <GaleriFotoProduk produk={produkTerpilih} cfg={cfg} />
 
             {/* Kotak Legalitas & Distribusi CDAKB */}
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2.5 text-xs">
@@ -1146,44 +1171,44 @@ function ModalDetailProduk({
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-500">{t('Nomor Izin Edar')}</dt>
                   <dd className="font-mono font-semibold text-slate-800 text-right">
-                    {nieAda ? produk.nomorIzinEdar : t('Terdaftar pada Register RA')}
+                    {nieAda ? produkTerpilih.nomorIzinEdar : t('Terdaftar pada Register RA')}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-500">{t('Status Registrasi')}</dt>
                   <dd
                     className={`font-semibold text-right ${
-                      produk.statusIzinEdar === 'Aktif'
+                      produkTerpilih.statusIzinEdar === 'Aktif'
                         ? 'text-emerald-700'
-                        : produk.statusIzinEdar === 'Verifikasi Register RA'
+                        : produkTerpilih.statusIzinEdar === 'Verifikasi Register RA'
                           ? 'text-[var(--brand)]'
                           : 'text-amber-700'
                     }`}
                   >
-                    {t(produk.statusIzinEdar)}
+                    {t(produkTerpilih.statusIzinEdar)}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-500">{t('Produsen / Prinsipal')}</dt>
-                  <dd className="text-slate-800 font-semibold text-right">{produk.produsen}</dd>
+                  <dd className="text-slate-800 font-semibold text-right">{produkTerpilih.produsen}</dd>
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-slate-500">{t('Negara Asal')}</dt>
-                  <dd className="text-slate-700 text-right">{produk.negaraAsal}</dd>
+                  <dd className="text-slate-700 text-right">{produkTerpilih.negaraAsal}</dd>
                 </div>
-                {produk.zonaSuhu && (
+                {produkTerpilih.zonaSuhu && (
                   <div className="flex justify-between gap-2">
                     <dt className="text-slate-500">{t('Zona Penyimpanan')}</dt>
-                    <dd className="text-slate-700 text-right">{produk.zonaSuhu}</dd>
+                    <dd className="text-slate-700 text-right">{produkTerpilih.zonaSuhu}</dd>
                   </div>
                 )}
                 <div className="flex justify-between gap-2 tabular-nums">
                   <dt className="text-slate-500">{t('Stok Bebas Gudang')}</dt>
                   <dd className="font-semibold text-slate-800 text-right">
-                    {produk.statusIzinEdar === 'Perpanjangan' || produk.statusIzinEdar === 'Kedaluwarsa'
+                    {produkTerpilih.statusIzinEdar === 'Perpanjangan' || produkTerpilih.statusIzinEdar === 'Kedaluwarsa'
                       ? t('Ditahan selama perpanjangan NIE')
-                      : typeof produk.stokTersedia === 'number' && produk.stokTersedia > 0
-                        ? `${produk.stokTersedia} ${produk.satuan || 'Unit'} (${t('Alokasi FEFO')})`
+                      : typeof produkTerpilih.stokTersedia === 'number' && produkTerpilih.stokTersedia > 0
+                        ? `${produkTerpilih.stokTersedia} ${produkTerpilih.satuan || 'Unit'} (${t('Alokasi FEFO')})`
                         : t('Sesuai jadwal PO / Inden')}
                   </dd>
                 </div>
@@ -1194,9 +1219,9 @@ function ModalDetailProduk({
             <div className="space-y-2">
               <p className="text-2xs font-bold uppercase tracking-wider text-slate-500">{t('Dokumen & Sumber Daya')}</p>
               <div className="flex flex-wrap gap-2">
-                {adalahUrlEksternal(produk.tautanBrosur) ? (
+                {adalahUrlEksternal(produkTerpilih.tautanBrosur) ? (
                   <a
-                    href={produk.tautanBrosur}
+                    href={produkTerpilih.tautanBrosur}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-[var(--brand)]"
@@ -1204,16 +1229,16 @@ function ModalDetailProduk({
                     <FileText className="w-3.5 h-3.5" />
                     {t('Buka Katalog / Brosur')}
                   </a>
-                ) : produk.tautanBrosur ? (
+                ) : produkTerpilih.tautanBrosur ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-2xs text-slate-600">
                     <FileText className="w-3.5 h-3.5 text-[var(--brand)] shrink-0" />
                     {t('Brosur teknis dilampirkan bersama penawaran resmi')}
                   </span>
                 ) : null}
 
-                {adalahUrlEksternal(produk.tautanVideo) && (
+                {adalahUrlEksternal(produkTerpilih.tautanVideo) && (
                   <a
-                    href={produk.tautanVideo}
+                    href={produkTerpilih.tautanVideo}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700"
@@ -1239,9 +1264,20 @@ function ModalDetailProduk({
           <div className="flex flex-col">
             <div className="bg-[color-mix(in_srgb,var(--brand)_10%,white)] border border-[color-mix(in_srgb,var(--brand)_35%,white)] rounded-xl px-4 py-3">
               <p className="text-2xs font-bold uppercase tracking-wider text-[var(--brand)]">{t('Referensi Harga & Pengadaan')}</p>
-              <p className="text-base font-bold text-slate-900 mt-0.5 tabular-nums">
-                {produk.hargaTayang || t('Sesuai Daftar Harga Resmi / Kontrak')}
-              </p>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-2xs font-semibold text-slate-600">{t('Harga tayang')}</p>
+                  <p className="text-base font-bold text-slate-900 tabular-nums">
+                    {produkTerpilih.hargaTayang || t('Sesuai Daftar Harga Resmi / Kontrak')}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-2xs font-semibold text-slate-600">{t('Referensi')}</p>
+                  <p className="text-xs font-medium text-slate-700">
+                    {produkTerpilih.referensiHarga?.[bahasa] || t('Hubungi tim penjualan untuk konfirmasi')}
+                  </p>
+                </div>
+              </div>
               <p className="text-2xs text-slate-600 mt-1">
                 {t('Melayani pengadaan RS Pemerintah & Swasta melalui e-Katalog LKPP, LPSE, maupun Purchase Order B2B.')}
               </p>
@@ -1249,14 +1285,14 @@ function ModalDetailProduk({
 
             <div className="mt-4">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">{t('Spesifikasi Teknis')}</h4>
-              <p className="text-xs sm:text-sm text-slate-700 mt-1.5 leading-relaxed">{produk.spesifikasi}</p>
+              <p className="text-xs sm:text-sm text-slate-700 mt-1.5 leading-relaxed">{produkTerpilih.spesifikasi}</p>
             </div>
 
-            {produk.poinJual && produk.poinJual.length > 0 && (
+            {produkTerpilih.poinJual && produkTerpilih.poinJual.length > 0 && (
               <div className="mt-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">{t('Keunggulan Utama')}</h4>
                 <ul className="mt-2 space-y-1.5">
-                  {produk.poinJual.map((poin) => (
+                  {produkTerpilih.poinJual.map((poin) => (
                     <li key={poin} className="text-xs text-slate-700 flex items-start gap-2">
                       <Check className="w-3.5 h-3.5 text-[var(--brand)] shrink-0 mt-0.5" />
                       <span>{poin}</span>
@@ -1266,11 +1302,11 @@ function ModalDetailProduk({
               </div>
             )}
 
-            {produk.tanyaJawabTeknis && produk.tanyaJawabTeknis.length > 0 && (
+            {produkTerpilih.tanyaJawabTeknis && produkTerpilih.tanyaJawabTeknis.length > 0 && (
               <div className="mt-4 pt-4 border-t border-slate-200">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">{t('Tanya Jawab Teknis')}</h4>
                 <div className="mt-2 space-y-2.5">
-                  {produk.tanyaJawabTeknis.map((tj) => (
+                  {produkTerpilih.tanyaJawabTeknis.map((tj) => (
                     <div key={tj.pertanyaan} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
                       <p className="text-xs font-semibold text-slate-800">{tj.pertanyaan}</p>
                       <p className="text-2xs text-slate-600 mt-1 leading-relaxed">{tj.jawaban}</p>
@@ -1311,7 +1347,7 @@ function ModalDetailProduk({
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </span>
-                  <span className="text-slate-500">{produk.satuan || 'Unit'}</span>
+                  <span className="text-slate-500">{produkTerpilih.satuan || 'Unit'}</span>
                 </label>
               </div>
 
@@ -1335,7 +1371,7 @@ function ModalDetailProduk({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onAjukanLangsung(Math.max(1, jumlah))}
+                  onClick={() => onAjukanLangsung(produkTerpilih, Math.max(1, jumlah))}
                   className="flex-1 inline-flex items-center justify-center gap-1.5 whitespace-nowrap px-4 py-2.5 rounded-full bg-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_85%,black)] text-white text-xs font-bold transition-colors cursor-pointer"
                 >
                   <Handshake className="w-4 h-4" />

@@ -77,7 +77,7 @@ const A4_LEBAR_PX = (210 * 96) / 25.4;
 const NAMA_BERKAS_PDF = 'Katalog Elektronik AMS 2026';
 
 export default function InternalCatalogModule() {
-  const dbTick = useDbTick(['izin_edar', 'stok_gudang', 'sales_pengetahuan_produk']);
+  const dbTick = useDbTick(['product_catalog', 'izin_edar', 'stok_gudang', 'sales_pengetahuan_produk']);
 
   // Ambil data produk dari register izin edar & rujukan website
   const daftarProdukSemua = useMemo(() => {
@@ -87,7 +87,8 @@ export default function InternalCatalogModule() {
         izinEdar: db.getIzinEdar(),
         stok: db.getStokGudang(),
         pengetahuanProduk: db.getPengetahuanProduk(),
-        skemaHarga: []
+        skemaHarga: db.getSkemaHarga(),
+        produkKatalog: db.getProdukKatalog()
       };
       return gabungkanKatalogProduk(sumber);
     } catch {

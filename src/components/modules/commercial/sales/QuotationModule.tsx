@@ -167,7 +167,8 @@ export default function QuotationModule({
     'sales_skema_harga',
     'izin_edar',
     'stok_gudang',
-    'sales_pengetahuan_produk'
+    'sales_pengetahuan_produk',
+    'product_catalog'
   ]);
   const pelangganList = useMemo(() => {
     void dbTick;
@@ -185,7 +186,8 @@ export default function QuotationModule({
       izinEdar: db.getIzinEdar(),
       stok: db.getStokGudang(),
       pengetahuanProduk: db.getPengetahuanProduk(),
-      skemaHarga: skemaHargaList
+      skemaHarga: skemaHargaList,
+      produkKatalog: db.getProdukKatalog()
     };
     const katalog: ProdukWebsite[] = gabungkanKatalogProduk(sumber);
 

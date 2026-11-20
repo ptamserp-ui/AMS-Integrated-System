@@ -29,7 +29,8 @@ import {
   Crown,
   UserCog,
   LogOut,
-  Smartphone
+  Smartphone,
+  PackageSearch
 } from 'lucide-react';
 import { AksesEfektif, DivisionId, ModuleId, UserRole } from '../../types';
 import LogoAplikasi from '../common/LogoAplikasi';
@@ -88,6 +89,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'website', label: 'Website', short: 'Website', icon: Globe, badge: 'SEGERA' },
 
   { id: 'sales-marketing', label: 'Sales & Marketing', short: 'Sales', icon: TrendingUp, group: 'commercial', badge: 'LKPP' },
+  { id: 'product-catalog', label: 'Product Catalog', short: 'Produk', icon: PackageSearch, group: 'commercial' },
   { id: 'purchasing-procurement', label: 'Purchasing & Procurement', short: 'Beli', icon: ShoppingCart, group: 'commercial' },
   { id: 'ra-pjt', label: 'Regulatory Affairs (RA) & Penanggung Jawab Teknis (PJT)', short: 'Izin Edar', icon: Building2, group: 'commercial', badge: 'WAJIB' },
   { id: 'qa-mutu', label: 'Quality Assurance (QA) / Pemastian Mutu', short: 'QA', icon: Award, group: 'commercial', badge: 'ISO' },

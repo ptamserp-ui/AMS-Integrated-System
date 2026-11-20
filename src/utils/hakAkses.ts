@@ -11,6 +11,7 @@ export const SEMUA_ID_MODUL: ModuleNavId[] = [
   'teknisi-service',
   'produksi-cpakb',
   'purchasing-procurement',
+  'product-catalog',
   'sales-marketing',
   'hrd-pelatihan',
   'finance-akuntansi',

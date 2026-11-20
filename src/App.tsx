@@ -43,6 +43,7 @@ const HRDModule = lazy(() => import('./components/modules/supporting/HRDModule')
 const FinanceModule = lazy(() => import('./components/modules/supporting/FinanceModule'));
 const ITModule = lazy(() => import('./components/modules/supporting/ITModule'));
 const WebsiteModule = lazy(() => import('./components/modules/website/WebsiteModule'));
+const ProductCatalogModule = lazy(() => import('./components/modules/commercial/ProductCatalogModule'));
 
 function PemuatModul({ layarPenuh = false }: { layarPenuh?: boolean }) {
   return (
@@ -74,6 +75,7 @@ function modulUntukKunciSync(key: string): RbacResourceId | 'all' {
   if (key === 'layanan_teknis') return 'teknisi-service';
   if (key === 'bets_produksi') return 'produksi-cpakb';
   if (key === 'pemasok' || key === 'purchase_order') return 'purchasing-procurement';
+  if (key === 'product_catalog') return 'product-catalog';
   if (
     key === 'penjualan' ||
     key.startsWith('sales_') ||
@@ -409,6 +411,7 @@ function Dasbor({
             {activeTab === 'purchasing-procurement' && <ProcurementModule />}
 
             {/* Sales & Marketing */}
+            {activeTab === 'product-catalog' && <ProductCatalogModule currentRole={currentRole} sesi={sesi} />}
             {activeTab === 'sales-marketing' && (
               <SalesModule
                 currentRole={currentRole}

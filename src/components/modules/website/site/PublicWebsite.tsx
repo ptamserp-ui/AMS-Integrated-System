@@ -14,6 +14,7 @@ import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite } from '../../../../typ
 import { PETA_HALAMAN, TampilkanSeksi, TombolSitus, type ItemRfqPublik, type PropsSeksi } from './SiteSections';
 import { SorotanKatalog } from './SorotanKatalog';
 import { hrefTautan, selesaikanGambar, slugifyWebsite } from '../../../../utils/website';
+import { terapkanVarianProduk } from '../../../../utils/productCatalog';
 import { tampilanEfektif, tumpukanFont } from '../../../../utils/tampilan';
 import {
   translateWebsiteUi,
@@ -237,16 +238,30 @@ export default function PublicWebsite({
   useEffect(() => {
     setDaftarRfq((lama) => {
       if (lama.length === 0) return lama;
-      const petaProduk = new Map(konfigurasi.produk.item.map((p) => [p.id, p]));
+      const petaProduk = new Map(
+        konfigurasi.produk.item.flatMap((produk) => [
+          [produk.id, produk] as const,
+          ...(produk.varianSku ?? []).map((varian) => [
+            `${produk.id}::${varian.id}`,
+            terapkanVarianProduk(produk, varian)
+          ] as const)
+        ])
+      );
       let berubah = false;
       const baru = lama.map((item) => {
         const terkini = petaProduk.get(item.produkId);
         if (!terkini) return item;
         const hargaBaru = terkini.hargaTayang;
+        const referensiBaru = terkini.referensiHarga;
         const satuanBaru = terkini.satuan || item.satuan;
-        if (item.hargaTayang === hargaBaru && item.satuan === satuanBaru) return item;
+        if (
+          item.hargaTayang === hargaBaru &&
+          item.referensiHarga?.id === referensiBaru?.id &&
+          item.referensiHarga?.en === referensiBaru?.en &&
+          item.satuan === satuanBaru
+        ) return item;
         berubah = true;
-        return { ...item, hargaTayang: hargaBaru, satuan: satuanBaru };
+        return { ...item, hargaTayang: hargaBaru, referensiHarga: referensiBaru, satuan: satuanBaru };
       });
       return berubah ? baru : lama;
     });
@@ -326,7 +341,10 @@ export default function PublicWebsite({
           produsen: produk.produsen,
           satuan: produk.satuan || 'Unit',
           jumlah: tambahan,
-          hargaTayang: produk.hargaTayang
+          hargaTayang: produk.hargaTayang,
+          referensiHarga: produk.referensiHarga,
+          kodeSKU: produk.kodeSKU,
+          varianId: produk.varianId
         }
       ];
     });

@@ -161,6 +161,7 @@ export const KATALOG_KOLEKSI_DATA: readonly DefinisiKoleksiData[] = [
   { key: 'bets_produksi', label: 'Batch Manufacturing Record (BMR)', modul: 'Manufaktur CPAKB', kategori: 'operasional' },
   { key: 'pemasok', label: 'Daftar Pemasok Terkualifikasi', modul: 'Purchasing & Procurement', kategori: 'operasional' },
   { key: 'purchase_order', label: 'Purchase Order (PO)', modul: 'Purchasing & Procurement', kategori: 'operasional' },
+  { key: 'product_catalog', label: 'Master Product Catalog & SKU', modul: 'Commercial', kategori: 'operasional' },
 
   // Sales, Marketing & Newsletter
   { key: 'penjualan', label: 'Pesanan Penjualan (Sales Order)', modul: 'Sales & Marketing', kategori: 'operasional' },
@@ -262,6 +263,7 @@ const INITIAL_SEEDS_MAP: Record<string, unknown[]> = {
   pemasok: INITIAL_PEMASOK,
   purchase_order: INITIAL_PURCHASE_ORDER,
   penjualan: INITIAL_PENJUALAN,
+  product_catalog: [],
   laporan_ktd: INITIAL_LAPORAN_KTD,
   penarikan_produk: INITIAL_RECALL,
   pelatihan: INITIAL_PELATIHAN,

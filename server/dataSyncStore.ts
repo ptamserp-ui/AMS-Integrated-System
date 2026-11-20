@@ -52,6 +52,7 @@ export function mapSyncKeyToResource(key: string): RbacResourceId {
   if (key === 'layanan_teknis') return 'teknisi-service';
   if (key === 'bets_produksi') return 'produksi-cpakb';
   if (key === 'pemasok' || key === 'purchase_order') return 'purchasing-procurement';
+  if (key === 'product_catalog') return 'product-catalog';
   if (
     key === 'penjualan' ||
     key.startsWith('sales_') ||

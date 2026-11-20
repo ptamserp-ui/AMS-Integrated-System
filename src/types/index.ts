@@ -11,6 +11,7 @@ export type ModuleId =
   | 'produksi-cpakb'
   | 'purchasing-procurement'
   // 3. Commercial & Market
+  | 'product-catalog'
   | 'sales-marketing'
   | 'pms-vigilance'
   // 4. Supporting System
@@ -671,6 +672,8 @@ export interface PenjualanAlkes {
   fasyankes: string; // RSUP / RSUD / Klinik
   jalurPenjualan: 'e-Katalog LKPP' | 'Tender RS Pemerintah' | 'Pembelian Langsung RS Swasta' | 'Klinik & Laboratorium';
   namaAlkes: string;
+  produkId?: string;
+  kodeSKU?: string;
   nomorBatch: string;
   jumlah: number;
   satuan: string;
@@ -1706,7 +1709,29 @@ export interface SolusiWebsite extends ItemWebsite {
   imageUrl?: string;
 }
 
-/** Kartu produk katalog — sumbernya register izin edar + stok gudang + brochure hub. */
+/** SKU turunan dari satu lini produk; stok ditautkan memakai SKU dan/atau nomor izin edar. */
+export interface VarianSkuProduk {
+  id: string;
+  kodeSKU: string;
+  tipeModel: string;
+  nomorIzinEdar: string;
+  statusIzinEdar: string;
+  kategoriRegulasi?: string;
+  kelasRisiko?: string;
+  produsen?: string;
+  negaraAsal?: string;
+  hargaTayang?: string;
+  referensiHarga?: { id: string; en: string };
+  satuan?: string;
+  zonaSuhu?: string;
+  imageUrl?: string;
+  stokTersedia?: number;
+  dokumenUrl?: string;
+  tautanLkpp?: string;
+  tkdn?: string;
+}
+
+/** Kartu produk katalog dengan data master dan SKU yang dapat dilacak secara terpisah. */
 export interface ProdukWebsite extends ItemWebsite {
   nama: string;
   tipeModel: string;
@@ -1725,10 +1750,24 @@ export interface ProdukWebsite extends ItemWebsite {
   satuan?: string;
   zonaSuhu?: string;
   hargaTayang?: string;
+  referensiHarga?: { id: string; en: string };
   imageUrl?: string;
   imageUrls?: string[];
   badge?: string;
   tanyaJawabTeknis?: { pertanyaan: string; jawaban: string }[];
+  kodeSKU?: string;
+  varianId?: string;
+  peruntukan?: string[];
+  varianSku?: VarianSkuProduk[];
+  dokumenUrl?: string;
+  tautanLkpp?: string;
+  tkdn?: string;
+}
+
+/** Sumber kanonik produk; status publikasi tetap dikelola oleh Website CMS. */
+export interface ProdukKatalog extends ProdukWebsite {
+  peruntukan: string[];
+  varianSku: VarianSkuProduk[];
 }
 
 /** Tahap perjalanan laboratorium/klien yang dilayani perusahaan. */

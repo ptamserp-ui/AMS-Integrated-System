@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useDbTick } from '../../../../hooks/useDbSync';
 import { db } from '../../../../services/pocketbase';
-import { HasilValidasiSO, PenjualanAlkes, SkemaHargaAlkes, StatusSuratJalan, SuratJalan } from '../../../../types';
+import { HasilValidasiSO, PenjualanAlkes, ProdukWebsite, SkemaHargaAlkes, StatusSuratJalan, SuratJalan } from '../../../../types';
 import {
   alokasikanFEFO,
   hargaTerkunciAktif,
@@ -10,6 +10,7 @@ import {
   statusLimitKredit,
   validasiSalesOrder
 } from '../../../../utils/sales';
+import { produkKatalogUntukPenjualan } from '../../../../utils/productCatalog';
 import { TANGGAL_ACUAN_BENIH, buatTanggalAcuan, waktuMutasiMonoton } from '../../operations/gudang/ui';
 import {
   AlertTriangle,
@@ -71,6 +72,10 @@ const toneStatusSuratJalan = (status: StatusSuratJalan): Tone =>
 const toneLimit = (status: ReturnType<typeof statusLimitKredit>['status']): Tone =>
   status === 'Diblokir' ? 'rose' : status === 'Perlu Persetujuan Manajemen' ? 'amber' : 'emerald';
 
+type OpsiProdukSO = Pick<ProdukWebsite, 'id' | 'nama' | 'tipeModel' | 'nomorIzinEdar' | 'kodeSKU' | 'satuan' | 'hargaTayang'> & {
+  tanggalKedaluwarsaNie: string;
+};
+
 export default function SalesOrderModule() {
   const dbTick = useDbTick([
     'penjualan',
@@ -79,6 +84,7 @@ export default function SalesOrderModule() {
     'sales_kontrak_harga',
     'izin_edar',
     'stok_gudang',
+    'product_catalog',
     'sales_pengetahuan_produk',
     'gudang_surat_jalan'
   ]);
@@ -110,10 +116,26 @@ export default function SalesOrderModule() {
     void dbTick;
     return db.getSuratJalan();
   }, [dbTick]);
-  const produk = useMemo(() => {
+  const produk = useMemo<OpsiProdukSO[]>(() => {
     void dbTick;
-    return db.getPengetahuanProduk();
-  }, [dbTick]);
+    const katalog = db.getProdukKatalog();
+    if (katalog.length > 0) {
+      return produkKatalogUntukPenjualan(katalog).map((item) => ({
+        ...item,
+        tanggalKedaluwarsaNie:
+          izinEdar.find((izin) => izin.nomorIzinEdar === item.nomorIzinEdar)?.tanggalKedaluwarsa ?? ''
+      }));
+    }
+    return db.getPengetahuanProduk().map((item) => ({
+      id: item.id,
+      nama: item.namaAlkes,
+      tipeModel: item.tipeModel,
+      nomorIzinEdar: item.nomorIzinEdar,
+      kodeSKU: izinEdar.find((izin) => izin.nomorIzinEdar === item.nomorIzinEdar)?.skuCode ?? '',
+      satuan: 'Unit',
+      tanggalKedaluwarsaNie: item.tanggalKedaluwarsaNie
+    }));
+  }, [dbTick, izinEdar]);
   const acuanFefo = useMemo(() => buatTanggalAcuan(TANGGAL_ACUAN_BENIH), []);
 
   const [kataKunci, setKataKunci] = useState('');
@@ -126,7 +148,9 @@ export default function SalesOrderModule() {
     pelangganId: '',
     fasyankes: '',
     jalurPenjualan: 'e-Katalog LKPP' as PenjualanAlkes['jalurPenjualan'],
-    namaAlkes: produk[0]?.namaAlkes ?? '',
+    produkId: produk[0]?.id ?? '',
+    namaAlkes: produk[0]?.nama ?? '',
+    kodeSKU: produk[0]?.kodeSKU ?? '',
     nomorBatch: '',
     jumlah: 1,
     satuan: 'Unit',
@@ -146,14 +170,14 @@ export default function SalesOrderModule() {
   const [ujiSkemaId, setUjiSkemaId] = useState(skema[0]?.id ?? '');
   const [ujiJumlah, setUjiJumlah] = useState(10);
   const [prakualifikasi, setPrakualifikasi] = useState<HasilValidasiSO | null>(null);
-  const [uji, setUji] = useState({ pelangganId: pelanggan[0]?.id ?? '', namaAlkes: produk[0]?.namaAlkes ?? '', jumlah: 5 });
+  const [uji, setUji] = useState({ pelangganId: pelanggan[0]?.id ?? '', produkId: produk[0]?.id ?? '', namaAlkes: produk[0]?.nama ?? '', kodeSKU: produk[0]?.kodeSKU ?? '', jumlah: 5 });
 
-  const produkTerpilih = produk.find((p) => p.namaAlkes === form.namaAlkes);
+  const produkTerpilih = produk.find((p) => p.id === form.produkId);
   const pelangganTerpilih = pelanggan.find((c) => c.id === form.pelangganId);
 
   const usulanFefo = useMemo(
-    () => alokasikanFEFO(stok, form.namaAlkes, form.jumlah, acuanFefo),
-    [stok, form.namaAlkes, form.jumlah, acuanFefo]
+    () => alokasikanFEFO(stok, form.namaAlkes, form.jumlah, acuanFefo, form.kodeSKU),
+    [stok, form.namaAlkes, form.kodeSKU, form.jumlah, acuanFefo]
   );
 
   const hargaTerakui = useMemo(() => {
@@ -164,8 +188,8 @@ export default function SalesOrderModule() {
       const hasil = hitungDiskonKuantitas(skemaProduk, form.jumlah);
       return { sumber: `Skema ${skemaProduk.namaSkema}`, unit: Math.round(hasil.hargaPerUnitEfektif) };
     }
-    return { sumber: 'Harga eceran terdaftar', unit: 0 };
-  }, [kontrak, skema, form.pelangganId, form.namaAlkes, form.jumlah]);
+    return { sumber: 'Harga belum terverifikasi', unit: 0 };
+  }, [kontrak, skema, form.pelangganId, form.namaAlkes, form.jumlah, produkTerpilih]);
 
   const daftarTampil = useMemo(() => {
     const kunci = kataKunci.trim().toLowerCase();
@@ -201,11 +225,12 @@ export default function SalesOrderModule() {
   const ujiHasil = skemaTerpilih ? hitungDiskonKuantitas(skemaTerpilih, ujiJumlah) : null;
 
   const jalankanPrakualifikasi = () => {
-    const infoProduk = produk.find((p) => p.namaAlkes === uji.namaAlkes);
+    const infoProduk = produk.find((p) => p.id === uji.produkId);
     setPrakualifikasi(
       validasiSalesOrder({
         pelanggan: pelanggan.find((c) => c.id === uji.pelangganId),
         nomorIzinEdar: infoProduk?.nomorIzinEdar ?? '',
+        kodeSKU: infoProduk?.kodeSKU,
         daftarIzinEdar: izinEdar,
         namaAlkes: uji.namaAlkes,
         jumlah: uji.jumlah,
@@ -220,7 +245,10 @@ export default function SalesOrderModule() {
     const defaultProduk = produk[0];
     setForm((sebelum) => ({
       ...sebelum,
-      namaAlkes: defaultProduk?.namaAlkes ?? '',
+      produkId: defaultProduk?.id ?? '',
+      namaAlkes: defaultProduk?.nama ?? '',
+      kodeSKU: defaultProduk?.kodeSKU ?? '',
+      satuan: defaultProduk?.satuan ?? 'Unit',
       nomorBatch: '',
       jumlah: 1,
       totalHarga: 0,
@@ -243,6 +271,7 @@ export default function SalesOrderModule() {
     const hasil = validasiSalesOrder({
       pelanggan: pelangganTerpilih,
       nomorIzinEdar: produkTerpilih?.nomorIzinEdar ?? '',
+      kodeSKU: produkTerpilih?.kodeSKU,
       daftarIzinEdar: izinEdar,
       namaAlkes: form.namaAlkes,
       jumlah: form.jumlah,
@@ -264,6 +293,8 @@ export default function SalesOrderModule() {
       fasyankes: form.fasyankes,
       jalurPenjualan: form.jalurPenjualan,
       namaAlkes: form.namaAlkes,
+      produkId: form.produkId || undefined,
+      kodeSKU: form.kodeSKU || undefined,
       nomorBatch: betsTerkirim,
       jumlah: form.jumlah,
       satuan: form.satuan,
@@ -379,9 +410,21 @@ export default function SalesOrderModule() {
           </div>
           <div>
             <label className={labelClass}>Produk Alkes</label>
-            <select className={inputClass} value={uji.namaAlkes} onChange={(e) => setUji({ ...uji, namaAlkes: e.target.value })}>
+            <select
+              className={inputClass}
+              value={uji.produkId}
+              onChange={(e) => {
+                const dipilih = produk.find((p) => p.id === e.target.value);
+                setUji({
+                  ...uji,
+                  produkId: dipilih?.id ?? '',
+                  namaAlkes: dipilih?.nama ?? '',
+                  kodeSKU: dipilih?.kodeSKU ?? ''
+                });
+              }}
+            >
               {produk.map((p) => (
-                <option key={p.id} value={p.namaAlkes}>{p.namaAlkes}</option>
+                <option key={p.id} value={p.id}>{p.nama}{p.kodeSKU ? ` • SKU ${p.kodeSKU}` : ''}</option>
               ))}
             </select>
           </div>
@@ -957,11 +1000,29 @@ export default function SalesOrderModule() {
 
             <div>
               <label className={labelClass}>Nama Produk Alkes</label>
-              <select className={inputClass} value={form.namaAlkes} onChange={(e) => setForm({ ...form, namaAlkes: e.target.value })}>
+              <select
+                className={inputClass}
+                value={form.produkId}
+                onChange={(e) => {
+                  const dipilih = produk.find((p) => p.id === e.target.value);
+                  setForm({
+                    ...form,
+                    produkId: dipilih?.id ?? '',
+                    namaAlkes: dipilih?.nama ?? '',
+                    kodeSKU: dipilih?.kodeSKU ?? '',
+                    satuan: dipilih?.satuan ?? 'Unit'
+                  });
+                }}
+              >
                 {produk.map((p) => (
-                  <option key={p.id} value={p.namaAlkes}>{p.namaAlkes}</option>
+                  <option key={p.id} value={p.id}>{p.nama}{p.kodeSKU ? ` • SKU ${p.kodeSKU}` : ''}</option>
                 ))}
               </select>
+              {produkTerpilih?.kodeSKU && (
+                <p className="text-2xs text-slate-500 mt-1">
+                  SKU: <span className="font-mono font-semibold text-slate-700">{produkTerpilih.kodeSKU}</span>
+                </p>
+              )}
               <p className="text-2xs text-slate-500 mt-1">
                 NIE terdaftar: <span className="font-mono font-semibold text-slate-700">{produkTerpilih?.nomorIzinEdar ?? '-'}</span> •
                 berlaku sampai {formatTanggal(produkTerpilih?.tanggalKedaluwarsaNie ?? '-')}

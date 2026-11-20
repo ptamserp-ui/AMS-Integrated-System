@@ -26,7 +26,7 @@ import {
   Tablet,
   UploadCloud
 } from 'lucide-react';
-import { KonfigurasiSitus, SeksiDaftar, UserRole } from '../../../types';
+import { KonfigurasiSitus, ProdukWebsite, SeksiDaftar, UserRole } from '../../../types';
 import { authFetch, punyaIzin, type SesiLogin } from '../../../utils/autentikasi';
 import { db } from '../../../services/pocketbase';
 import { namaPengguna, peranPengguna } from '../../layout/Navbar';
@@ -101,6 +101,63 @@ const tanpaMeta = (cfg: KonfigurasiSitus) => {
   return JSON.stringify(isi);
 };
 
+function EditorPemilihProduk({
+  seksi,
+  bolehUbah,
+  onGanti
+}: {
+  seksi: SeksiDaftar<ProdukWebsite>;
+  bolehUbah: boolean;
+  onGanti: (seksi: SeksiDaftar<ProdukWebsite>) => void;
+}) {
+  const terbit = seksi.item.filter((produk) => produk.isActive).length;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+        <h3 className="text-sm font-bold text-blue-950">Pilih produk untuk dipublikasikan</h3>
+        <p className="mt-1 text-xs leading-relaxed text-blue-900">
+          Detail, foto, spesifikasi, dan SKU dikelola di Commercial → Product Catalog. Di sini hanya status publish yang dapat diubah.
+          Jika katalog baru belum terlihat, gunakan Sinkron dari Data Aplikasi terlebih dahulu.
+        </p>
+        <p className="mt-2 text-xs font-semibold text-blue-900">{terbit} dari {seksi.item.length} produk dipilih</p>
+      </div>
+      <div className="space-y-2">
+        {seksi.item.map((produk) => (
+          <label key={produk.id} className="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
+            <input
+              type="checkbox"
+              checked={produk.isActive}
+              disabled={!bolehUbah}
+              onChange={(e) => onGanti({
+                ...seksi,
+                item: seksi.item.map((item) => item.id === produk.id ? { ...item, isActive: e.target.checked } : item)
+              })}
+              className="mt-0.5 h-4 w-4 accent-slate-800"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-bold text-slate-900">{produk.nama || '(tanpa nama)'}</span>
+              <span className="mt-0.5 block truncate text-2xs text-slate-500">
+                {[produk.tipeModel, produk.kategori, produk.produsen].filter(Boolean).join(' · ')}
+              </span>
+              {produk.varianSku && produk.varianSku.length > 0 && (
+                <span className="mt-1 block text-2xs text-slate-500">{produk.varianSku.length} SKU</span>
+              )}
+            </span>
+            <span className={`shrink-0 rounded-full px-2 py-1 text-2xs font-bold ${produk.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
+              {produk.isActive ? 'Publish' : 'Draft'}
+            </span>
+          </label>
+        ))}
+        {seksi.item.length === 0 && (
+          <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">
+            Belum ada produk. Tambahkan di Product Catalog, lalu pilih Sinkron dari Data Aplikasi.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   const [draf, setDraf] = useState<KonfigurasiSitus>(() => db.getWebsiteDraft());
   const [baseline, setBaseline] = useState<string>(() => tanpaMeta(db.getWebsiteDraft()));
@@ -120,6 +177,7 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   const bolehTerbit = sesi
     ? punyaIzin(sesi, 'website', 'publish')
     : PERAN_PENERBIT.includes(currentRole);
+  const bolehUbahPilihanProduk = sesi ? punyaIzin(sesi, 'website', 'update') : true;
 
   useEffect(() => {
     const berhentiTerbit = db.subscribe('website_published', () => setTerbit(db.getWebsiteTerbit()));
@@ -282,6 +340,15 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
     }
     const bagian = BAGIAN_WEBSITE.find((b) => b.kunci === kunci);
     if (bagian) {
+      if (bagian.kunci === 'produk') {
+        return (
+          <EditorPemilihProduk
+            seksi={nilaiSeksi('produk') as SeksiDaftar<ProdukWebsite>}
+            bolehUbah={bolehUbahPilihanProduk}
+            onGanti={(baru) => gantiSeksi('produk', baru)}
+          />
+        );
+      }
       return (
         <EditorSeksiDaftar
           def={bagian}
