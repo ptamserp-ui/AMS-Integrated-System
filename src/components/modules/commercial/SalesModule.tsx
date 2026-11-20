@@ -24,15 +24,15 @@ import InternalCatalogModule from './sales/InternalCatalogModule';
 export type SalesTab = 'crm' | 'quotation' | 'tender' | 'sfa' | 'order' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
 
 const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
+  { id: 'analitik', label: 'Analitik & Dashboard (BI)', ikon: ChartColumn },
   { id: 'crm', label: 'CRM & Management Prospek', ikon: Users },
   { id: 'quotation', label: 'Quotation (Penawaran PDF A4)', ikon: FileText },
   { id: 'tender', label: 'Manajemen Tender & Kontrak (e-Katalog & LPSE)', ikon: Gavel },
   { id: 'sfa', label: 'Otomasi Sales Force (SFA)', ikon: MapPinned },
   { id: 'order', label: 'Manajemen Order & Penjualan', ikon: ShoppingCart },
-  { id: 'katalog-internal', label: 'e-Katalog Internal (PDF)', ikon: BookOpen },
+  { id: 'katalog-internal', label: 'e-Brochure (PDF)', ikon: BookOpen },
   { id: 'kampanye', label: 'Marketing, Promo & Campaign Management', ikon: Megaphone },
-  { id: 'listmonk', label: 'Newsletter & Mailing List (listmonk)', ikon: Mail },
-  { id: 'analitik', label: 'Analitik & Dashboard (BI)', ikon: ChartColumn }
+  { id: 'listmonk', label: 'Newsletter & Mailing List (listmonk)', ikon: Mail }
 ];
 
 export default function SalesModule({
@@ -67,14 +67,14 @@ export default function SalesModule({
           <span className="text-xs text-slate-500">Etika Promosi Alkes Permenkes RI &amp; LKPP</span>
         </div>
         <h2 className="text-xl font-bold text-slate-900 mt-1">
-          Sales &amp; Marketing Alkes (e-Katalog LKPP)
+          Sales &amp; Marketing
         </h2>
         <p className="text-xs text-slate-600 mt-1 max-w-3xl leading-relaxed">
           Distribusi alkes ke Rumah Sakit Pemerintah (LKPP), RS Swasta, dan Klinik dengan verifikasi etika promosi alkes oleh PJT (bebas dari klaim medis palsu) dan alokasi stok sistem FEFO sadar-kunci.
         </p>
         <p className="text-xs text-slate-500 mt-2 max-w-3xl leading-relaxed">
-          Cetak biru divisi komersial: 9 kelompok kerja (CRM &amp; Prospek, Penerbitan Quotation PDF A4, Tender &amp; Kontrak, Otomasi Sales Force,
-          Manajemen Order, Penyusun e-Katalog Internal PDF, Kampanye &amp; Rebate, Newsletter &amp; Mailing List, Analitik BI). Ketertelusuran batch &amp;
+          Cetak biru divisi komersial: 9 kelompok kerja (Analitik BI, CRM &amp; Prospek, Penerbitan Quotation PDF A4, Tender &amp; Kontrak, Otomasi Sales Force,
+          Manajemen Order, Penyusun e-Brochure PDF, Kampanye &amp; Rebate, Newsletter &amp; Mailing List). Ketertelusuran batch &amp;
           nomor serial dipusatkan penuh pada menu Gudang &amp; Logistik (Tab 3).
         </p>
       </div>
