@@ -277,7 +277,7 @@ try {
   Invoke-CheckedCommand "npm" @("ci", "--include=dev")
   if (-not $SkipTests) {
     Invoke-CheckedCommand "npm" @("run", "lint")
-    Invoke-CheckedCommand "npm" @("test")
+    Invoke-CheckedCommand "npm" @("test", "--", "--mode", $DeploymentEnv)
   }
   Invoke-CheckedCommand "npm" @("run", "build:$DeploymentEnv")
   $buildSucceeded = $true

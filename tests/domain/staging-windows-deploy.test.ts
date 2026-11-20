@@ -94,6 +94,7 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(deployScript).toContain('"pull"');
     expect(deployScript).toContain('"--ff-only"');
     expect(deployScript).toContain('"build:$DeploymentEnv"');
+    expect(deployScript).toContain('"test", "--", "--mode", $DeploymentEnv');
     expect(deployScript).toContain('"ams-integrated-system"');
     expect(deployScript).toContain(':(exclude)public/website-published.json');
     expect(deployScript).toContain('"website-published-before-deploy-{0}.json"');
