@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react';
 import {createRoot} from 'react-dom/client';
+import InitialLoadingScreen from './components/common/InitialLoadingScreen';
 import './index.css';
 
 const App = lazy(() => import('./App.tsx'));
@@ -21,9 +22,10 @@ const Halaman = JALUR_MOBILE.test(jalur) ? (
 createRoot(document.getElementById('root')!).render(
   <Suspense
     fallback={
-      <div role="status" aria-live="polite" className="min-h-screen flex items-center justify-center bg-slate-50 text-sm font-medium text-slate-500">
-        Memuat AMS…
-      </div>
+      <InitialLoadingScreen
+        title="MEMUAT APLIKASI AMS"
+        message="Menyiapkan modul aplikasi..."
+      />
     }
   >
     {Halaman}

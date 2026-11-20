@@ -8,6 +8,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import Navbar, { ALL_TABS, DIVISION_ORDER, type NavId } from './components/layout/Navbar';
 import DivisionWorkspace from './components/layout/DivisionWorkspace';
 import { terapkanFaviconAplikasi, useIdentitasVisualAplikasi } from './components/common/LogoAplikasi';
+import InitialLoadingScreen from './components/common/InitialLoadingScreen';
 import type { SalesTab } from './components/modules/commercial/SalesModule';
 import type { ITSubTabId } from './components/modules/supporting/ITModule';
 import type { GudangTabId } from './components/modules/operations/gudang/ui';
@@ -104,6 +105,7 @@ function isDivisionId(id: NavId): id is DivisionId {
 export default function App() {
   const [sesi, setSesi] = useState<SesiLogin | null>(() => bacaSesi());
   const [memeriksaSesi, setMemeriksaSesi] = useState<boolean>(() => Boolean(bacaSesi()));
+  const [statusPemuatan, setStatusPemuatan] = useState('Menunggu inisialisasi koneksi...');
   const identitasVisual = useIdentitasVisualAplikasi();
 
   useEffect(() => {
@@ -117,11 +119,14 @@ export default function App() {
         if (aktif) setMemeriksaSesi(false);
         return;
       }
+      setStatusPemuatan('Memverifikasi token sesi & hak akses pengguna (RBAC)...');
       const segar = await ambilSesiServer();
       if (segar) {
         db.prepareSessionSync(segar.userId);
+        setStatusPemuatan('Menyinkronkan state database real-time...');
         await db.syncFromServer(false);
       } else {
+        setStatusPemuatan('Memuat pengaturan publik...');
         await db.hydratePublicSettingsFromServer();
       }
       if (aktif) {
@@ -159,6 +164,7 @@ export default function App() {
 
   const tanganiMasuk = async (sesiBaru: SesiLogin) => {
     setMemeriksaSesi(true);
+    setStatusPemuatan('Menyinkronkan izin RBAC dan data pengguna...');
     db.prepareSessionSync(sesiBaru.userId);
     await db.syncFromServer(false);
     if (!sesiBaru.isHiddenDeveloper) {
@@ -177,13 +183,7 @@ export default function App() {
   };
 
   if (memeriksaSesi) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-          Menyelaraskan sesi RBAC &amp; data real-time server…
-        </p>
-      </div>
-    );
+    return <InitialLoadingScreen message={statusPemuatan} />;
   }
 
   if (!sesi) {
