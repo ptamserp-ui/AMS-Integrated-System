@@ -68,6 +68,8 @@ export interface VpsFirebaseValidationResult {
   hasAlternativeCredential: boolean;
   credentialSource: FirebaseAdminCredentialSource;
   projectId: string | null;
+  expectedProjectId: string | null;
+  projectIdMatchesTarget: boolean;
   firestoreDatabaseId: string;
   databaseIdSource: FirestoreDatabaseIdResolution['source'];
   databaseIdMatchesTarget: boolean;
@@ -300,6 +302,33 @@ export function resolveFirebaseAdminConfig(opts?: {
       '';
 
   const { databaseId } = resolveFirestoreDatabaseId({ rootDir, env });
+  const expectedProjectId = env.FIREBASE_EXPECTED_PROJECT_ID?.trim() || '';
+  const deploymentEnv = (env.DEPLOYMENT_ENV || env.VITE_DEPLOYMENT_ENV || env.NODE_ENV || '').trim().toLowerCase();
+
+  if (inAiStudioPreview && deploymentEnv === 'production') {
+    return {
+      projectId,
+      databaseId,
+      credentialSource: 'unconfigured',
+      configError: 'Koneksi Firebase production dinonaktifkan pada preview AI Studio.'
+    };
+  }
+  if (deploymentEnv === 'production' && expectedProjectId !== 'ams-integrated-system') {
+    return {
+      projectId,
+      databaseId,
+      credentialSource: 'unconfigured',
+      configError: 'FIREBASE_EXPECTED_PROJECT_ID wajib diset ke ams-integrated-system untuk rilis production.'
+    };
+  }
+  if (expectedProjectId && projectId && projectId !== expectedProjectId) {
+    return {
+      projectId,
+      databaseId,
+      credentialSource: 'unconfigured',
+      configError: `Project Firebase aktif "${projectId}" tidak sesuai target "${expectedProjectId}".`
+    };
+  }
 
   // 1. Inline JSON / Base64 JSON (cocok untuk secret manager atau .env single-line)
   const rawJson = env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
@@ -313,8 +342,17 @@ export function resolveFirebaseAdminConfig(opts?: {
         configError: parsed.error
       };
     }
+    const accountProjectId = parsed.account.projectId || projectId;
+    if (expectedProjectId && accountProjectId !== expectedProjectId) {
+      return {
+        projectId: accountProjectId,
+        databaseId,
+        credentialSource: 'unconfigured',
+        configError: `Project pada Service Account "${accountProjectId}" tidak sesuai target "${expectedProjectId}".`
+      };
+    }
     return {
-      projectId: parsed.account.projectId || projectId,
+      projectId: accountProjectId,
       databaseId,
       credentialSource: 'service-account-json',
       serviceAccount: parsed.account
@@ -350,8 +388,18 @@ export function resolveFirebaseAdminConfig(opts?: {
           configError: `${parsed.error} (${resolvedPath})`
         };
       }
+      const accountProjectId = parsed.account.projectId || projectId;
+      if (expectedProjectId && accountProjectId !== expectedProjectId) {
+        return {
+          projectId: accountProjectId,
+          databaseId,
+          credentialSource: 'unconfigured',
+          serviceAccountFilePath: resolvedPath,
+          configError: `Project pada Service Account "${accountProjectId}" tidak sesuai target "${expectedProjectId}".`
+        };
+      }
       return {
-        projectId: parsed.account.projectId || projectId,
+        projectId: accountProjectId,
         databaseId,
         credentialSource: 'service-account-file',
         serviceAccount: parsed.account,
@@ -440,6 +488,9 @@ export function validateVpsFirebaseConfig(opts?: {
 
   const rawServiceAccountJson = (env.FIREBASE_SERVICE_ACCOUNT_JSON || '').trim();
   const hasServiceAccountJson = rawServiceAccountJson.length > 0;
+  const expectedProjectId = (env.FIREBASE_EXPECTED_PROJECT_ID || '').trim() || null;
+  const deploymentEnv = (env.DEPLOYMENT_ENV || env.VITE_DEPLOYMENT_ENV || env.NODE_ENV || '').trim().toLowerCase();
+  const expectedDatabaseId = (env.FIRESTORE_EXPECTED_DATABASE_ID || '').trim();
   let serviceAccountJsonStatus: ServiceAccountJsonValidationStatus = 'missing';
   let serviceAccountJsonValid = false;
   const warnings: string[] = [];
@@ -505,10 +556,56 @@ export function validateVpsFirebaseConfig(opts?: {
   if (!resolved.projectId) {
     errors.push('Project ID Firebase belum terdefinisi untuk koneksi Admin SDK.');
   }
+  if (expectedProjectId && resolved.projectId !== expectedProjectId) {
+    errors.push(
+      `Project Firebase aktif (${resolved.projectId || 'tidak diset'}) berbeda dari target (${expectedProjectId}).`
+    );
+  }
+  if (deploymentEnv === 'production' && expectedProjectId !== 'ams-integrated-system') {
+    errors.push('FIREBASE_EXPECTED_PROJECT_ID wajib diset ke ams-integrated-system untuk rilis production.');
+  }
+  if (expectedProjectId && env.VITE_FIREBASE_PROJECT_ID?.trim() !== expectedProjectId) {
+    errors.push(
+      `VITE_FIREBASE_PROJECT_ID harus sama dengan FIREBASE_EXPECTED_PROJECT_ID (${expectedProjectId}).`
+    );
+  }
+  if (
+    deploymentEnv === 'production' &&
+    (!expectedDatabaseId || isPlaceholderEnvValue(expectedDatabaseId))
+  ) {
+    errors.push('FIRESTORE_EXPECTED_DATABASE_ID wajib diset eksplisit untuk rilis production.');
+  }
+  if (deploymentEnv === 'production' && !dbResolution.matchesExpectedDatabaseId) {
+    errors.push(
+      `Database Firestore aktif (${dbResolution.databaseId}) berbeda dari target (${expectedDatabaseId || 'belum diset'}).`
+    );
+  }
+  if (
+    deploymentEnv === 'production' &&
+    env.VITE_FIRESTORE_DATABASE_ID?.trim() !== dbResolution.databaseId
+  ) {
+    errors.push('VITE_FIRESTORE_DATABASE_ID harus sama dengan FIRESTORE_DATABASE_ID untuk rilis production.');
+  }
+  if (
+    deploymentEnv === 'production' &&
+    (env.FIRESTORE_DATABASE_ID?.trim() !== dbResolution.databaseId ||
+      env.FIREBASE_FIRESTORE_DATABASE_ID?.trim() !== dbResolution.databaseId)
+  ) {
+    errors.push('FIRESTORE_DATABASE_ID dan FIREBASE_FIRESTORE_DATABASE_ID harus diset eksplisit untuk rilis production.');
+  }
 
   const readyForStableConnection =
+    resolved.credentialSource !== 'unconfigured' &&
     Boolean(resolved.projectId) &&
     Boolean(dbResolution.databaseId) &&
+    (!expectedProjectId || resolved.projectId === expectedProjectId) &&
+    (deploymentEnv !== 'production' ||
+      Boolean(
+        expectedProjectId &&
+          expectedDatabaseId &&
+          dbResolution.matchesExpectedDatabaseId &&
+          env.VITE_FIRESTORE_DATABASE_ID?.trim() === dbResolution.databaseId
+      )) &&
     (serviceAccountJsonValid || hasAlternativeCredential);
 
   return {
@@ -519,6 +616,9 @@ export function validateVpsFirebaseConfig(opts?: {
     hasAlternativeCredential,
     credentialSource: resolved.credentialSource,
     projectId: resolved.projectId || null,
+    expectedProjectId,
+    projectIdMatchesTarget:
+      expectedProjectId ? resolved.projectId === expectedProjectId : deploymentEnv !== 'production',
     firestoreDatabaseId: dbResolution.databaseId,
     databaseIdSource: dbResolution.source,
     databaseIdMatchesTarget: dbResolution.matchesExpectedDatabaseId,

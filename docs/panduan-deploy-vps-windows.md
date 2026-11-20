@@ -8,12 +8,12 @@ Dokumen ini memandu langkah lengkap untuk menjalankan **AMS Integrated System** 
 
 ---
 
-## 1. Siapkan Proyek Firebase Staging Terpisah
+## 1. Siapkan Proyek Firebase Staging
 
-Jangan memakai kredensial production atau `firebase-applet-config.json` secara langsung untuk server staging publik.
+Preview lokal dan VPS staging harus memakai proyek Firebase yang sama, yaitu `ams-integrated-staging`. Jangan memakai `firebase-applet-config.json` sebagai pengganti konfigurasi staging.
 
-1. Buka [Firebase Console](https://console.firebase.google.com/) menggunakan akun Google resmi (`cloud.ams2026@gmail.com`).
-2. Buat proyek Firebase baru khusus staging (misalnya `ams-integrated-staging`).
+1. Masuk ke [Firebase Console](https://console.firebase.google.com/) menggunakan `ptams.erp@gmail.com`. Pastikan akun ini memiliki izin Owner/IAM yang sesuai pada proyek staging.
+2. Pilih proyek Firebase `ams-integrated-staging`.
 3. Daftarkan aplikasi **Web App** pada proyek staging tersebut dan catat nilai konfigurasi:
    - `VITE_FIREBASE_API_KEY`
    - `VITE_FIREBASE_AUTH_DOMAIN`
@@ -80,17 +80,20 @@ AMS_DATA_DIR="C:\\AMS\\Data"
 VITE_FIREBASE_API_KEY="<dari Firebase Web App staging>"
 VITE_FIREBASE_AUTH_DOMAIN="ams-integrated-staging.firebaseapp.com"
 VITE_FIREBASE_PROJECT_ID="ams-integrated-staging"
+VITE_FIREBASE_EXPECTED_PROJECT_ID="ams-integrated-staging"
 VITE_FIREBASE_STORAGE_BUCKET="ams-integrated-staging.firebasestorage.app"
 VITE_FIREBASE_MESSAGING_SENDER_ID="<dari Firebase Web App staging>"
 VITE_FIREBASE_APP_ID="<dari Firebase Web App staging>"
 VITE_FIRESTORE_DATABASE_ID="(default)"
-VITE_FIREBASE_ADMIN_EMAIL="cloud.ams2026@gmail.com"
+VITE_FIREBASE_ADMIN_EMAIL="ptams.erp@gmail.com,cloud.ams2026@gmail.com"
 
 # Firebase Admin SDK (Server-to-Server Firestore)
+FIREBASE_PROJECT_ID="ams-integrated-staging"
+FIREBASE_EXPECTED_PROJECT_ID="ams-integrated-staging"
 FIRESTORE_DATABASE_ID="(default)"
 FIREBASE_FIRESTORE_DATABASE_ID="(default)"
 FIRESTORE_EXPECTED_DATABASE_ID="(default)"
-FIREBASE_SERVICE_ACCOUNT_PATH="C:\\AMS\\Secrets\\ams-integrated-staging-firebase-adminsdk-fbsvc-9d434aa089.json"
+FIREBASE_SERVICE_ACCOUNT_PATH="C:\\AMS\\Secrets\\ams-integrated-staging-service-account.json"
 
 # Terjemahan situs publik (opsional; kunci digunakan server saja)
 DEEPL_AUTH_KEY="<DeepL API key, simpan hanya di VPS>"
@@ -98,16 +101,38 @@ DEEPL_API_URL="https://api-free.deepl.com"
 
 SESSION_SECRET="<64-karakter-hex-acak>"
 INITIAL_SETUP_TOKEN="<token acak setup awal>"
-BOOTSTRAP_DEV_EMAIL="cloud.ams2026@gmail.com"
-FIREBASE_ADMIN_EMAILS="cloud.ams2026@gmail.com,antraderyll@gmail.com"
+BOOTSTRAP_DEV_EMAIL="ptams.erp@gmail.com"
+FIREBASE_ADMIN_EMAILS="ptams.erp@gmail.com,cloud.ams2026@gmail.com,antraderyll@gmail.com"
 ```
 
 Fitur tombol **ID / EN** menerjemahkan teks CMS situs terbit menggunakan DeepL. Untuk mengaktifkannya, isi `DEEPL_AUTH_KEY` pada `.env.staging` di VPS dengan API key akun DeepL Anda. Gunakan `https://api-free.deepl.com` untuk paket Free atau `https://api.deepl.com` untuk Pro. Jangan gunakan awalan `VITE_` dan jangan kirim API key ke browser, Git, atau chat. Cache terjemahan disimpan di `AMS_DATA_DIR\website-translation-en.json`; setelah memperbarui environment, jalankan ulang deployment agar service membaca konfigurasi terbaru.
 
 > **Konfigurasi Service Account Firebase Admin SDK (Wajib untuk koneksi server VPS → Firestore)**:
 > 1. Buka Firebase Console → **Project Settings (ikon roda gigi) → Service accounts → Generate new private key**.
-> 2. Simpan file JSON di luar repo, pada lokasi yang sesuai dengan `FIREBASE_SERVICE_ACCOUNT_PATH` (saat ini `C:\AMS\Secrets\ams-integrated-staging-firebase-adminsdk-fbsvc-9d434aa089.json`).
+> 2. Simpan file JSON di luar repo, pada lokasi yang sesuai dengan `FIREBASE_SERVICE_ACCOUNT_PATH`.
 > 3. Server Express menggunakan Firestore database `(default)`. Nilai `FIRESTORE_DATABASE_ID`, `FIREBASE_FIRESTORE_DATABASE_ID`, `FIRESTORE_EXPECTED_DATABASE_ID`, dan `VITE_FIRESTORE_DATABASE_ID` harus sama; jangan memakai ID database lain sebelum diverifikasi di proyek staging.
+
+### Preview lokal pada Firebase Staging
+
+Preview lokal yang diperiksa saat ini masih memakai proyek bawaan `sixth-cedar-f5v9p`; VPS memakai `ams-integrated-staging`. Untuk menyamakan target, salin template lokal dan isi konfigurasi Web App dari proyek `ams-integrated-staging`:
+
+```powershell
+Copy-Item .env.local.example .env.local
+```
+
+Pastikan kedua mode bernilai `staging`, lalu isi path Service Account staging pada `.env.local`. Template memakai `AMS_DATA_DIR=.\data-local` agar data server lokal tetap terpisah dari `C:\AMS\Data`. Jangan menyalin Service Account JSON ke repositori atau chat. Setelah menjalankan `npm run dev`, verifikasi `/api/health` menunjukkan `deploymentEnv=staging` dan `firebaseProjectId=ams-integrated-staging`.
+
+### Peralihan saat rilis penuh ke Firebase Production
+
+Rilis penuh wajib menggunakan proyek **`ams-integrated-system`** dengan akun operator **`ptams.erp@gmail.com`**. Template tersedia di `.env.production.example`. Sebelum cutover:
+
+1. Berikan `ptams.erp@gmail.com` izin yang sesuai pada proyek production dan daftarkan domain di Firebase Authentication.
+2. Isi konfigurasi Web App production dari Firebase Console. Verifikasi Firestore Database ID di proyek production; samakan semua variabel `*_FIRESTORE_DATABASE_ID` dan jangan mengasumsikan `(default)`.
+3. Buat Service Account baru dari proyek `ams-integrated-system`, simpan file JSON di luar repo, dan pastikan `project_id`-nya cocok.
+4. Backup dan migrasikan data Firestore yang diperlukan dari staging, lalu siapkan Authentication, Storage, rules, indexes, serta konfigurasi Firebase lain yang dipakai. **Mengganti environment tidak memindahkan data.**
+5. Setelah migrasi diverifikasi, siapkan `.env.production` di VPS dan deploy dengan `-DeploymentEnv production -EnvFileName .env.production`. Skrip menolak proyek, database, atau Service Account yang tidak sesuai target.
+
+Jangan cutover hanya dengan mengganti `DEPLOYMENT_ENV`: aplikasi akan tersambung ke proyek production, tetapi data staging tidak otomatis tersalin dan izin akun Google tidak otomatis diberikan.
 
 > **Tip Membuat `SESSION_SECRET` Acak di PowerShell**:
 > ```powershell
@@ -163,13 +188,15 @@ Set-Location C:\Apps\AMS
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Apps\AMS\deploy.ps1 `
   -AppDir "C:\Apps\AMS" `
   -Domain "ams.bejodigitalprint.com" `
-  -Port 3100
+  -Port 3100 `
+  -DeploymentEnv staging `
+  -EnvFileName .env.staging
 if ($LASTEXITCODE -ne 0) {
   throw "Deploy AMS gagal. Jangan menghentikan atau mengubah service aplikasi lain."
 }
 ```
 
-Skrip `C:\Apps\AMS\deploy.ps1` mengambil `origin/main` dengan fast-forward-only, menjalankan `npm ci`, lint, tes, dan `build:staging`, lalu memperbarui `AMS_AppService` dan health-check `127.0.0.1:3100`. Jika snapshot `public/website-published.json` berubah lokal, skrip membackupnya ke `C:\AMS\Backups`, menormalkan file sementara untuk pull, lalu memulihkan snapshot walaupun pull gagal. Perubahan tracked lainnya menghentikan proses dengan aman. Jika build gagal, skrip mencoba menjalankan kembali service AMS yang sebelumnya aktif.
+Skrip `C:\Apps\AMS\deploy.ps1` mengambil `origin/main` dengan fast-forward-only, memvalidasi target Firebase staging, menjalankan `npm ci`, lint, tes, dan `build:staging`, lalu memperbarui `AMS_AppService` dan health-check `127.0.0.1:3100`. Jika snapshot `public/website-published.json` berubah lokal, skrip membackupnya ke `C:\AMS\Backups`, menormalkan file sementara untuk pull, lalu memulihkan snapshot walaupun pull gagal. Perubahan tracked lainnya menghentikan proses dengan aman. Jika build gagal, skrip mencoba menjalankan kembali service AMS yang sebelumnya aktif.
 
 > **Jangan menambahkan `-ConfigureFirewall` atau `-BlockPocketBasePort` pada rilis rutin.** Port 80/443 dan Caddy dipakai bersama oleh aplikasi lain. Jangan stop/restart Caddy, jangan mengubah port 3100, dan jangan menjalankan deploy bila `C:\caddy\Caddyfile` hilang atau konfigurasi domain bersama belum diverifikasi.
 

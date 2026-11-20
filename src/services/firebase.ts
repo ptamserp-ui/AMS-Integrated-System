@@ -90,11 +90,18 @@ export const dbFirestore = createFirestoreDb();
 export const authFirebase = getAuth(app);
 
 export function getFirebaseProjectInfo() {
+  const configuredEnv = import.meta.env?.VITE_DEPLOYMENT_ENV;
+  const deploymentEnv =
+    firebaseConfig.projectId === defaultFirebaseConfig.projectId
+      ? 'default'
+      : configuredEnv === 'production'
+        ? 'production'
+        : 'staging';
   return {
     projectId: firebaseConfig.projectId,
     firestoreDatabaseId: firebaseConfig.firestoreDatabaseId,
     authDomain: firebaseConfig.authDomain,
-    deploymentEnv: firebaseConfig.projectId !== defaultFirebaseConfig.projectId ? 'staging' : 'default'
+    deploymentEnv
   };
 }
 

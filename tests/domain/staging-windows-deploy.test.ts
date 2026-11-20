@@ -74,7 +74,6 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
       domain: 'staging.ams-med.co.id',
       deploymentEnv: 'staging',
       activeDriver: 'firebase',
-      firebaseProjectId: 'ams-staging-demo'
     });
 
     expect(guides.isStaging).toBe(true);
@@ -85,13 +84,17 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(guides.nssmCommands.join('\n')).toContain('DEPLOYMENT_ENV=staging');
     expect(guides.envStagingTemplate).toContain('APP_URL=https://staging.ams-med.co.id');
     expect(guides.envStagingTemplate).toContain('VITE_DEPLOYMENT_ENV=staging');
+    expect(guides.envStagingTemplate).toContain('VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com');
+    expect(guides.envProductionTemplate).toContain('FIREBASE_PROJECT_ID=ams-integrated-system');
     expect(guides.powershellQuickDeploy.join('\n')).toContain('.\\deploy.ps1');
+    expect(guides.powershellQuickDeploy.join('\n')).not.toContain('-ConfigureFirewall');
     expect(fs.existsSync(path.join(process.cwd(), 'deploy.ps1'))).toBe(true);
     expect(fs.existsSync(path.join(process.cwd(), 'scripts', 'deploy-windows-vps.ps1'))).toBe(false);
     const deployScript = fs.readFileSync(path.join(process.cwd(), 'deploy.ps1'), 'utf8');
     expect(deployScript).toContain('"pull"');
     expect(deployScript).toContain('"--ff-only"');
-    expect(deployScript).toContain('"build:staging"');
+    expect(deployScript).toContain('"build:$DeploymentEnv"');
+    expect(deployScript).toContain('"ams-integrated-system"');
     expect(deployScript).toContain(':(exclude)public/website-published.json');
     expect(deployScript).toContain('"website-published-before-deploy-{0}.json"');
     expect(deployScript).toContain('"restore", "--source=HEAD", "--staged", "--worktree"');
@@ -112,6 +115,22 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(resolveNssmIndex).toBeLessThan(stopServiceIndex);
     expect(stopServiceIndex).toBeGreaterThanOrEqual(0);
     expect(stopServiceIndex).toBeLessThan(npmCiIndex);
+  });
+
+  it('membuat panduan cutover production tanpa mengubah service Caddy bersama', () => {
+    const guides = buildWindowsDeploymentGuides({
+      deploymentEnv: 'production',
+      port: 3100
+    });
+
+    expect(guides.environment).toBe('production');
+    expect(guides.isStaging).toBe(false);
+    expect(guides.caddyfile).toContain('reverse_proxy 127.0.0.1:3100');
+    expect(guides.nssmCommands.join('\n')).toContain('DEPLOYMENT_ENV=production');
+    expect(guides.nssmCommands.join('\n')).not.toContain('restart Caddy');
+    expect(guides.envProductionTemplate).toContain('FIREBASE_EXPECTED_PROJECT_ID=ams-integrated-system');
+    expect(guides.powershellQuickDeploy.join('\n')).toContain('-DeploymentEnv production');
+    expect(guides.powershellQuickDeploy.join('\n')).not.toContain('-ConfigureFirewall');
   });
 
   it('mengizinkan admin Firebase staging (cloud.ams2026@gmail.com) login tanpa menimpa email developer utama', () => {

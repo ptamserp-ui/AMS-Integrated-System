@@ -4,6 +4,7 @@ export interface WindowsDeploymentGuides {
   caddyfile: string;
   nssmCommands: string[];
   envStagingTemplate: string;
+  envProductionTemplate: string;
   powershellQuickDeploy: string[];
 }
 
@@ -11,14 +12,16 @@ export function buildWindowsDeploymentGuides(opts?: {
   domain?: string;
   deploymentEnv?: string;
   activeDriver?: 'firebase' | 'pocketbase';
-  firebaseProjectId?: string;
+  port?: number;
 }): WindowsDeploymentGuides {
   const rawEnv = (opts?.deploymentEnv || 'staging').trim().toLowerCase();
   const environment =
     rawEnv === 'staging' ? 'staging' : rawEnv === 'production' ? 'production' : 'development';
   const isStaging = environment === 'staging';
   const domain = (opts?.domain || 'ams.bejodigitalprint.com').trim();
-  const firebaseProjectId = opts?.firebaseProjectId || 'ams-integrated-staging';
+  const configuredPort = opts?.port;
+  const port = configuredPort && Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 3000;
+  const firebaseProjectId = environment === 'production' ? 'ams-integrated-system' : 'ams-integrated-staging';
 
   const caddyfile = `# Caddyfile Konfigurasi Reverse Proxy + HTTPS Otomatis (Windows Server VPS)
 # Lokasi file: C:\\caddy\\Caddyfile
@@ -28,7 +31,7 @@ ${domain} {
     encode gzip zstd
 
     # Reverse proxy utama (Express API + SPA + WebSocket /api/sync/ws)
-    reverse_proxy 127.0.0.1:3000 {
+    reverse_proxy 127.0.0.1:${port} {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-Proto {scheme}
@@ -56,73 +59,69 @@ ${domain} {
 }`;
 
   const nssmCommands = [
-    '# ===== 1. PERSIAPAN DIREKTORI & BUILD STAGING FIREBASE (PowerShell Admin) =====',
-    'New-Item -ItemType Directory -Force -Path C:\\AMS\\App, C:\\AMS\\Data, C:\\AMS\\Secrets, C:\\AMS\\Backups, C:\\AMS\\Logs, C:\\caddy\\logs | Out-Null',
+    `# ===== 1. PERSIAPAN DIREKTORI & BUILD FIREBASE ${environment.toUpperCase()} (PowerShell Admin) =====`,
+    'New-Item -ItemType Directory -Force -Path C:\\AMS\\App, C:\\AMS\\Data, C:\\AMS\\Secrets, C:\\AMS\\Backups, C:\\AMS\\Logs | Out-Null',
     'cd C:\\AMS\\App',
-    'Copy-Item .env.staging.example .env.staging -Force  # lalu isi nilai Firebase Staging Project (' + firebaseProjectId + ') & taruh key JSON di C:\\AMS\\Secrets\\firebase-service-account.json',
+    `Copy-Item .env.${environment}.example .env.${environment} -Force  # isi Firebase ${firebaseProjectId} dan Service Account yang sesuai`,
     'npm ci',
-    'npm run build:staging   # Membaca .env.staging (VITE_DEPLOYMENT_ENV=staging + VITE_FIREBASE_*) & build server.js',
+    `npm run build:${environment}`,
     '',
     '# ===== 2. PASANG NODE EXPRESS SERVICE (WAJIB 1 INSTANCE TUNGGAL) =====',
     'nssm install AMS_AppService "C:\\Program Files\\nodejs\\node.exe" "C:\\AMS\\App\\server.js"',
     'nssm set AMS_AppService AppDirectory "C:\\AMS\\App"',
-    'nssm set AMS_AppService AppEnvironmentExtra NODE_ENV=production DEPLOYMENT_ENV=staging VITE_DEPLOYMENT_ENV=staging AMS_DB_DRIVER=firebase PORT=3000 AMS_DATA_DIR=C:\\AMS\\Data "FIRESTORE_DATABASE_ID=(default)" "FIREBASE_FIRESTORE_DATABASE_ID=(default)" "FIRESTORE_EXPECTED_DATABASE_ID=(default)" FIREBASE_SERVICE_ACCOUNT_PATH=C:\\AMS\\Secrets\\firebase-service-account.json',
+    `nssm set AMS_AppService AppEnvironmentExtra NODE_ENV=production DEPLOYMENT_ENV=${environment} VITE_DEPLOYMENT_ENV=${environment} AMS_DB_DRIVER=firebase PORT=${port} AMS_DATA_DIR=C:\\AMS\\Data FIREBASE_PROJECT_ID=${firebaseProjectId} FIREBASE_EXPECTED_PROJECT_ID=${firebaseProjectId} FIREBASE_SERVICE_ACCOUNT_PATH=C:\\AMS\\Secrets\\${firebaseProjectId}-service-account.json`,
     'nssm set AMS_AppService AppStdout "C:\\AMS\\Logs\\service_output.log"',
     'nssm set AMS_AppService AppStderr "C:\\AMS\\Logs\\service_error.log"',
     'nssm set AMS_AppService Start SERVICE_AUTO_START',
     'nssm restart AMS_AppService',
     '',
-    '# ===== 3. PASANG CADDY WEB SERVER (PORT 80/443 HTTPS + WEBSOCKET) =====',
-    'nssm install CaddyWebServer "C:\\caddy\\caddy.exe" "run --config C:\\caddy\\Caddyfile"',
-    'nssm set CaddyWebServer AppDirectory "C:\\caddy"',
-    'nssm set CaddyWebServer AppStdout "C:\\caddy\\logs\\caddy_stdout.log"',
-    'nssm set CaddyWebServer AppStderr "C:\\caddy\\logs\\caddy_stderr.log"',
-    'nssm restart CaddyWebServer',
+    '# Caddy is shared; do not install, stop, or restart its service for an AMS deploy.',
     '',
-    '# ===== 4. VERIFIKASI ENDPOINT STAGING =====',
-    'Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/health"',
-    'Invoke-RestMethod -Uri "http://127.0.0.1:3000/api/system/db-config"'
+    `# ===== 4. VERIFIKASI ENDPOINT FIREBASE ${environment.toUpperCase()} =====`,
+    `Invoke-RestMethod -Uri "http://127.0.0.1:${port}/api/health"`,
+    `Invoke-RestMethod -Uri "http://127.0.0.1:${port}/api/system/db-config"`
   ];
 
-  const envStagingTemplate = `# Simpan sebagai C:\\AMS\\App\\.env.staging (JANGAN di-commit ke Git)
+  const buildEnvTemplate = (target: 'staging' | 'production', projectId: string, databaseId: string) => `# Simpan sebagai C:\\AMS\\App\\.env.${target} (JANGAN di-commit ke Git)
 NODE_ENV=production
-PORT=3000
+PORT=${port}
 APP_URL=https://${domain}
-DEPLOYMENT_ENV=staging
-VITE_DEPLOYMENT_ENV=staging
+DEPLOYMENT_ENV=${target}
+VITE_DEPLOYMENT_ENV=${target}
 AMS_DB_DRIVER=firebase
 AMS_DATA_DIR=C:\\AMS\\Data
 
-# Firebase Staging Web App Config (Project terpisah dari production/AI Studio)
-VITE_FIREBASE_API_KEY=GANTI_DENGAN_API_KEY_STAGING
-VITE_FIREBASE_AUTH_DOMAIN=GANTI_PROJECT_STAGING.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=GANTI_PROJECT_STAGING
-VITE_FIREBASE_STORAGE_BUCKET=GANTI_PROJECT_STAGING.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=GANTI_SENDER_ID_STAGING
-VITE_FIREBASE_APP_ID=1:GANTI:web:STAGING
-VITE_FIRESTORE_DATABASE_ID=(default)
-VITE_FIREBASE_ADMIN_EMAIL=cloud.ams2026@gmail.com
+# Firebase Web App Config (ambil nilai Web App dari Firebase Console)
+VITE_FIREBASE_API_KEY=GANTI_DARI_FIREBASE_CONSOLE
+VITE_FIREBASE_AUTH_DOMAIN=GANTI_DARI_FIREBASE_CONSOLE
+VITE_FIREBASE_PROJECT_ID=${projectId}
+VITE_FIREBASE_EXPECTED_PROJECT_ID=${projectId}
+VITE_FIREBASE_STORAGE_BUCKET=GANTI_DARI_FIREBASE_CONSOLE
+VITE_FIREBASE_MESSAGING_SENDER_ID=GANTI_DARI_FIREBASE_CONSOLE
+VITE_FIREBASE_APP_ID=GANTI_DARI_FIREBASE_CONSOLE
+VITE_FIRESTORE_DATABASE_ID=${databaseId}
+VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com
 
 # Firebase Admin SDK Server-to-Server (simpan JSON di C:\\AMS\\Secrets)
-FIRESTORE_DATABASE_ID=(default)
-FIREBASE_FIRESTORE_DATABASE_ID=(default)
-FIRESTORE_EXPECTED_DATABASE_ID=(default)
-FIREBASE_SERVICE_ACCOUNT_PATH=C:\\AMS\\Secrets\\firebase-service-account.json
+FIREBASE_PROJECT_ID=${projectId}
+FIREBASE_EXPECTED_PROJECT_ID=${projectId}
+FIRESTORE_DATABASE_ID=${databaseId}
+FIREBASE_FIRESTORE_DATABASE_ID=${databaseId}
+FIRESTORE_EXPECTED_DATABASE_ID=${databaseId}
+FIREBASE_SERVICE_ACCOUNT_PATH=C:\\AMS\\Secrets\\${projectId}-service-account.json
 
 # Rahasia Server (Buat minimal 48 karakter acak di PowerShell)
 SESSION_SECRET=GANTI_DENGAN_RANDOM_HEX_64_KARAKTER
 INITIAL_SETUP_TOKEN=GANTI_TOKEN_SETUP_AWAL_STAGING
-BOOTSTRAP_DEV_EMAIL=cloud.ams2026@gmail.com
-FIREBASE_ADMIN_EMAILS=cloud.ams2026@gmail.com,antraderyll@gmail.com`;
+BOOTSTRAP_DEV_EMAIL=ptams.erp@gmail.com
+FIREBASE_ADMIN_EMAILS=ptams.erp@gmail.com,antraderyll@gmail.com`;
+  const envStagingTemplate = buildEnvTemplate('staging', 'ams-integrated-staging', '(default)');
+  const envProductionTemplate = buildEnvTemplate('production', 'ams-integrated-system', 'GANTI_DATABASE_ID_PRODUCTION');
 
   const powershellQuickDeploy = [
-    '# Jalankan di PowerShell Administrator pada Windows Server VPS:',
+    `# Jalankan di PowerShell Administrator pada Windows Server VPS untuk mode ${environment}:`,
     'cd C:\\AMS\\App',
-    'powershell -ExecutionPolicy Bypass -File .\\deploy.ps1 -Domain "' + domain + '" -ConfigureFirewall',
-    '',
-    '# Verifikasi rules Firebase Staging sebelum membuka login Google:',
-    'npx eslint firestore.rules',
-    'npx firebase deploy --only firestore:rules --project <FIREBASE_STAGING_PROJECT_ID>'
+    `powershell -ExecutionPolicy Bypass -File .\\deploy.ps1 -Domain "${domain}" -Port ${port} -DeploymentEnv ${environment} -EnvFileName .env.${environment}`
   ];
 
   return {
@@ -131,6 +130,7 @@ FIREBASE_ADMIN_EMAILS=cloud.ams2026@gmail.com,antraderyll@gmail.com`;
     caddyfile,
     nssmCommands,
     envStagingTemplate,
+    envProductionTemplate,
     powershellQuickDeploy
   };
 }

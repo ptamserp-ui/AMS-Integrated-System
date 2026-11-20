@@ -16,6 +16,7 @@ const stagingEnv = {
   VITE_FIREBASE_API_KEY: 'staging-api-key',
   VITE_FIREBASE_AUTH_DOMAIN: 'staging.firebaseapp.com',
   VITE_FIREBASE_PROJECT_ID: 'staging-project',
+  VITE_FIREBASE_EXPECTED_PROJECT_ID: 'staging-project',
   VITE_FIREBASE_STORAGE_BUCKET: 'staging.appspot.com',
   VITE_FIREBASE_MESSAGING_SENDER_ID: '456',
   VITE_FIREBASE_APP_ID: 'staging-app',
@@ -42,6 +43,33 @@ describe('resolveFirebaseClientConfig', () => {
         productionConfig
       )
     ).toThrow('VITE_FIREBASE_PROJECT_ID');
+    expect(() =>
+      resolveFirebaseClientConfig(
+        { ...stagingEnv, VITE_FIREBASE_API_KEY: 'GANTI_API_KEY_FIREBASE_STAGING' },
+        productionConfig
+      )
+    ).toThrow('VITE_FIREBASE_API_KEY');
+  });
+
+  it('uses the configured production project and rejects a project mismatch', () => {
+    const productionEnv = {
+      ...stagingEnv,
+      VITE_DEPLOYMENT_ENV: 'production',
+      VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+      VITE_FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+      VITE_FIREBASE_AUTH_DOMAIN: 'ams-integrated-system.firebaseapp.com'
+    };
+
+    expect(resolveFirebaseClientConfig(productionEnv, productionConfig)).toMatchObject({
+      projectId: 'ams-integrated-system',
+      firestoreDatabaseId: '(default)'
+    });
+    expect(() =>
+      resolveFirebaseClientConfig(
+        { ...productionEnv, VITE_FIREBASE_PROJECT_ID: 'ams-integrated-staging' },
+        productionConfig
+      )
+    ).toThrow('tidak sesuai target');
   });
 
   it('preserves the bundled Firebase project outside staging', () => {
@@ -52,6 +80,34 @@ describe('resolveFirebaseClientConfig', () => {
     expect(
       resolveFirebaseClientConfig(stagingEnv, productionConfig, {
         hostname: 'ais-dev-5wlp3yc5jxvcxnp4msjgv6-571456223791.asia-east1.run.app'
+      })
+    ).toBe(productionConfig);
+  });
+
+  it('does not use production Firebase config in an AI Studio preview by default', () => {
+    const productionEnv = {
+      ...stagingEnv,
+      VITE_DEPLOYMENT_ENV: 'production',
+      VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+      VITE_FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system'
+    };
+    expect(
+      resolveFirebaseClientConfig(productionEnv, productionConfig, {
+        hostname: 'ais-dev-5wlp3yc5jxvcxnp4msjgv6-571456223791.asia-east1.run.app'
+      })
+    ).toBe(productionConfig);
+  });
+
+  it('does not use production Firebase config on localhost', () => {
+    const productionEnv = {
+      ...stagingEnv,
+      VITE_DEPLOYMENT_ENV: 'production',
+      VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+      VITE_FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system'
+    };
+    expect(
+      resolveFirebaseClientConfig(productionEnv, productionConfig, {
+        hostname: 'localhost'
       })
     ).toBe(productionConfig);
   });

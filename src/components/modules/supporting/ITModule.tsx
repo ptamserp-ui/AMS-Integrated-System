@@ -157,6 +157,7 @@ export default function ITModule({
     caddyfile: string;
     nssmCommands: string[];
     envStagingTemplate?: string;
+    envProductionTemplate?: string;
     powershellQuickDeploy?: string[];
   }>({
     environment: 'staging',
@@ -166,7 +167,7 @@ export default function ITModule({
 ams.bejodigitalprint.com {
     encode gzip zstd
 
-    reverse_proxy 127.0.0.1:3000 {
+    reverse_proxy 127.0.0.1:3100 {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-Proto {scheme}
@@ -202,21 +203,37 @@ ams.bejodigitalprint.com {
       'nssm set AMS_AppService AppStderr "C:\\AMS\\Logs\\service_error.log"',
       'nssm start AMS_AppService',
       '',
-      '# 3. Pasang Caddy Web Server sebagai Service (HTTPS + WebSocket /api/sync/ws)',
-      'nssm install CaddyWebServer "C:\\caddy\\caddy.exe" "run --config C:\\caddy\\Caddyfile"',
-      'nssm start CaddyWebServer'
+      '# Caddy dipakai bersama; jangan pasang, hentikan, atau restart untuk deploy AMS.'
     ],
+    envProductionTemplate: `# Gunakan hanya setelah migrasi data dan verifikasi proyek production
+DEPLOYMENT_ENV=production
+VITE_DEPLOYMENT_ENV=production
+FIREBASE_PROJECT_ID=ams-integrated-system
+FIREBASE_EXPECTED_PROJECT_ID=ams-integrated-system
+VITE_FIREBASE_PROJECT_ID=ams-integrated-system
+VITE_FIREBASE_EXPECTED_PROJECT_ID=ams-integrated-system
+FIRESTORE_DATABASE_ID=GANTI_DATABASE_ID_PRODUCTION
+FIREBASE_FIRESTORE_DATABASE_ID=GANTI_DATABASE_ID_PRODUCTION
+FIRESTORE_EXPECTED_DATABASE_ID=GANTI_DATABASE_ID_PRODUCTION
+VITE_FIRESTORE_DATABASE_ID=GANTI_DATABASE_ID_PRODUCTION
+VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com
+FIREBASE_ADMIN_EMAILS=ptams.erp@gmail.com,antraderyll@gmail.com`,
     envStagingTemplate: `# Simpan sebagai C:\\AMS\\App\\.env.staging
 NODE_ENV=production
-PORT=3000
+PORT=3100
 APP_URL=https://ams.bejodigitalprint.com
 DEPLOYMENT_ENV=staging
 VITE_DEPLOYMENT_ENV=staging
 AMS_DB_DRIVER=firebase
-AMS_DATA_DIR=C:\\AMS\\Data`,
+AMS_DATA_DIR=C:\\AMS\\Data
+VITE_FIREBASE_PROJECT_ID=ams-integrated-staging
+VITE_FIREBASE_EXPECTED_PROJECT_ID=ams-integrated-staging
+FIREBASE_PROJECT_ID=ams-integrated-staging
+FIREBASE_EXPECTED_PROJECT_ID=ams-integrated-staging
+VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com`,
     powershellQuickDeploy: [
       'cd C:\\AMS\\App',
-      'powershell -ExecutionPolicy Bypass -File .\\deploy.ps1 -Domain "ams.bejodigitalprint.com" -ConfigureFirewall'
+      'powershell -ExecutionPolicy Bypass -File .\\deploy.ps1 -Domain "ams.bejodigitalprint.com" -Port 3100 -DeploymentEnv staging -EnvFileName .env.staging'
     ]
   });
 
@@ -1346,23 +1363,27 @@ AMS_DATA_DIR=C:\\AMS\\Data`,
         </div>
       )}
 
-      {/* Tab 3: Caddy + NSSM + Firebase Staging Deployment */}
+      {/* Tab 3: Firebase Staging & Production Deployment */}
       {activeTab === 'deployment' && (
         <div className="space-y-6">
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-xs text-blue-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="font-bold text-blue-900 flex items-center gap-2">
                 <Cloud className="w-4 h-4 text-blue-600" />
-                <span>Blueprint Deployment Firebase Staging — Windows Server VPS</span>
+                <span>Blueprint Firebase Staging & Production — Windows Server VPS</span>
                 <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-2xs font-bold border border-blue-200">
-                  {dbConfigData?.isStaging ? 'Staging Aktif' : 'Siap Staging'}
+                  {dbConfigData?.deploymentEnv === 'production'
+                    ? 'Production Aktif'
+                    : dbConfigData?.isStaging
+                      ? 'Staging Aktif'
+                      : 'Siap Staging'}
                 </span>
               </div>
               <p className="text-blue-800 leading-relaxed">
-                Gunakan proyek Firebase Staging terpisah lewat <code>.env.staging</code> dan bangun aplikasi dengan{' '}
-                <code>npm run build:staging</code>. Pastikan hostname domain VPS didaftarkan ke{' '}
-                <strong>Firebase Authentication → Authorized domains</strong> dan aturan <code>firestore.rules</code>{' '}
-                sudah diterbitkan ke proyek staging.
+                Gunakan <code>ams-integrated-staging</code> selama pengembangan. Saat rilis penuh, pilih mode{' '}
+                <code>production</code> untuk beralih ke <code>ams-integrated-system</code>. Proyek, database ID,
+                dan Service Account harus cocok; migrasi data harus selesai dan diverifikasi sebelum cutover.
+                Pastikan hostname didaftarkan ke <strong>Firebase Authentication → Authorized domains</strong>.
               </p>
             </div>
           </div>
@@ -1388,6 +1409,36 @@ AMS_DATA_DIR=C:\\AMS\\Data`,
               </div>
               <pre className="p-4 bg-slate-950 rounded-xl text-slate-300 font-mono text-xs overflow-x-auto leading-relaxed border border-slate-800">
                 {deploymentConfig.envStagingTemplate}
+              </pre>
+            </div>
+          )}
+
+          {deploymentConfig.envProductionTemplate && (
+            <div className="bg-amber-950 rounded-2xl p-5 text-white shadow-xs space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-300" />
+                  <h4 className="font-bold text-xs text-white">
+                    Konfigurasi rilis penuh (.env.production)
+                  </h4>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(deploymentConfig.envProductionTemplate || '', 'production-env')}
+                  className="px-3 py-1 bg-amber-900 hover:bg-amber-800 text-amber-100 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {copiedSection === 'production-env'
+                    ? <Check className="w-3.5 h-3.5 text-emerald-300" />
+                    : <Copy className="w-3.5 h-3.5" />}
+                  {copiedSection === 'production-env' ? 'Tersalin' : 'Salin .env.production'}
+                </button>
+              </div>
+              <p className="text-xs text-amber-100">
+                Template ini bukan perintah cutover. Isi Web App config, Database ID, dan Service Account dari
+                proyek production; lakukan backup serta migrasi data terlebih dahulu.
+              </p>
+              <pre className="p-4 bg-slate-950 rounded-xl text-slate-300 font-mono text-xs overflow-x-auto leading-relaxed border border-amber-900">
+                {deploymentConfig.envProductionTemplate}
               </pre>
             </div>
           )}

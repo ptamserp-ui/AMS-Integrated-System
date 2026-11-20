@@ -70,6 +70,7 @@ function readFirebaseClientConfig(): FirebaseClientConfig | null {
         VITE_FIREBASE_API_KEY: process.env.VITE_FIREBASE_API_KEY,
         VITE_FIREBASE_AUTH_DOMAIN: process.env.VITE_FIREBASE_AUTH_DOMAIN,
         VITE_FIREBASE_PROJECT_ID: process.env.VITE_FIREBASE_PROJECT_ID,
+        VITE_FIREBASE_EXPECTED_PROJECT_ID: process.env.VITE_FIREBASE_EXPECTED_PROJECT_ID,
         VITE_FIREBASE_STORAGE_BUCKET: process.env.VITE_FIREBASE_STORAGE_BUCKET,
         VITE_FIREBASE_MESSAGING_SENDER_ID: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
         VITE_FIREBASE_APP_ID: process.env.VITE_FIREBASE_APP_ID,
@@ -1371,9 +1372,8 @@ async function startServer() {
     res.json({ ok: true, revision });
   });
 
-  // IT & DevOps Deployment Guide & Config for Caddy + NSSM Windows Server (Firebase Staging)
+  // IT & DevOps Deployment Guide & Config for Caddy + NSSM Windows Server
   app.get('/api/system/deployment-guides', requirePermission('it-traceability', 'view'), (_req, res) => {
-    const fbCfg = readFirebaseClientConfig();
     const envInfo = resolveDeploymentEnvironment();
     let domainFromEnv = '';
     try {
@@ -1389,9 +1389,9 @@ async function startServer() {
     res.json(
       buildWindowsDeploymentGuides({
         domain,
-        deploymentEnv: envInfo.isStaging ? 'staging' : 'staging',
+        deploymentEnv: envInfo.deploymentEnv === 'production' ? 'production' : 'staging',
         activeDriver: dbDriverManager.getActiveDriver(),
-        firebaseProjectId: fbCfg?.projectId
+        port: PORT
       })
     );
   });

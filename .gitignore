@@ -7,8 +7,11 @@ coverage/
 *.log
 .env*
 !.env.example
+!.env.local.example
 !.env.staging.example
+!.env.production.example
 /data/
+/data-local/
 C:*AMS*
 C:*AMS Integrated System*/
 *.qoder.site

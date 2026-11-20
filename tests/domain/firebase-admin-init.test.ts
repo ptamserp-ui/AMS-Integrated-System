@@ -224,6 +224,38 @@ describe('Firebase Admin SDK & Named Firestore Database (Windows VPS)', () => {
     expect(resolved.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
   });
 
+  it('menonaktifkan koneksi Firebase production di preview AI Studio', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-prod-preview-'));
+    tempDirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, 'firebase-applet-config.json'),
+      JSON.stringify({
+        projectId: 'sixth-cedar-f5v9p',
+        firestoreDatabaseId: DEFAULT_FIRESTORE_DATABASE_ID
+      }),
+      'utf8'
+    );
+
+    const resolved = resolveFirebaseAdminConfig({
+      rootDir: dir,
+      env: {
+        K_SERVICE: 'ais-dev-preview',
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-system',
+          client_email: 'preview@ams-integrated-system.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(resolved.credentialSource).toBe('unconfigured');
+    expect(resolved.configError).toContain('dinonaktifkan pada preview AI Studio');
+  });
+
   it('memvalidasi FIREBASE_SERVICE_ACCOUNT_JSON valid dan memuat FIRESTORE_DATABASE_ID eksplisit di VPS', () => {
     const privateKey = generateEphemeralRsaPrivateKeyPem();
     const saJson = JSON.stringify({
@@ -272,6 +304,82 @@ describe('Firebase Admin SDK & Named Firestore Database (Windows VPS)', () => {
     expect(validation.databaseIdMatchesTarget).toBe(true);
     expect(validation.warnings.some((warning) => warning.includes('berbeda dari target'))).toBe(false);
     expect(validation.readyForStableConnection).toBe(true);
+  });
+
+  it('menolak rilis production bila target proyek dan database belum ditentukan eksplisit', () => {
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-system',
+          client_email: 'vps-runner@ams-integrated-system.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(validation.readyForStableConnection).toBe(false);
+    expect(validation.errors).toContain(
+      'FIREBASE_EXPECTED_PROJECT_ID wajib diset ke ams-integrated-system untuk rilis production.'
+    );
+    expect(validation.errors).toContain(
+      'FIRESTORE_EXPECTED_DATABASE_ID wajib diset eksplisit untuk rilis production.'
+    );
+  });
+
+  it('menolak Service Account production dari proyek selain target', () => {
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+        VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_FIRESTORE_DATABASE_ID: '(default)',
+        FIRESTORE_EXPECTED_DATABASE_ID: '(default)',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-staging',
+          client_email: 'vps-runner@ams-integrated-staging.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(validation.readyForStableConnection).toBe(false);
+    expect(validation.errors.some((error) => error.includes('tidak sesuai target'))).toBe(true);
+  });
+
+  it('menerima konfigurasi production hanya saat proyek dan seluruh ID database cocok', () => {
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+        VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_FIRESTORE_DATABASE_ID: '(default)',
+        FIRESTORE_EXPECTED_DATABASE_ID: '(default)',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-system',
+          client_email: 'vps-runner@ams-integrated-system.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(validation.projectIdMatchesTarget).toBe(true);
+    expect(validation.databaseIdMatchesTarget).toBe(true);
+    expect(validation.readyForStableConnection).toBe(true);
+    expect(validation.errors).toEqual([]);
   });
 
   it('melaporkan error saat FIREBASE_SERVICE_ACCOUNT_JSON tidak valid atau hilang tanpa fallback di VPS', () => {

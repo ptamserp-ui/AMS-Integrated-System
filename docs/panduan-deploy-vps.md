@@ -21,6 +21,8 @@ Lakukan langkah ini pada komputer pengembangan, di folder repositori:
 Set-Location "<jalur-repo-lokal>\AMS Integrated System"
 git switch main
 git status --short
+Copy-Item .env.local.example .env.local
+# Isi Web App config staging sebelum menjalankan build.
 npm run lint
 npm test
 npm run build:staging
@@ -99,12 +101,15 @@ AMS_DATA_DIR="C:\\AMS\\Data"
 VITE_FIREBASE_API_KEY="<dari Firebase Web App staging>"
 VITE_FIREBASE_AUTH_DOMAIN="ams-integrated-staging.firebaseapp.com"
 VITE_FIREBASE_PROJECT_ID="ams-integrated-staging"
+VITE_FIREBASE_EXPECTED_PROJECT_ID="ams-integrated-staging"
 VITE_FIREBASE_STORAGE_BUCKET="ams-integrated-staging.firebasestorage.app"
 VITE_FIREBASE_MESSAGING_SENDER_ID="<dari Firebase Web App staging>"
 VITE_FIREBASE_APP_ID="<dari Firebase Web App staging>"
 VITE_FIRESTORE_DATABASE_ID="(default)"
-VITE_FIREBASE_ADMIN_EMAIL="cloud.ams2026@gmail.com"
+VITE_FIREBASE_ADMIN_EMAIL="ptams.erp@gmail.com,cloud.ams2026@gmail.com"
 
+FIREBASE_PROJECT_ID="ams-integrated-staging"
+FIREBASE_EXPECTED_PROJECT_ID="ams-integrated-staging"
 FIRESTORE_DATABASE_ID="(default)"
 FIREBASE_FIRESTORE_DATABASE_ID="(default)"
 FIRESTORE_EXPECTED_DATABASE_ID="(default)"
@@ -115,11 +120,11 @@ INITIAL_SETUP_TOKEN="<token acak untuk setup awal>"
 AMS_ADMIN_TOKEN=""
 BOOTSTRAP_DEV_USERNAME="dev.admin"
 BOOTSTRAP_DEV_FULLNAME="Langgo Bramandityo"
-BOOTSTRAP_DEV_EMAIL="cloud.ams2026@gmail.com"
+BOOTSTRAP_DEV_EMAIL="ptams.erp@gmail.com"
 BOOTSTRAP_DEV_ROLE_ID="Developer & IT Support"
 BOOTSTRAP_DEV_PASSWORD_HASH=""
 BOOTSTRAP_DEV_PASSWORD=""
-FIREBASE_ADMIN_EMAILS="cloud.ams2026@gmail.com,antraderyll@gmail.com"
+FIREBASE_ADMIN_EMAILS="ptams.erp@gmail.com,cloud.ams2026@gmail.com,antraderyll@gmail.com"
 
 # Opsional: terjemahan otomatis bahasa Inggris pada website publik
 DEEPL_AUTH_KEY="<DeepL API key; hanya disimpan di VPS>"
