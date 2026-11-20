@@ -1,22 +1,30 @@
 import type { KonfigurasiSitus, ProdukKatalog, ProdukWebsite, VarianSkuProduk } from '../types';
 import { DATA_DAFTAR_HARGA_AMS_V6 } from '../data/productCatalogReference';
 
-const REFERENSI_HARGA_DAFTAR_AMS_V6 = {
-  id: 'Referensi daftar harga AMS V6; harga wajib diverifikasi.',
-  en: 'AMS V6 price-list reference; price must be verified.'
-};
+const REFERENSI_HARGA_DAFTAR_AMS_V6 = 'Referensi daftar harga AMS V6; harga wajib diverifikasi.';
+
+function teksReferensiHarga(nilai: unknown, bahasa: 'id' | 'en'): string | undefined {
+  if (typeof nilai === 'string') return nilai.trim() ? nilai : undefined;
+  if (!nilai || typeof nilai !== 'object') return undefined;
+  const lama = nilai as { id?: unknown; en?: unknown };
+  const pilihan = lama[bahasa];
+  if (typeof pilihan === 'string' && pilihan.trim()) return pilihan;
+  const cadangan = bahasa === 'en' ? lama.id : lama.en;
+  return typeof cadangan === 'string' && cadangan.trim() ? cadangan : undefined;
+}
 
 function pisahkanHargaTayang(
   hargaTayang?: string,
-  referensiHarga?: { id: string; en: string }
-): { hargaTayang?: string; referensiHarga?: { id: string; en: string } } {
-  if (!hargaTayang) return { hargaTayang, referensiHarga };
+  referensiHarga?: unknown
+): { hargaTayang?: string; referensiHarga?: string } {
+  const referensi = teksReferensiHarga(referensiHarga, 'id');
+  if (!hargaTayang) return { hargaTayang, referensiHarga: referensi };
   const lama = hargaTayang.match(/^(.*?)\s+[—–-]\s*(?:referensi PDF,?\s*)?wajib verifikasi\s*$/i)
     ?? hargaTayang.match(/^(.*?)\s+[—–-]\s*verifikasi\s*$/i);
-  if (!lama) return { hargaTayang, referensiHarga };
+  if (!lama) return { hargaTayang, referensiHarga: referensi };
   return {
     hargaTayang: lama[1]?.trim(),
-    referensiHarga: referensiHarga ?? REFERENSI_HARGA_DAFTAR_AMS_V6
+    referensiHarga: referensi ?? REFERENSI_HARGA_DAFTAR_AMS_V6
   };
 }
 
@@ -227,6 +235,44 @@ export function terapkanVarianProduk(produk: ProdukWebsite, varian: VarianSkuPro
     tautanLkpp: varian.tautanLkpp || produk.tautanLkpp,
     tkdn: varian.tkdn || produk.tkdn
   };
+}
+
+export function terapkanReferensiHargaTerjemahan(
+  produk: ProdukWebsite[],
+  terjemahan: ProdukWebsite[],
+  bahasa: 'id' | 'en'
+): ProdukWebsite[] {
+  const terjemahanPerProduk = new Map(terjemahan.map((item) => [item.id, item]));
+  return produk.map((item) => {
+    const versiTerjemahan = terjemahanPerProduk.get(item.id);
+    if (!versiTerjemahan) {
+      return {
+        ...item,
+        referensiHarga: teksReferensiHarga(item.referensiHarga, bahasa),
+        varianSku: (item.varianSku ?? []).map((varian) => ({
+          ...varian,
+          referensiHarga: teksReferensiHarga(varian.referensiHarga, bahasa)
+        }))
+      };
+    }
+    const referensiPerSku = new Map(
+      (versiTerjemahan.varianSku ?? []).map((varian) => [
+        varian.id,
+        teksReferensiHarga(varian.referensiHarga, bahasa)
+      ])
+    );
+    return {
+      ...item,
+      referensiHarga:
+        teksReferensiHarga(versiTerjemahan.referensiHarga, bahasa) ??
+        teksReferensiHarga(item.referensiHarga, bahasa),
+      varianSku: (item.varianSku ?? []).map((varian) => ({
+        ...varian,
+        referensiHarga:
+          referensiPerSku.get(varian.id) ?? teksReferensiHarga(varian.referensiHarga, bahasa)
+      }))
+    };
+  });
 }
 
 /** Sales tools select individual SKU rows, while the public website presents product families. */

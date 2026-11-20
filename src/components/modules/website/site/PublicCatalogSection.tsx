@@ -36,7 +36,7 @@ import {
   selesaikanGambar,
   slugifyWebsite
 } from '../../../../utils/website';
-import { terapkanVarianProduk } from '../../../../utils/productCatalog';
+import { terapkanReferensiHargaTerjemahan, terapkanVarianProduk } from '../../../../utils/productCatalog';
 import { IDENTITAS_RUJUKAN } from '../../../../data/websiteRujukan';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
@@ -50,7 +50,7 @@ export interface ItemRfqPublik {
   satuan: string;
   jumlah: number;
   hargaTayang?: string;
-  referensiHarga?: { id: string; en: string };
+  referensiHarga?: string;
   kodeSKU?: string;
   varianId?: string;
 }
@@ -123,7 +123,11 @@ function ikonKategoriAlkes(kategori: string) {
  * Perkaya daftar produk situs secara real-time dengan status stok gudang FEFO, recall, izin edar,
  * serta skema/kontrak harga terkini dari modul operasional, tanpa mengabaikan visibilitas CMS Website.
  */
-function useProdukKatalogPublik(cfg: KonfigurasiSitus, cfgAsli: KonfigurasiSitus): ProdukWebsite[] {
+function useProdukKatalogPublik(
+  cfg: KonfigurasiSitus,
+  cfgAsli: KonfigurasiSitus,
+  bahasa: 'id' | 'en'
+): ProdukWebsite[] {
   const [versiData, setVersiData] = useState(0);
 
   useEffect(() => {
@@ -135,8 +139,9 @@ function useProdukKatalogPublik(cfg: KonfigurasiSitus, cfgAsli: KonfigurasiSitus
   return useMemo(() => {
     void versiData;
     const terselaraskan = selaraskanKontenOperasional(cfgAsli, db.getSumberOperasionalWebsite());
-    return terselaraskan.produk.item.filter((produk) => produk.isActive);
-  }, [cfg, cfgAsli, versiData]);
+    return terapkanReferensiHargaTerjemahan(terselaraskan.produk.item, cfg.produk.item, bahasa)
+      .filter((produk) => produk.isActive);
+  }, [cfg, cfgAsli, bahasa, versiData]);
 }
 
 function cariLogoMerek(cfg: KonfigurasiSitus, produsen: string): string | undefined {
@@ -240,7 +245,7 @@ export function SeksiProdukPublik({
 }: PropsKatalogProduk) {
   const bahasa = useWebsiteLanguage();
   const t = (text: string) => translateWebsiteUi(text, bahasa);
-  const semua = useProdukKatalogPublik(cfg, cfgAsli);
+  const semua = useProdukKatalogPublik(cfg, cfgAsli, bahasa);
   const modeRingkas = typeof batasProduk === 'number';
 
   const kategoriTersedia = useMemo(() => {
@@ -755,7 +760,7 @@ export function SeksiProdukPublik({
                             </div>
                             <div>
                               <p className="text-2xs text-slate-500">{t('Referensi')}</p>
-                              <p className="text-slate-700">{p.referensiHarga?.[bahasa] || t('Hubungi tim penjualan untuk konfirmasi')}</p>
+                              <p className="text-slate-700">{p.referensiHarga || t('Hubungi tim penjualan untuk konfirmasi')}</p>
                             </div>
                           </div>
                         </td>
@@ -884,7 +889,7 @@ export function SeksiProdukPublik({
                         </div>
                         <div>
                           <dt className="text-2xs">{t('Referensi')}</dt>
-                          <dd className="text-slate-700">{p.referensiHarga?.[bahasa] || t('Hubungi tim penjualan untuk konfirmasi')}</dd>
+                          <dd className="text-slate-700">{p.referensiHarga || t('Hubungi tim penjualan untuk konfirmasi')}</dd>
                         </div>
                       </div>
                     </dl>
@@ -1274,7 +1279,7 @@ function ModalDetailProduk({
                 <div>
                   <p className="text-2xs font-semibold text-slate-600">{t('Referensi')}</p>
                   <p className="text-xs font-medium text-slate-700">
-                    {produkTerpilih.referensiHarga?.[bahasa] || t('Hubungi tim penjualan untuk konfirmasi')}
+                    {produkTerpilih.referensiHarga || t('Hubungi tim penjualan untuk konfirmasi')}
                   </p>
                 </div>
               </div>

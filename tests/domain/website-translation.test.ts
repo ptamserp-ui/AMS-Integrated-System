@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -67,7 +68,8 @@ describe('WebsiteTranslationService', () => {
             tipeModel: 'RX-500',
             nomorIzinEdar: 'KEMENKES RI AKL 12345678901',
             statusIzinEdar: 'Aktif',
-            spesifikasi: 'Perangkat untuk pemeriksaan laboratorium'
+            spesifikasi: 'Perangkat untuk pemeriksaan laboratorium',
+            varianSku: [{ id: 'sku-1', referensiHarga: 'Daftar harga AMS V6; wajib diverifikasi' }]
           }
         ]
       }
@@ -93,7 +95,8 @@ describe('WebsiteTranslationService', () => {
           tipeModel: 'RX-500',
           nomorIzinEdar: 'KEMENKES RI AKL 12345678901',
           statusIzinEdar: 'Aktif',
-          spesifikasi: 'EN: Perangkat untuk pemeriksaan laboratorium'
+          spesifikasi: 'EN: Perangkat untuk pemeriksaan laboratorium',
+          varianSku: [{ id: 'sku-1', referensiHarga: 'EN: Daftar harga AMS V6; wajib diverifikasi' }]
         }
       ]
     });
@@ -104,6 +107,37 @@ describe('WebsiteTranslationService', () => {
     });
     await expect(fs.readFile(path.join(temporaryDirectories[0], 'website-translation-en.json'), 'utf8'))
       .resolves.not.toContain('test-key');
+  });
+
+  it('rebuilds older translation cache entries after catalog references become translatable', async () => {
+    process.env.DEEPL_AUTH_KEY = 'test-key';
+    const fetchMock = mockDeepL();
+    const service = await createService();
+    const source = {
+      produk: {
+        item: [{ varianSku: [{ id: 'sku-1', referensiHarga: 'Daftar harga AMS V6; wajib diverifikasi' }] }]
+      }
+    };
+    const legacyHash = createHash('sha256').update(JSON.stringify(source)).digest('hex');
+    await fs.writeFile(
+      path.join(temporaryDirectories[0]!, 'website-translation-en.json'),
+      JSON.stringify({
+        sourceHash: legacyHash,
+        targetLanguage: 'EN-US',
+        config: {
+          produk: {
+            item: [{ varianSku: [{ id: 'sku-1', referensiHarga: 'Daftar harga AMS V6; wajib diverifikasi' }] }]
+          }
+        }
+      })
+    );
+
+    const result = await service.translate(source);
+
+    expect(result.config.produk).toMatchObject({
+      item: [{ varianSku: [{ referensiHarga: 'EN: Daftar harga AMS V6; wajib diverifikasi' }] }]
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('returns a clear configuration error without calling DeepL when the server key is missing', async () => {

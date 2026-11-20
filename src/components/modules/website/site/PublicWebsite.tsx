@@ -256,8 +256,7 @@ export default function PublicWebsite({
         const satuanBaru = terkini.satuan || item.satuan;
         if (
           item.hargaTayang === hargaBaru &&
-          item.referensiHarga?.id === referensiBaru?.id &&
-          item.referensiHarga?.en === referensiBaru?.en &&
+          item.referensiHarga === referensiBaru &&
           item.satuan === satuanBaru
         ) return item;
         berubah = true;

@@ -1721,7 +1721,7 @@ export interface VarianSkuProduk {
   produsen?: string;
   negaraAsal?: string;
   hargaTayang?: string;
-  referensiHarga?: { id: string; en: string };
+  referensiHarga?: string;
   satuan?: string;
   zonaSuhu?: string;
   imageUrl?: string;
@@ -1750,7 +1750,7 @@ export interface ProdukWebsite extends ItemWebsite {
   satuan?: string;
   zonaSuhu?: string;
   hargaTayang?: string;
-  referensiHarga?: { id: string; en: string };
+  referensiHarga?: string;
   imageUrl?: string;
   imageUrls?: string[];
   badge?: string;

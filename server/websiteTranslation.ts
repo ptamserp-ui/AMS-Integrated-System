@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 const CACHE_FILE = 'website-translation-en.json';
+const TRANSLATION_CACHE_VERSION = 2;
 const MAX_REQUEST_BYTES = 128 * 1024;
 const MAX_TEXTS_PER_REQUEST = 50;
 const TRANSLATABLE_FIELDS = new Set([
@@ -31,6 +32,7 @@ const TRANSLATABLE_FIELDS = new Set([
   'poinJual',
   'pertanyaan',
   'ringkasan',
+  'referensiHarga',
   'spesifikasi',
   'tahap',
   'subjudul',
@@ -171,7 +173,10 @@ export class WebsiteTranslationService {
 
   async translate(config: Record<string, unknown>): Promise<CacheEntry> {
     const serialized = JSON.stringify(config);
-    const sourceHash = createHash('sha256').update(serialized).digest('hex');
+    const sourceHash = createHash('sha256')
+      .update(`website-translation-v${TRANSLATION_CACHE_VERSION}\0`)
+      .update(serialized)
+      .digest('hex');
     const cached = await this.readCache();
     if (cached?.sourceHash === sourceHash && cached.targetLanguage === 'EN-US') return cached;
 

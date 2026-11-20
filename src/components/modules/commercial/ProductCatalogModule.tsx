@@ -5,7 +5,7 @@ import { db } from '../../../services/pocketbase';
 import { useDbTick } from '../../../hooks/useDbSync';
 import { punyaIzin, type SesiLogin } from '../../../utils/autentikasi';
 import { normalisasiProdukKatalog } from '../../../utils/productCatalog';
-import { bangunProduk } from '../../../utils/website';
+import { bangunProduk, selesaikanGambar } from '../../../utils/website';
 import { DATA_DAFTAR_HARGA_AMS_V6, SUMBER_DAFTAR_HARGA_AMS } from '../../../data/productCatalogReference';
 import { MedanGambarBanyak } from '../website/editor/medanEditor';
 
@@ -232,16 +232,26 @@ export default function ProductCatalogModule({
             <p className="text-2xs text-slate-500">{daftar.length} produk · {daftar.reduce((n, produk) => n + produk.varianSku.length, 0)} SKU</p>
           </div>
           <div className="max-h-[70vh] overflow-y-auto divide-y divide-slate-100">
-            {produkTampil.map((produk) => (
-              <button key={produk.id} type="button" onClick={() => { setPilihanId(produk.id); setPesan(''); }}
-                className={`w-full px-4 py-3 text-left hover:bg-slate-50 ${pilihanId === produk.id ? 'bg-blue-50' : ''}`}>
-                <span className="block truncate text-xs font-bold text-slate-900">{produk.nama || '(tanpa nama)'}</span>
-                <span className="mt-1 block truncate text-2xs text-slate-500">{produk.produsen || 'Produsen belum diisi'} · {produk.varianSku.length} SKU</span>
-                <span className="mt-1 flex flex-wrap gap-1">
-                  {produk.peruntukan.map((item) => <span key={item} className="rounded bg-slate-100 px-1.5 py-0.5 text-2xs text-slate-600">{item}</span>)}
-                </span>
-              </button>
-            ))}
+            {produkTampil.map((produk) => {
+              const fotoUtama = selesaikanGambar(produk.imageUrls?.[0] ?? produk.imageUrl);
+              return (
+                <button key={produk.id} type="button" onClick={() => { setPilihanId(produk.id); setPesan(''); }}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 ${pilihanId === produk.id ? 'bg-blue-50' : ''}`}>
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    {fotoUtama
+                      ? <img src={fotoUtama} alt="" loading="lazy" className="h-full w-full object-cover" />
+                      : <Tag className="h-5 w-5 text-slate-300" />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-bold text-slate-900">{produk.nama || '(tanpa nama)'}</span>
+                    <span className="mt-1 block truncate text-2xs text-slate-500">{produk.produsen || 'Produsen belum diisi'} · {produk.varianSku.length} SKU</span>
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {produk.peruntukan.map((item) => <span key={item} className="rounded bg-slate-100 px-1.5 py-0.5 text-2xs text-slate-600">{item}</span>)}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
             {produkTampil.length === 0 && <p className="p-5 text-center text-xs text-slate-500">Produk tidak ditemukan.</p>}
           </div>
         </section>
@@ -355,6 +365,7 @@ export default function ProductCatalogModule({
                         ['nomorIzinEdar', 'Nomor izin edar'],
                         ['statusIzinEdar', 'Status izin edar'],
                         ['hargaTayang', 'Harga tayang'],
+                        ['referensiHarga', 'Referensi'],
                         ['produsen', 'Produsen (opsional)'],
                         ['negaraAsal', 'Negara asal (opsional)'],
                         ['satuan', 'Satuan'],
@@ -369,26 +380,6 @@ export default function ProductCatalogModule({
                             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs" />
                         </label>
                       ))}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="text-2xs font-semibold text-slate-600">Referensi (Indonesia)
-                        <input
-                          value={varian.referensiHarga?.id ?? ''}
-                          onChange={(e) => perbaruiVarian(varian.id, {
-                            referensiHarga: { id: e.target.value, en: varian.referensiHarga?.en ?? '' }
-                          })}
-                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs"
-                        />
-                      </label>
-                      <label className="text-2xs font-semibold text-slate-600">Reference (English)
-                        <input
-                          value={varian.referensiHarga?.en ?? ''}
-                          onChange={(e) => perbaruiVarian(varian.id, {
-                            referensiHarga: { id: varian.referensiHarga?.id ?? '', en: e.target.value }
-                          })}
-                          className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs"
-                        />
-                      </label>
                     </div>
                   </div>
                 ))}

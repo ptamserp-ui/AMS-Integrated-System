@@ -3,7 +3,9 @@ import {
   buatKatalogProdukDariDaftarHarga,
   normalisasiProdukKatalog,
   perluMigrasiProdukBawaanCms,
-  siapkanKatalogProduk
+  produkKatalogUntukWebsite,
+  siapkanKatalogProduk,
+  terapkanReferensiHargaTerjemahan
 } from '../../src/utils/productCatalog';
 
 describe('katalog rujukan daftar harga AMS V6', () => {
@@ -28,10 +30,7 @@ describe('katalog rujukan daftar harga AMS V6', () => {
     expect(katalog[0]?.varianSku[0]).toMatchObject({
       kodeSKU: 'REF-DH-V6-001',
       hargaTayang: 'Rp 18.870',
-      referensiHarga: {
-        id: 'Referensi daftar harga AMS V6; harga wajib diverifikasi.',
-        en: 'AMS V6 price-list reference; price must be verified.'
-      },
+      referensiHarga: 'Referensi daftar harga AMS V6; harga wajib diverifikasi.',
       nomorIzinEdar: '',
       satuan: 'box'
     });
@@ -59,7 +58,7 @@ describe('katalog rujukan daftar harga AMS V6', () => {
     expect(hasil.some((produk) => produk.id === 'produk-terkunci')).toBe(true);
   });
 
-  it('memisahkan referensi legacy dari harga dan mempertahankan teks per bahasa', () => {
+  it('memisahkan referensi legacy dari harga menjadi satu teks sumber', () => {
     const [referensi] = buatKatalogProdukDariDaftarHarga();
     if (!referensi) throw new Error('Data rujukan produk tidak tersedia');
     const produk = normalisasiProdukKatalog({
@@ -73,10 +72,34 @@ describe('katalog rujukan daftar harga AMS V6', () => {
 
     expect(produk.varianSku[0]).toMatchObject({
       hargaTayang: 'Rp 18.870',
-      referensiHarga: {
-        id: 'Referensi daftar harga AMS V6; harga wajib diverifikasi.',
-        en: 'AMS V6 price-list reference; price must be verified.'
-      }
+      referensiHarga: 'Referensi daftar harga AMS V6; harga wajib diverifikasi.'
     });
+  });
+
+  it('mempertahankan referensi varian hasil terjemahan saat katalog diselaraskan', () => {
+    const [referensi] = buatKatalogProdukDariDaftarHarga();
+    if (!referensi) throw new Error('Data rujukan produk tidak tersedia');
+    const versiIndonesia = normalisasiProdukKatalog(referensi);
+    const varian = versiIndonesia.varianSku[0];
+    if (!varian) throw new Error('Varian rujukan produk tidak tersedia');
+    const versiInggris = {
+      ...versiIndonesia,
+      varianSku: [{ ...varian, referensiHarga: 'AMS V6 price-list reference; price must be verified.' }]
+    };
+
+    const hasil = terapkanReferensiHargaTerjemahan([versiIndonesia], [versiInggris], 'en');
+
+    expect(hasil[0]?.varianSku?.[0]?.referensiHarga)
+      .toBe('AMS V6 price-list reference; price must be verified.');
+  });
+
+  it('menampilkan seluruh produk katalog di CMS sambil mempertahankan status publish', () => {
+    const katalog = buatKatalogProdukDariDaftarHarga().slice(0, 3);
+    const sebelumnya = katalog[0];
+    if (!sebelumnya) throw new Error('Data rujukan produk tidak tersedia');
+    const terpilih = produkKatalogUntukWebsite(katalog, [{ ...sebelumnya, isActive: true }]);
+
+    expect(terpilih.map((produk) => produk.id)).toEqual(katalog.map((produk) => produk.id));
+    expect(terpilih.map((produk) => produk.isActive)).toEqual([true, false, false]);
   });
 });
