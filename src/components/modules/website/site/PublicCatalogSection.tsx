@@ -28,16 +28,16 @@ import {
   X
 } from 'lucide-react';
 import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite, VarianSkuProduk } from '../../../../types';
-import { db, KOLEKSI_OPERASIONAL_SITUS } from '../../../../services/pocketbase';
 import {
   cocokKategoriProduk,
   fotoProdukSitus,
-  selaraskanKontenOperasional,
+  punyaDataOperasionalLokal,
   selesaikanGambar,
-  slugifyWebsite
-} from '../../../../utils/website';
-import { terapkanReferensiHargaTerjemahan, terapkanVarianProduk } from '../../../../utils/productCatalog';
-import { IDENTITAS_RUJUKAN } from '../../../../data/websiteRujukan';
+  slugifyWebsite,
+  TAUTAN_DAFTAR_HARGA_RUJUKAN,
+  TAUTAN_KATALOG_PDF_RUJUKAN
+} from '../../../../utils/websitePrimitives';
+import { terapkanReferensiHargaTerjemahan, terapkanVarianProduk } from '../../../../utils/productCatalogPrimitives';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
 export interface ItemRfqPublik {
@@ -128,20 +128,52 @@ function useProdukKatalogPublik(
   cfgAsli: KonfigurasiSitus,
   bahasa: 'id' | 'en'
 ): ProdukWebsite[] {
-  const [versiData, setVersiData] = useState(0);
+  const [produkOverride, setProdukOverride] = useState<ProdukWebsite[] | null>(null);
 
   useEffect(() => {
-    return db.subscribeKoleksi(KOLEKSI_OPERASIONAL_SITUS, () => {
-      setVersiData((v) => v + 1);
-    });
-  }, []);
+    let aktif = true;
+    let lepas: (() => void) | undefined;
+
+    const muatOperasional = async () => {
+      const [{ db, KOLEKSI_OPERASIONAL_SITUS }, { selaraskanKontenOperasional }] = await Promise.all([
+        import('../../../../services/pocketbase'),
+        import('../../../../utils/website')
+      ]);
+      if (!aktif) return;
+      const hitung = () => {
+        const terselaraskan = selaraskanKontenOperasional(cfgAsli, db.getSumberOperasionalWebsite());
+        setProdukOverride(
+          terapkanReferensiHargaTerjemahan(terselaraskan.produk.item, cfg.produk.item, bahasa).filter(
+            (produk) => produk.isActive
+          )
+        );
+      };
+      hitung();
+      if (!lepas) {
+        lepas = db.subscribeKoleksi(KOLEKSI_OPERASIONAL_SITUS, hitung);
+      }
+    };
+
+    if (punyaDataOperasionalLokal()) {
+      void muatOperasional();
+    }
+    const padaOperasional = () => {
+      void muatOperasional();
+    };
+    window.addEventListener('ams:db-collection-updated', padaOperasional);
+    return () => {
+      aktif = false;
+      lepas?.();
+      window.removeEventListener('ams:db-collection-updated', padaOperasional);
+    };
+  }, [cfg, cfgAsli, bahasa]);
 
   return useMemo(() => {
-    void versiData;
-    const terselaraskan = selaraskanKontenOperasional(cfgAsli, db.getSumberOperasionalWebsite());
-    return terapkanReferensiHargaTerjemahan(terselaraskan.produk.item, cfg.produk.item, bahasa)
-      .filter((produk) => produk.isActive);
-  }, [cfg, cfgAsli, bahasa, versiData]);
+    if (produkOverride) return produkOverride;
+    return terapkanReferensiHargaTerjemahan(cfgAsli.produk.item, cfg.produk.item, bahasa).filter(
+      (produk) => produk.isActive
+    );
+  }, [cfg, cfgAsli, bahasa, produkOverride]);
 }
 
 function cariLogoMerek(cfg: KonfigurasiSitus, produsen: string): string | undefined {
@@ -448,7 +480,7 @@ export function SeksiProdukPublik({
           ) : (
             <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
               <a
-                href={IDENTITAS_RUJUKAN.tautanKatalog}
+                href={TAUTAN_KATALOG_PDF_RUJUKAN}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 whitespace-nowrap px-3.5 py-2 rounded-full bg-white border border-slate-300 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors"
@@ -457,7 +489,7 @@ export function SeksiProdukPublik({
                 {t('Unduh Katalog PDF')}
               </a>
               <a
-                href={IDENTITAS_RUJUKAN.tautanDaftarHarga}
+                href={TAUTAN_DAFTAR_HARGA_RUJUKAN}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 whitespace-nowrap px-3.5 py-2 rounded-full bg-white border border-slate-300 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition-colors"
@@ -1254,7 +1286,7 @@ function ModalDetailProduk({
                 )}
 
                 <a
-                  href={IDENTITAS_RUJUKAN.tautanDaftarHarga}
+                  href={TAUTAN_DAFTAR_HARGA_RUJUKAN}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700"

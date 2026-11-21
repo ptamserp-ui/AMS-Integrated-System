@@ -13,7 +13,7 @@ import type { SalesTab } from './components/modules/commercial/SalesModule';
 import type { ITSubTabId } from './components/modules/supporting/ITModule';
 import type { GudangTabId } from './components/modules/operations/gudang/ui';
 
-import type { AksesEfektif, DivisionId, ModuleNavId, RbacResourceId, UserRole } from './types';
+import type { AksesEfektif, DivisionId, ModuleNavId, PelangganB2B, RbacResourceId, UserRole } from './types';
 import { Lock, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import {
   akhiriSesi,
@@ -43,6 +43,7 @@ const PMSModule = lazy(() => import('./components/modules/commercial/PMSModule')
 const HRDModule = lazy(() => import('./components/modules/supporting/HRDModule'));
 const FinanceModule = lazy(() => import('./components/modules/supporting/FinanceModule'));
 const ITModule = lazy(() => import('./components/modules/supporting/ITModule'));
+const DokumenInternalModule = lazy(() => import('./components/modules/supporting/DokumenInternalModule'));
 const WebsiteModule = lazy(() => import('./components/modules/website/WebsiteModule'));
 const ProductCatalogModule = lazy(() => import('./components/modules/commercial/ProductCatalogModule'));
 
@@ -82,7 +83,6 @@ function modulUntukKunciSync(key: string): RbacResourceId | 'all' {
     key.startsWith('sales_') ||
     key.startsWith('surat_') ||
     key.startsWith('listmonk_') ||
-    key.startsWith('quotation_') ||
     key.startsWith('catalog_')
   ) {
     return 'sales-marketing';
@@ -93,6 +93,7 @@ function modulUntukKunciSync(key: string): RbacResourceId | 'all' {
   if (key === 'transaksi' || key === 'transaksi_keuangan' || key.startsWith('keuangan_')) {
     return 'finance-akuntansi';
   }
+  if (key.startsWith('dokumen_internal') || key.startsWith('quotation_')) return 'dokumen-internal';
   if (key === 'sistem_data_manifest') return 'it-traceability';
   if (key === 'audit_trail') return 'audit-trail';
   return 'overview';
@@ -102,9 +103,21 @@ function isDivisionId(id: NavId): id is DivisionId {
   return DIVISION_ORDER.some((division) => division === id);
 }
 
+function punyaCacheErpLokal(): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    return (
+      localStorage.getItem('ams_alkes_izin_edar') !== null ||
+      localStorage.getItem('ams_alkes_stok_gudang') !== null
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default function App() {
   const [sesi, setSesi] = useState<SesiLogin | null>(() => bacaSesi());
-  const [memeriksaSesi, setMemeriksaSesi] = useState<boolean>(() => Boolean(bacaSesi()));
+  const [memeriksaSesi, setMemeriksaSesi] = useState<boolean>(() => Boolean(bacaSesi()) && !punyaCacheErpLokal());
   const [statusPemuatan, setStatusPemuatan] = useState('Menunggu inisialisasi koneksi...');
   const identitasVisual = useIdentitasVisualAplikasi();
 
@@ -163,10 +176,7 @@ export default function App() {
   }, [sesi?.token]);
 
   const tanganiMasuk = async (sesiBaru: SesiLogin) => {
-    setMemeriksaSesi(true);
-    setStatusPemuatan('Menyinkronkan izin RBAC dan data pengguna...');
     db.prepareSessionSync(sesiBaru.userId);
-    await db.syncFromServer(false);
     if (!sesiBaru.isHiddenDeveloper) {
       db.logAudit(
         'Autentikasi & Akses',
@@ -180,6 +190,7 @@ export default function App() {
     db.connectRealtimeSync(sesiBaru.token || null);
     setSesi(sesiBaru);
     setMemeriksaSesi(false);
+    void db.syncFromServer(false);
   };
 
   if (memeriksaSesi) {
@@ -243,6 +254,7 @@ function Dasbor({
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [showComplianceBanner, setShowComplianceBanner] = useState(true);
   const [gudangTabAwal, setGudangTabAwal] = useState<GudangTabId | undefined>(undefined);
+  const [quotationPelangganAwal, setQuotationPelangganAwal] = useState<PelangganB2B | null>(null);
   const [remoteModuleVersion, setRemoteModuleVersion] = useState(0);
   const [pendingRemoteSync, setPendingRemoteSync] = useState(false);
 
@@ -324,6 +336,12 @@ function Dasbor({
         onITNavigate={(sub) => {
           setItSubTab(sub);
           setActiveTab('it-traceability');
+        }}
+        onSearchNavigate={(target) => {
+          if (target.salesSubTab) setSalesSubTab(target.salesSubTab);
+          if (target.itSubTab) setItSubTab(target.itSubTab);
+          if (target.gudangTab) setGudangTabAwal(target.gudangTab);
+          setActiveTab(target.moduleId);
         }}
       />
 
@@ -417,6 +435,10 @@ function Dasbor({
                 currentRole={currentRole}
                 initialTab={salesSubTab}
                 onTabChange={setSalesSubTab}
+                onBuatQuotationUntukPelanggan={(pel) => {
+                  setQuotationPelangganAwal(pel);
+                  setActiveTab('dokumen-internal');
+                }}
               />
             )}
             {activeTab === 'pms-vigilance' && (
@@ -430,6 +452,14 @@ function Dasbor({
 
             {/* Supporting System */}
             {activeTab === 'hrd-pelatihan' && <HRDModule />}
+            {activeTab === 'dokumen-internal' && (
+              <DokumenInternalModule
+                currentRole={currentRole}
+                sesi={sesi}
+                pelangganQuotationAwal={quotationPelangganAwal}
+                onKonsumsiPelangganQuotation={() => setQuotationPelangganAwal(null)}
+              />
+            )}
             {activeTab === 'finance-akuntansi' && <FinanceModule currentRole={currentRole} />}
             {activeTab === 'it-traceability' && (
               <ITModule

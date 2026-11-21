@@ -267,6 +267,14 @@ export default function ProductCatalogModule({
 
             <fieldset disabled={!bisaUbah} className="space-y-5 disabled:opacity-70">
               <section className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1 sm:col-span-2">
+                  <p className="text-xs font-semibold text-slate-700">Foto produk</p>
+                  <MedanGambarBanyak
+                    nilai={draf.imageUrls?.length ? draf.imageUrls : draf.imageUrl ? [draf.imageUrl] : []}
+                    onChange={(imageUrls) => perbaruiDraf({ imageUrls, imageUrl: imageUrls[0] })}
+                    petunjuk="Unggah beberapa foto sekaligus atau tambahkan URL. Foto pertama menjadi foto utama; urutan dapat diubah."
+                  />
+                </div>
                 <label className="text-xs font-semibold text-slate-700">Nama produk
                   <input value={draf.nama} onChange={(e) => perbaruiDraf({ nama: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                 </label>
@@ -300,14 +308,6 @@ export default function ProductCatalogModule({
                 <label className="text-xs font-semibold text-slate-700 sm:col-span-2">Poin jual (satu per baris)
                   <textarea rows={3} value={draf.poinJual.join('\n')} onChange={(e) => perbaruiDraf({ poinJual: e.target.value.split('\n').filter(Boolean) })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                 </label>
-                <div className="space-y-1 sm:col-span-2">
-                  <p className="text-xs font-semibold text-slate-700">Foto produk</p>
-                  <MedanGambarBanyak
-                    nilai={draf.imageUrls?.length ? draf.imageUrls : draf.imageUrl ? [draf.imageUrl] : []}
-                    onChange={(imageUrls) => perbaruiDraf({ imageUrls, imageUrl: imageUrls[0] })}
-                    petunjuk="Unggah beberapa foto sekaligus atau tambahkan URL. Foto pertama menjadi foto utama; urutan dapat diubah."
-                  />
-                </div>
                 <label className="text-xs font-semibold text-slate-700">Lencana produk
                   <input value={draf.badge ?? ''} onChange={(e) => perbaruiDraf({ badge: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                 </label>

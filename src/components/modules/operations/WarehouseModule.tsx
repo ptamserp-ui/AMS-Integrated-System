@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
 import {
   Boxes,
@@ -17,19 +17,20 @@ import {
   Truck
 } from 'lucide-react';
 import { ModuleId, UserRole } from '../../../types';
-import DasborAuditTab from './gudang/DasborAuditTab';
-import StrukturGudangTab from './gudang/StrukturGudangTab';
-import StokFefoTab from './gudang/StokFefoTab';
-import RantaiDinginTab from './gudang/RantaiDinginTab';
-import PengendalianHamaTab from './gudang/PengendalianHamaTab';
-import PenerimaanInboundTab from './gudang/PenerimaanInboundTab';
-import PengirimanOutboundTab from './gudang/PengirimanOutboundTab';
-import OpnameCycleCountTab from './gudang/OpnameCycleCountTab';
-import OptimasiStokTab from './gudang/OptimasiStokTab';
-import ScannerRfidTab from './gudang/ScannerRfidTab';
-import KarantinaRecallTab from './gudang/KarantinaRecallTab';
-import GerbangPemerintahTab from './gudang/GerbangPemerintahTab';
-import MasterDataErpTab from './gudang/MasterDataErpTab';
+
+const DasborAuditTab = lazy(() => import('./gudang/DasborAuditTab'));
+const StrukturGudangTab = lazy(() => import('./gudang/StrukturGudangTab'));
+const StokFefoTab = lazy(() => import('./gudang/StokFefoTab'));
+const RantaiDinginTab = lazy(() => import('./gudang/RantaiDinginTab'));
+const PengendalianHamaTab = lazy(() => import('./gudang/PengendalianHamaTab'));
+const PenerimaanInboundTab = lazy(() => import('./gudang/PenerimaanInboundTab'));
+const PengirimanOutboundTab = lazy(() => import('./gudang/PengirimanOutboundTab'));
+const OpnameCycleCountTab = lazy(() => import('./gudang/OpnameCycleCountTab'));
+const OptimasiStokTab = lazy(() => import('./gudang/OptimasiStokTab'));
+const ScannerRfidTab = lazy(() => import('./gudang/ScannerRfidTab'));
+const KarantinaRecallTab = lazy(() => import('./gudang/KarantinaRecallTab'));
+const GerbangPemerintahTab = lazy(() => import('./gudang/GerbangPemerintahTab'));
+const MasterDataErpTab = lazy(() => import('./gudang/MasterDataErpTab'));
 import { chipFilter } from '../../ui';
 import {
   GudangTabId,
@@ -178,99 +179,107 @@ export default function WarehouseModule({
       </div>
 
       {/* Isi Sub-Modul Aktif */}
-      {activeTab === 'dasbor' && (
-        <DasborAuditTab
-          dariAcuan={dariAcuan}
-          onPilihTab={(tujuan) => setActiveTab(tujuan)}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+      <Suspense
+        fallback={
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+            Memuat sub-modul Gudang &amp; Logistik…
+          </div>
+        }
+      >
+        {activeTab === 'dasbor' && (
+          <DasborAuditTab
+            dariAcuan={dariAcuan}
+            onPilihTab={(tujuan) => setActiveTab(tujuan)}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'struktur' && (
-        <StrukturGudangTab onPerubahanData={picuSegarkan} />
-      )}
+        {activeTab === 'struktur' && (
+          <StrukturGudangTab onPerubahanData={picuSegarkan} />
+        )}
 
-      {activeTab === 'stok' && (
-        <StokFefoTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'stok' && (
+          <StokFefoTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'rantai-dingin' && (
-        <RantaiDinginTab
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'rantai-dingin' && (
+          <RantaiDinginTab
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'hama' && (
-        <PengendalianHamaTab
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'hama' && (
+          <PengendalianHamaTab
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'inbound' && (
-        <PenerimaanInboundTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onOpenPrintModal={onOpenPrintModal}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'inbound' && (
+          <PenerimaanInboundTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onOpenPrintModal={onOpenPrintModal}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'outbound' && (
-        <PengirimanOutboundTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onOpenPrintModal={onOpenPrintModal}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'outbound' && (
+          <PengirimanOutboundTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onOpenPrintModal={onOpenPrintModal}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'opname' && (
-        <OpnameCycleCountTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'opname' && (
+          <OpnameCycleCountTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'optimasi' && (
-        <OptimasiStokTab
-          dariAcuan={dariAcuan}
-          onNavigateModule={onNavigateModule}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'optimasi' && (
+          <OptimasiStokTab
+            dariAcuan={dariAcuan}
+            onNavigateModule={onNavigateModule}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'scanner' && (
-        <ScannerRfidTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'scanner' && (
+          <ScannerRfidTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'recall' && (
-        <KarantinaRecallTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'recall' && (
+          <KarantinaRecallTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'pemerintah' && (
-        <GerbangPemerintahTab
-          currentRole={currentRole}
-          dariAcuan={dariAcuan}
-          onPerubahanData={picuSegarkan}
-        />
-      )}
+        {activeTab === 'pemerintah' && (
+          <GerbangPemerintahTab
+            currentRole={currentRole}
+            dariAcuan={dariAcuan}
+            onPerubahanData={picuSegarkan}
+          />
+        )}
 
-      {activeTab === 'master-data' && <MasterDataErpTab dariAcuan={dariAcuan} />}
+        {activeTab === 'master-data' && <MasterDataErpTab dariAcuan={dariAcuan} />}
+      </Suspense>
     </div>
   );
 }

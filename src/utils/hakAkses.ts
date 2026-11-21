@@ -15,6 +15,7 @@ export const SEMUA_ID_MODUL: ModuleNavId[] = [
   'sales-marketing',
   'hrd-pelatihan',
   'finance-akuntansi',
+  'dokumen-internal',
   'it-traceability'
 ];
 

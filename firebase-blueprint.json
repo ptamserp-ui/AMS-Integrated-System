@@ -294,6 +294,82 @@
         }
       },
       "required": ["uid", "email", "updatedAt"]
+    },
+    "MediaAssetDoc": {
+      "title": "MediaAssetDoc",
+      "description": "Individual compressed image asset persisted per document to stay safely under 1 MiB Firestore document limits.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "filename": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "contentType": {
+          "type": "string",
+          "enum": ["image/png", "image/jpeg", "image/webp"]
+        },
+        "dataUrl": {
+          "type": "string",
+          "minLength": 24,
+          "maxLength": 1000000
+        },
+        "size": {
+          "type": "integer"
+        },
+        "visibility": {
+          "type": "string",
+          "enum": ["public", "internal"]
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 128
+        },
+        "uploadedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ownerUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "id",
+        "filename",
+        "contentType",
+        "dataUrl",
+        "size",
+        "visibility",
+        "scope",
+        "sha256",
+        "uploadedBy",
+        "createdAt",
+        "updatedAt",
+        "ownerUid"
+      ]
     }
   },
   "firestore": {
@@ -328,6 +404,10 @@
     "/users/{userId}/private/{docId}": {
       "schema": { "$ref": "#/entities/UserPrivateInfoDoc" },
       "description": "Split private PII document accessible only to owner or admin"
+    },
+    "/ams_media_assets/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaAssetDoc" },
+      "description": "Individual compressed photo assets persisted across container restarts and synced real-time"
     }
   }
 }

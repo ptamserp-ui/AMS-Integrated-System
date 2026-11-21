@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
 import type { UserRole } from '../../../types';
 import { TANGGAL_ACUAN_BENIH, buatTanggalAcuan } from '../operations/gudang/ui';
-import DasborTab from './finance/DasborTab';
-import FakturTab from './finance/FakturTab';
-import JurnalTab from './finance/JurnalTab';
-import LaporanTab from './finance/LaporanTab';
-import PajakTab from './finance/PajakTab';
-import PeriodeTab from './finance/PeriodeTab';
-import PersediaanTab from './finance/PersediaanTab';
+
+const DasborTab = lazy(() => import('./finance/DasborTab'));
+const FakturTab = lazy(() => import('./finance/FakturTab'));
+const JurnalTab = lazy(() => import('./finance/JurnalTab'));
+const LaporanTab = lazy(() => import('./finance/LaporanTab'));
+const PajakTab = lazy(() => import('./finance/PajakTab'));
+const PeriodeTab = lazy(() => import('./finance/PeriodeTab'));
+const PersediaanTab = lazy(() => import('./finance/PersediaanTab'));
 import { type FinanceTabId, identitasPeranFinance } from './finance/ui';
 import { BarChart3, CalendarClock, type Coins, LayoutDashboard, PackageSearch, Plus, Receipt, ScrollText, Wallet } from 'lucide-react';
 
@@ -101,40 +102,48 @@ export default function FinanceModule({ currentRole }: { currentRole?: UserRole 
         })}
       </div>
 
-      {activeTab === 'faktur' && (
-        <FakturTab
-          identitas={identitas}
-          dariAcuan={dariAcuan}
-          bukaForm={bukaFormFaktur}
-          onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-        />
-      )}
-      {activeTab === 'dasbor' && (
-        <DasborTab dariAcuan={dariAcuan} identitas={identitas} onPilihTab={setActiveTab} />
-      )}
-      {activeTab === 'jurnal' && (
-        <JurnalTab
-          identitas={identitas}
-          dariAcuan={dariAcuan}
-          onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-        />
-      )}
-      {activeTab === 'laporan' && <LaporanTab dariAcuan={dariAcuan} />}
-      {activeTab === 'persediaan' && (
-        <PersediaanTab
-          identitas={identitas}
-          dariAcuan={dariAcuan}
-          onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-        />
-      )}
-      {activeTab === 'pajak' && <PajakTab identitas={identitas} dariAcuan={dariAcuan} />}
-      {activeTab === 'periode' && (
-        <PeriodeTab
-          identitas={identitas}
-          dariAcuan={dariAcuan}
-          onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-        />
-      )}
+      <Suspense
+        fallback={
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+            Memuat sub-modul Keuangan…
+          </div>
+        }
+      >
+        {activeTab === 'faktur' && (
+          <FakturTab
+            identitas={identitas}
+            dariAcuan={dariAcuan}
+            bukaForm={bukaFormFaktur}
+            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+          />
+        )}
+        {activeTab === 'dasbor' && (
+          <DasborTab dariAcuan={dariAcuan} identitas={identitas} onPilihTab={setActiveTab} />
+        )}
+        {activeTab === 'jurnal' && (
+          <JurnalTab
+            identitas={identitas}
+            dariAcuan={dariAcuan}
+            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+          />
+        )}
+        {activeTab === 'laporan' && <LaporanTab dariAcuan={dariAcuan} />}
+        {activeTab === 'persediaan' && (
+          <PersediaanTab
+            identitas={identitas}
+            dariAcuan={dariAcuan}
+            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+          />
+        )}
+        {activeTab === 'pajak' && <PajakTab identitas={identitas} dariAcuan={dariAcuan} />}
+        {activeTab === 'periode' && (
+          <PeriodeTab
+            identitas={identitas}
+            dariAcuan={dariAcuan}
+            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

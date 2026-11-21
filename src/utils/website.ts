@@ -40,6 +40,33 @@ import {
 } from '../data/websiteRujukan';
 import { stokBebas } from './gudang';
 import { produkKatalogUntukPenjualan, produkKatalogUntukWebsite } from './productCatalog';
+import {
+  WEBSITE_MEDIA_KEY,
+  KUNCI_KATEGORI,
+  slugifyWebsite,
+  cocokKategoriProduk,
+  fotoProdukSitus,
+  hrefTautan,
+  type MediaWebsite,
+  daftarMediaWebsite,
+  simpanMediaWebsite,
+  hapusMediaWebsite,
+  selesaikanGambar
+} from './websitePrimitives';
+
+export {
+  WEBSITE_MEDIA_KEY,
+  KUNCI_KATEGORI,
+  slugifyWebsite,
+  cocokKategoriProduk,
+  fotoProdukSitus,
+  hrefTautan,
+  type MediaWebsite,
+  daftarMediaWebsite,
+  simpanMediaWebsite,
+  hapusMediaWebsite,
+  selesaikanGambar
+};
 
 /** Identitas resmi perusahaan — kontak sesuai situs resmi remediams.com. */
 export const IDENTITAS_PERUSAHAAN = {
@@ -49,23 +76,12 @@ export const IDENTITAS_PERUSAHAAN = {
   email: IDENTITAS_RUJUKAN.email
 };
 
-export const WEBSITE_MEDIA_KEY = 'ams_alkes_website_media_v1';
-
 /**
  * Naikkan setiap kali konten bawaan (rujukan situs resmi) berganti. Draf yang tersimpan pada
  * perangkat dengan versi lebih lama dibangun ulang dari konten bawaan terbaru — suntingan
  * terkunci dan item buatan tangan tetap dipertahankan.
  */
 export const VERSI_KONTEN_WEBSITE = 5;
-
-/** Kunci kategori izin edar untuk tautan filter katalog produk. */
-export const KUNCI_KATEGORI: Record<IzinEdarAlkes['kategori'], string> = {
-  'Elektromedik Radiasi': 'elektromedik-radiasi',
-  'Elektromedik Non Radiasi': 'elektromedik-non-radiasi',
-  'Non Elektromedik Steril': 'non-elektromedik-steril',
-  'Non Elektromedik Non Steril': 'non-elektromedik-non-steril',
-  'Diagnostik In Vitro': 'diagnostik-in-vitro'
-};
 
 /** Pemetaan kategori regulasi Kemenkes RI ke 8 grup katalog situs REMEDI. */
 export const PETA_GRUP_DARI_REGULASI: Record<IzinEdarAlkes['kategori'], string> = {
@@ -75,44 +91,6 @@ export const PETA_GRUP_DARI_REGULASI: Record<IzinEdarAlkes['kategori'], string> 
   'Non Elektromedik Non Steril': 'General',
   'Diagnostik In Vitro': 'Laboratory'
 };
-
-export function slugifyWebsite(nilai: string): string {
-  return String(nilai || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-/** Cocokkan filter kategori baik berupa nama grup katalog REMEDI, kategori regulasi Kemenkes, maupun slug URL. */
-export function cocokKategoriProduk(
-  produk: Pick<ProdukWebsite, 'kategori' | 'kategoriRegulasi' | 'peruntukan'>,
-  filterKategori?: string
-): boolean {
-  if (!filterKategori || filterKategori === 'Semua') return true;
-  const target = filterKategori.trim().toLowerCase();
-  const targetSlug = slugifyWebsite(filterKategori);
-  const kandidat = [
-    produk.kategori,
-    produk.kategoriRegulasi,
-    ...(produk.peruntukan ?? []),
-    produk.kategoriRegulasi
-      ? KUNCI_KATEGORI[produk.kategoriRegulasi as IzinEdarAlkes['kategori']]
-      : undefined
-  ].filter((v): v is string => Boolean(v));
-
-  return kandidat.some((nilai) => nilai.trim().toLowerCase() === target || slugifyWebsite(nilai) === targetSlug);
-}
-
-/** Daftar foto produk dengan fallback ke properti tunggal pada konten lama. */
-export function fotoProdukSitus(
-  produk: Pick<ProdukWebsite, 'imageUrl' | 'imageUrls'>
-): string[] {
-  const sumber = Array.isArray(produk.imageUrls) ? produk.imageUrls : [produk.imageUrl];
-  return sumber
-    .filter((rujukan): rujukan is string => typeof rujukan === 'string' && Boolean(rujukan.trim()))
-    .map((rujukan) => rujukan.trim());
-}
 
 /** Data mentah yang dibaca pembangun konten. Diterima sebagai argumen agar util ini
  *  tidak mengimpor layanan db (db yang mengimpor util ini, bukan sebaliknya). */
@@ -1253,111 +1231,8 @@ export function diffKonfigurasi(lama: KonfigurasiSitus, baru: KonfigurasiSitus):
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Tautan & gambar                                                            */
+/*  Kompresi gambar                                                            */
 /* -------------------------------------------------------------------------- */
-
-/** href sebuah tautan situs; halaman internal memakai query agar aman dipakai <a>. */
-export function hrefTautan(tautan: TautanWebsite | undefined, kontak: KonfigurasiSitus['kontak']): string {
-  if (!tautan) return '#';
-  switch (tautan.tipe) {
-    case 'whatsapp': {
-      const nomor = (tautan.nilai || kontak.whatsapp || '').replace(/[^0-9]/g, '');
-      if (!nomor) return '#';
-      const pesan = encodeURIComponent(tautan.nilai && tautan.nilai !== kontak.whatsapp ? tautan.nilai : kontak.pesanPembukaWA);
-      return `https://wa.me/${nomor}${pesan ? `?text=${pesan}` : ''}`;
-    }
-    case 'url':
-      return tautan.nilai && /^https?:\/\//i.test(tautan.nilai) ? tautan.nilai : '#';
-    case 'email':
-      return `mailto:${tautan.nilai || kontak.email}`;
-    case 'telepon':
-      return `tel:${(tautan.nilai || kontak.telepon).replace(/[^+0-9]/g, '')}`;
-    case 'halaman':
-      return `?halaman=${encodeURIComponent(tautan.nilai || 'beranda')}`;
-    default:
-      return '#';
-  }
-}
-
-export interface MediaWebsite {
-  id: string;
-  nama: string;
-  dataUrl: string;
-  ukuran: number;
-}
-
-let cacheMediaWebsite: MediaWebsite[] | null = null;
-
-export function daftarMediaWebsite(): MediaWebsite[] {
-  if (cacheMediaWebsite) return cacheMediaWebsite;
-  try {
-    if (typeof localStorage === 'undefined') return [];
-    const tersimpan = localStorage.getItem(WEBSITE_MEDIA_KEY);
-    const hasil = tersimpan ? (JSON.parse(tersimpan) as MediaWebsite[]) : [];
-    cacheMediaWebsite = Array.isArray(hasil) ? hasil : [];
-    return cacheMediaWebsite;
-  } catch {
-    cacheMediaWebsite = [];
-    return cacheMediaWebsite;
-  }
-}
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('storage', (event) => {
-    if (event.key === WEBSITE_MEDIA_KEY) cacheMediaWebsite = null;
-  });
-}
-
-/** Simpan gambar terkompresi di luar konfigurasi agar draf situs tidak membengkak. */
-export function simpanMediaWebsite(media: MediaWebsite): MediaWebsite[] {
-  const daftar = daftarMediaWebsite().filter((m) => m.id !== media.id);
-  const baru = [media, ...daftar];
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(WEBSITE_MEDIA_KEY, JSON.stringify(baru));
-    }
-    cacheMediaWebsite = baru;
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('ams:local-setting-write', {
-          detail: { key: 'website_media_v1', value: baru }
-        })
-      );
-    }
-  } catch {
-    return daftar;
-  }
-  return baru;
-}
-
-export function hapusMediaWebsite(id: string): MediaWebsite[] {
-  const baru = daftarMediaWebsite().filter((m) => m.id !== id);
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(WEBSITE_MEDIA_KEY, JSON.stringify(baru));
-    }
-    cacheMediaWebsite = baru;
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('ams:local-setting-write', {
-          detail: { key: 'website_media_v1', value: baru }
-        })
-      );
-    }
-  } catch {
-    /* abaikan */
-  }
-  return baru;
-}
-
-/** Nilai gambar bisa berupa URL biasa atau rujukan `media:<id>` ke penyimpanan lokal. */
-export function selesaikanGambar(referensi?: string): string | undefined {
-  if (!referensi) return undefined;
-  if (!referensi.startsWith('media:')) return referensi;
-  const id = referensi.slice('media:'.length);
-  const media = daftarMediaWebsite().find((m) => m.id === id);
-  return media?.dataUrl ?? `/api/website/media/${encodeURIComponent(id)}`;
-}
 
 /** Kompres ke lebar maksimal agar muat di penyimpanan browser. */
 export async function kompresGambarWebsite(

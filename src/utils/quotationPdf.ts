@@ -1,4 +1,3 @@
-import { jsPDF } from 'jspdf';
 
 export interface IdentitasPerusahaanQuotation {
   tampilkanLogo: boolean;
@@ -132,6 +131,7 @@ export async function unduhQuotationPdfA4(
   identitas: IdentitasPerusahaanQuotation,
   logoResolvedUrl?: string
 ): Promise<void> {
+  const { jsPDF } = await import('jspdf');
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',

@@ -6,12 +6,6 @@ import type {
   ServerUserPublic,
   UserRole
 } from '../types';
-import {
-  pullAllCloudStateFromFirestore,
-  signInWithGoogleFirebase,
-  signOutFirebase
-} from '../services/firebase';
-import { db } from '../services/pocketbase';
 
 const KUNCI_SESI = 'ams_alkes_sesi_login_v2';
 const KUNCI_SESI_LAMA = 'ams_alkes_sesi_login';
@@ -280,6 +274,12 @@ export async function masukDenganGoogleFirebaseServer(): Promise<
   { ok: true; sesi: SesiLogin } | { ok: false; pesan: string }
 > {
   try {
+    const [firebaseMod, pbMod] = await Promise.all([
+      import('../services/firebase'),
+      import('../services/pocketbase')
+    ]);
+    const { signInWithGoogleFirebase, pullAllCloudStateFromFirestore } = firebaseMod;
+    const { db } = pbMod;
     const { idToken } = await signInWithGoogleFirebase();
 
     // Pulihkan state dari Firestore lebih dulu agar container re-publish langsung memiliki user/roles/app-state terbaru
@@ -340,6 +340,10 @@ export async function masukDenganGoogleFirebaseServer(): Promise<
 
 export async function hubungkanGoogleFirebaseUntukSync(): Promise<{ ok: boolean; pesan: string }> {
   try {
+    const [{ signInWithGoogleFirebase }, { db }] = await Promise.all([
+      import('../services/firebase'),
+      import('../services/pocketbase')
+    ]);
     await signInWithGoogleFirebase();
     const res = await db.syncWithFirebaseCloud();
     return { ok: res.ok, pesan: res.pesan };
@@ -364,6 +368,7 @@ export async function keluarDariServer(): Promise<void> {
       credentials: 'include',
       headers
     });
+    const { signOutFirebase } = await import('../services/firebase');
     await signOutFirebase().catch(() => {});
   } catch {
     /* tetap bersihkan sesi lokal walau jaringan gagal */

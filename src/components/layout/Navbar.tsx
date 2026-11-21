@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   Award, 
@@ -30,7 +30,9 @@ import {
   UserCog,
   LogOut,
   Smartphone,
-  PackageSearch
+  PackageSearch,
+  ShieldAlert,
+  FileCheck2
 } from 'lucide-react';
 import { AksesEfektif, DivisionId, ModuleId, UserRole } from '../../types';
 import LogoAplikasi from '../common/LogoAplikasi';
@@ -39,7 +41,11 @@ import { gantiKataSandiServer, punyaIzin, type SesiLogin } from '../../utils/aut
 import { bolehAksesModul, SEMUA_ID_MODUL } from '../../utils/hakAkses';
 import type { ITSubTabId } from '../modules/supporting/ITModule';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
-import { MobilePreviewModal } from '../mobile/MobilePreviewModal';
+import GlobalSearchBar, { type SearchNavigationTarget } from './GlobalSearchBar';
+
+const MobilePreviewModal = lazy(() =>
+  import('../mobile/MobilePreviewModal').then((m) => ({ default: m.MobilePreviewModal }))
+);
 
 export type Tone = 'slate' | 'amber' | 'indigo' | 'blue' | 'emerald' | 'rose';
 export type NavId = ModuleId | DivisionId | 'overview' | 'website';
@@ -82,6 +88,7 @@ export const MAIN_MENU: MainMenuItem[] = [
   { kind: 'division', id: 'operations' },
   { kind: 'division', id: 'finance' },
   { kind: 'division', id: 'support' },
+  { kind: 'tab', id: 'dokumen-internal' },
   { kind: 'tab', id: 'overview' }
 ];
 
@@ -105,6 +112,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'hrd-pelatihan', label: 'HRD & General Affairs (GA)', short: 'HRD & GA', icon: Users, group: 'support' },
   { id: 'it-traceability', label: 'Information Technology (IT)', short: 'IT Hub', icon: Cpu, group: 'support', badge: 'CADDY' },
 
+  { id: 'dokumen-internal', label: 'Internal Document', short: 'Internal Doc', icon: FileCheck2, badge: 'CDAKB' },
   { id: 'overview', label: 'Executive Overview', short: 'Overview', icon: LayoutDashboard, badge: 'Cockpit' },
 ];
 
@@ -201,6 +209,7 @@ interface NavbarProps {
   onKeluar: () => void;
   aksesAktif?: AksesEfektif;
   onITNavigate?: (sub: ITSubTabId) => void;
+  onSearchNavigate?: (target: SearchNavigationTarget) => void;
 }
 
 export default function Navbar({
@@ -213,8 +222,11 @@ export default function Navbar({
   onKeluar,
   aksesAktif,
   onITNavigate,
+  onSearchNavigate,
 }: NavbarProps) {
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [restrictedSearchAlert, setRestrictedSearchAlert] = useState<string | null>(null);
   const [showMobilePreview, setShowMobilePreview] = useState(
     () => typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('preview') === 'mobile'
   );
@@ -394,6 +406,21 @@ export default function Navbar({
           );
         })()}
 
+        {/* Tombol Pencarian Mobile */}
+        <button
+          type="button"
+          onClick={() => setMobileSearchOpen((v) => !v)}
+          aria-label="Cari data di seluruh modul"
+          title="Cari data berdasarkan keyword"
+          className={`lg:hidden flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors cursor-pointer ${
+            mobileSearchOpen
+              ? 'border-blue-500 bg-blue-50 text-blue-700'
+              : 'border-slate-200 bg-white text-slate-700 active:bg-slate-100'
+          }`}
+        >
+          <Search className="w-4 h-4" />
+        </button>
+
         {/* Tombol Preview Aplikasi Mobile */}
         <button
           type="button"
@@ -525,58 +552,118 @@ export default function Navbar({
       </div>
 
       {/* ================= NAVIGASI UTAMA DESKTOP ================= */}
-      <nav className="hidden lg:flex w-full max-w-[1440px] mx-auto px-3 sm:px-5 pb-2 -mt-0.5 gap-1">
-        {MAIN_MENU.map((entry) => {
-          if (entry.kind === 'tab') {
-            if (!bolehAksesModul(entry.id, aksesEfektif)) return null;
-            const tab = ALL_TABS.find((t) => t.id === entry.id)!;
-            const Icon = tab.icon;
-            const isActive = currentTab === tab.id;
+      <nav className="hidden lg:flex w-full max-w-[1440px] mx-auto px-3 sm:px-5 pb-2 -mt-0.5 items-center justify-between gap-3">
+        <div className="flex items-center gap-1 min-w-0 overflow-x-auto">
+          {MAIN_MENU.map((entry) => {
+            if (entry.kind === 'tab') {
+              if (!bolehAksesModul(entry.id, aksesEfektif)) return null;
+              const tab = ALL_TABS.find((t) => t.id === entry.id)!;
+              const Icon = tab.icon;
+              const isActive = currentTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => go(tab.id)}
+                  title={tab.label}
+                  className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
+                    isActive ? `${TONE_ACTIVE} shadow-xs` : `text-slate-600 ${TONE_HOVER}`
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-white' : TONE_ICON}`} />
+                  <span>{tab.label}</span>
+                  {tab.badge && (
+                    <span
+                      className={`text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold ${
+                        isActive ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            }
+
+            const items = subMenuMap[entry.id];
+            if (items.length === 0) return null;
+            const Icon = items[0].icon;
+            const isActive = currentTab === entry.id || items.some((tab) => tab.id === currentTab);
             return (
               <button
-                key={tab.id}
+                key={entry.id}
                 type="button"
-                onClick={() => go(tab.id)}
-                title={tab.label}
+                onClick={() => go(entry.id)}
+                aria-current={currentTab === entry.id ? 'page' : undefined}
                 className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
                   isActive ? `${TONE_ACTIVE} shadow-xs` : `text-slate-600 ${TONE_HOVER}`
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? 'text-white' : TONE_ICON}`} />
-                <span>{tab.label}</span>
-                {tab.badge && (
-                  <span
-                    className={`text-3xs px-1.5 py-0.5 rounded-full font-mono font-bold ${
-                      isActive ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {tab.badge}
-                  </span>
-                )}
+                <span>{DIVISION_LABELS[entry.id]}</span>
               </button>
             );
-          }
+          })}
+        </div>
 
-          const items = subMenuMap[entry.id];
-          if (items.length === 0) return null;
-          const Icon = items[0].icon;
-          const isActive = currentTab === entry.id || items.some((tab) => tab.id === currentTab);
-          return (
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => go(entry.id)}
-              aria-current={currentTab === entry.id ? 'page' : undefined}
-              className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-semibold transition-all cursor-pointer whitespace-nowrap ${
-                isActive ? `${TONE_ACTIVE} shadow-xs` : `text-slate-600 ${TONE_HOVER}`
-              }`}
-            >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-white' : TONE_ICON}`} />
-              <span>{DIVISION_LABELS[entry.id]}</span>
-            </button>
-          );
-        })}
+        <GlobalSearchBar
+          aksesAktif={aksesEfektif}
+          sesi={sesi}
+          currentRole={currentRole}
+          currentTab={currentTab}
+          onNavigate={(target) => {
+            if (onSearchNavigate) {
+              onSearchNavigate(target);
+            } else {
+              go(target.moduleId);
+            }
+          }}
+          onRestrictedNotification={setRestrictedSearchAlert}
+          className="w-60 xl:w-72 shrink-0"
+        />
       </nav>
+
+      {/* Bar Pencarian Mobile (muncul di semua halaman modul pada viewport < lg) */}
+      {mobileSearchOpen && (
+        <div className="lg:hidden border-t border-slate-100 bg-slate-50/70 px-3 py-2">
+          <GlobalSearchBar
+            aksesAktif={aksesEfektif}
+            sesi={sesi}
+            currentRole={currentRole}
+            currentTab={currentTab}
+            autoFocus
+            onNavigate={(target) => {
+              setMobileSearchOpen(false);
+              if (onSearchNavigate) {
+                onSearchNavigate(target);
+              } else {
+                go(target.moduleId);
+              }
+            }}
+            onRestrictedNotification={setRestrictedSearchAlert}
+          />
+        </div>
+      )}
+
+      {/* Notifikasi Pembatasan Akses Pencarian Berbasis Role */}
+      {restrictedSearchAlert && (
+        <div role="alert" className="bg-rose-50 border-t border-rose-200 px-3 sm:px-5 py-2">
+          <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-3 text-rose-900">
+            <div className="flex items-center gap-2 text-xs font-semibold">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{restrictedSearchAlert}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRestrictedSearchAlert(null)}
+              aria-label="Tutup notifikasi pencarian"
+              className="p-1 rounded-lg text-rose-500 hover:text-rose-800 hover:bg-rose-100 cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ================= DRAWER SLIDE-OVER (MOBILE BEJO STYLE) ================= */}
       {drawerOpen && (
@@ -793,10 +880,14 @@ export default function Navbar({
           </div>
         </div>
       )}
-      <MobilePreviewModal
-        isOpen={showMobilePreview}
-        onClose={() => setShowMobilePreview(false)}
-      />
+      {showMobilePreview && (
+        <Suspense fallback={null}>
+          <MobilePreviewModal
+            isOpen={showMobilePreview}
+            onClose={() => setShowMobilePreview(false)}
+          />
+        </Suspense>
+      )}
     </header>
   );
 }

@@ -58,7 +58,6 @@ export function mapSyncKeyToResource(key: string): RbacResourceId {
     key.startsWith('sales_') ||
     key.startsWith('surat_') ||
     key.startsWith('listmonk_') ||
-    key.startsWith('quotation_') ||
     key.startsWith('catalog_')
   ) {
     return 'sales-marketing';
@@ -74,6 +73,7 @@ export function mapSyncKeyToResource(key: string): RbacResourceId {
   if (key === 'transaksi' || key === 'transaksi_keuangan' || key.startsWith('keuangan_')) {
     return 'finance-akuntansi';
   }
+  if (key.startsWith('dokumen_internal') || key.startsWith('quotation_')) return 'dokumen-internal';
   if (key === 'sistem_data_manifest') return 'it-traceability';
   if (key === 'audit_trail') return 'audit-trail';
   return 'overview';
@@ -108,6 +108,78 @@ export function canDeleteSyncKey(role: RoleDefinition, key: string): boolean {
     return perms.includes('delete');
   }
   return perms.includes('delete') || perms.includes('update') || perms.includes('publish');
+}
+
+const MEDIA_WRITE_RESOURCES: RbacResourceId[] = [
+  'website',
+  'product-catalog',
+  'dokumen-internal',
+  'sales-marketing',
+  'qa-mutu',
+  'qc-inspeksi',
+  'gudang-logistik',
+  'hrd-pelatihan',
+  'teknisi-service',
+  'produksi-cpakb',
+  'ra-pjt'
+];
+
+export function canUploadMedia(role: RoleDefinition): boolean {
+  if (role.id === 'developer') return true;
+  return MEDIA_WRITE_RESOURCES.some((resId) => {
+    const perms = role.permissions[resId];
+    return Array.isArray(perms) && (perms.includes('create') || perms.includes('update') || perms.includes('publish'));
+  });
+}
+
+export function canDeleteMedia(role: RoleDefinition): boolean {
+  if (role.id === 'developer') return true;
+  return MEDIA_WRITE_RESOURCES.some((resId) => {
+    const perms = role.permissions[resId];
+    return Array.isArray(perms) && (perms.includes('delete') || perms.includes('update') || perms.includes('publish'));
+  });
+}
+
+export function containsMediaReference(value: unknown, mediaId: string): boolean {
+  if (value === `media:${mediaId}`) return true;
+  if (Array.isArray(value)) return value.some((item) => containsMediaReference(item, mediaId));
+  if (value && typeof value === 'object') {
+    return Object.values(value).some((item) => containsMediaReference(item, mediaId));
+  }
+  return false;
+}
+
+export function mergeCatalogIntoPublishedSnapshot(
+  snapshot: Record<string, unknown>,
+  catalogValue: unknown
+): Record<string, unknown> | null {
+  if (!snapshot || typeof snapshot !== 'object' || snapshot.isPublished !== true) return null;
+  if (!Array.isArray(catalogValue)) return null;
+  const produkSection = snapshot.produk as { item?: Array<Record<string, unknown>> } | undefined;
+  if (!produkSection || !Array.isArray(produkSection.item)) return null;
+
+  const statusMap = new Map<string, boolean>();
+  for (const item of produkSection.item) {
+    if (item && typeof item.id === 'string') {
+      statusMap.set(item.id, Boolean(item.isActive));
+    }
+  }
+
+  const nextItems = catalogValue
+    .filter((p): p is Record<string, unknown> => Boolean(p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string'))
+    .map((p) => ({
+      ...p,
+      isActive: statusMap.get(String(p.id)) ?? false
+    }));
+
+  return {
+    ...snapshot,
+    lastModifiedAt: Date.now(),
+    produk: {
+      ...produkSection,
+      item: nextItems
+    }
+  };
 }
 
 export class ServerDataSyncStore {

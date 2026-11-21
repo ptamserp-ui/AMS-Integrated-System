@@ -32,8 +32,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite, ProspekAlkes, TautanWebsite, TipeFasyankes } from '../../../../types';
-import { db } from '../../../../services/pocketbase';
-import { cocokKategoriProduk, hrefTautan, selesaikanGambar } from '../../../../utils/website';
+import { cocokKategoriProduk, hrefTautan, selesaikanGambar } from '../../../../utils/websitePrimitives';
 import { SeksiProdukPublik, type ItemRfqPublik } from './PublicCatalogSection';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
@@ -175,6 +174,7 @@ function GambarSitus({
         src={url}
         alt={alt}
         loading={prioritas ? 'eager' : 'lazy'}
+        decoding={prioritas ? 'sync' : 'async'}
         fetchPriority={prioritas ? 'high' : 'auto'}
         className={`w-full h-full object-contain ${kelasGambar ?? ''}`}
         onError={() => setGagalMuat(true)}
@@ -910,7 +910,7 @@ export function SeksiKontak({
     ? `https://wa.me/${nomorWa}?text=${encodeURIComponent(`${subjekOtomatis}\n\n${isiRfqTerformat}`)}`
     : hrefTautan({ tipe: 'whatsapp', nilai: kontak.whatsapp }, kontak);
 
-  const catatPermintaanKeSistem = () => {
+  const catatPermintaanKeSistem = async () => {
     setGalatForm('');
     if (!namaInstansi.trim()) {
       setGalatForm('Mohon isi nama instansi, rumah sakit, klinik, atau perusahaan pemohon.');
@@ -956,6 +956,7 @@ export function SeksiKontak({
       }`
     };
 
+    const { db } = await import('../../../../services/pocketbase');
     db.addProspek(prospekBaru);
     setNomorTercatat(kodeRfq);
   };

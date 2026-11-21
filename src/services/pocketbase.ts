@@ -338,8 +338,20 @@ class AMSDatabaseManager {
   private pocketbaseArchiveConfig: Record<string, unknown> | null = null;
 
   constructor() {
-    this.ratakanNamaPerusahaan();
-    this.ratakanIstilahBatch();
+    const kunciMigrasi = 'ams_storage_normalized_v2';
+    const sudahMigrasi =
+      typeof localStorage !== 'undefined' && localStorage.getItem(kunciMigrasi) === '1';
+    if (!sudahMigrasi) {
+      this.ratakanNamaPerusahaan();
+      this.ratakanIstilahBatch();
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(kunciMigrasi, '1');
+        }
+      } catch {
+        /* abaikan bila penyimpanan privat/penuh */
+      }
+    }
     this.muatAntreanSyncPersisten();
     this.pasangPendengarLintasTab();
     if (typeof window !== 'undefined') {
@@ -536,6 +548,9 @@ class AMSDatabaseManager {
       this.isOnlineBrowser = true;
       this.updateConnectionStatusLabel();
       void this.flushPendingSync();
+      void import('../utils/mediaUpload')
+        .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+        .catch(() => {});
       if (this.wsShouldConnect) {
         void this.syncFromServer(true);
       }
@@ -553,6 +568,9 @@ class AMSDatabaseManager {
           if (this.pendingSyncKeys.size > 0) {
             void this.flushPendingSync();
           }
+          void import('../utils/mediaUpload')
+            .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+            .catch(() => {});
           if (this.wsShouldConnect) {
             void this.syncFromServer(true);
           }
@@ -815,6 +833,20 @@ class AMSDatabaseManager {
 
   private emitRemoteUpdate(keys: string[], reason: string) {
     if (keys.length === 0) return;
+    if (typeof window !== 'undefined') {
+      if (keys.some((k) => k === 'all' || k.startsWith('website'))) {
+        window.dispatchEvent(new CustomEvent('ams:public-identity-update'));
+      }
+      if (
+        keys.some(
+          (k) =>
+            k === 'all' ||
+            (KOLEKSI_OPERASIONAL_SITUS as readonly string[]).includes(k)
+        )
+      ) {
+        window.dispatchEvent(new CustomEvent('ams:db-collection-updated', { detail: { keys, reason } }));
+      }
+    }
     this.remoteListeners.forEach((cb) => {
       try {
         cb(keys, reason);
@@ -1364,12 +1396,18 @@ class AMSDatabaseManager {
           }
         }
         void this.flushPendingSync().then(() => this.syncFromServer(true));
+        void import('../utils/mediaUpload')
+          .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+          .catch(() => {});
       };
 
       socket.onmessage = (ev: MessageEvent) => {
         try {
           const msg = JSON.parse(String(ev.data)) as {
             type?: string;
+            id?: string;
+            url?: string;
+            media?: { id?: string; scope?: string };
             key?: string;
             value?: unknown;
             version?: number;
@@ -1508,6 +1546,24 @@ class AMSDatabaseManager {
             return;
           }
 
+          if (msg.type === 'media:uploaded' || msg.type === 'media:deleted') {
+            if (typeof msg.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, msg.revision);
+            }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(msg.type === 'media:uploaded' ? 'ams:media-uploaded' : 'ams:media-deleted', {
+                  detail: msg
+                })
+              );
+            }
+            this.notifyLocal('website_draft');
+            this.notifyLocal('website_published');
+            this.notifyLocal('product_catalog');
+            this.notifyLocal('dokumen_internal_identitas_v1');
+            return;
+          }
+
           if (msg.type === 'rbac:session-revoked') {
             this.currentWsToken = null;
             try {
@@ -1611,6 +1667,19 @@ class AMSDatabaseManager {
 
   private notify(collectionKey: string) {
     this.notifyLocal(collectionKey);
+    if (typeof window !== 'undefined') {
+      if (collectionKey === 'all' || collectionKey.startsWith('website')) {
+        window.dispatchEvent(new CustomEvent('ams:public-identity-update'));
+      }
+      if (
+        collectionKey === 'all' ||
+        (KOLEKSI_OPERASIONAL_SITUS as readonly string[]).includes(collectionKey)
+      ) {
+        window.dispatchEvent(
+          new CustomEvent('ams:db-collection-updated', { detail: { collectionKey } })
+        );
+      }
+    }
     if (this.kanalSiaran) {
       try {
         this.kanalSiaran.postMessage({ type: 'ams-db-update', collectionKey });
@@ -4408,6 +4477,43 @@ class AMSDatabaseManager {
         return val ? [val] : [];
       }
     }
+  }
+
+  public getAllSearchableCollections(): Record<string, unknown[]> {
+    const hasil: Record<string, unknown[]> = {};
+    const skipKeys = new Set([
+      'website_media_v1',
+      'website_published',
+      'gudang_pengaturan',
+      'surat_pengaturan',
+      'quotation_identitas_v1',
+      'dokumen_internal_identitas_v1',
+      'catalog_settings_v1'
+    ]);
+
+    for (const def of KATALOG_KOLEKSI_DATA) {
+      if (skipKeys.has(def.key)) continue;
+      if (def.key === 'product_catalog') {
+        hasil[def.key] = this.getProdukKatalog();
+        continue;
+      }
+      if (def.key === 'website_draft') {
+        const draf = this.getWebsiteDraft();
+        const itemSitus: unknown[] = [];
+        if (draf.identitas) itemSitus.push({ id: 'website-identitas', ...draf.identitas });
+        if (draf.hero) itemSitus.push({ id: 'website-hero', ...draf.hero });
+        if (Array.isArray(draf.solusi?.item)) itemSitus.push(...draf.solusi.item);
+        if (Array.isArray(draf.artikel?.item)) itemSitus.push(...draf.artikel.item);
+        if (Array.isArray(draf.produk?.item)) itemSitus.push(...draf.produk.item);
+        if (Array.isArray(draf.faq?.item)) itemSitus.push(...draf.faq.item);
+        if (Array.isArray(draf.kegiatan?.item)) itemSitus.push(...draf.kegiatan.item);
+        hasil[def.key] = itemSitus;
+        continue;
+      }
+      hasil[def.key] = this.bacaKoleksiMentahUntukProvenance(def.key);
+    }
+
+    return hasil;
   }
 
   public getRingkasanAsalData(): {

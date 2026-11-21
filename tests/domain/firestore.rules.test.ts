@@ -51,4 +51,12 @@ describe('Firestore Security Rules & Blueprint — Audit Delapan Pilar', () => {
     const archivesBlock = rulesContent.split('match /ams_archives/{archiveId}')[1]?.split('match /admins')[0] || '';
     expect(archivesBlock).not.toContain('allow delete:');
   });
+
+  it('memvalidasi koleksi ams_media_assets untuk foto terpublikasi & internal secara ketat', () => {
+    expect(rulesContent).toContain('function isValidMediaAsset(data)');
+    const mediaBlock = rulesContent.split('match /ams_media_assets/{mediaId}')[1] || '';
+    expect(mediaBlock).toContain("resource.data.visibility == 'public'");
+    expect(mediaBlock).toContain('isValidMediaAsset(incoming())');
+    expect(mediaBlock).toContain('incoming().createdAt == existing().createdAt');
+  });
 });

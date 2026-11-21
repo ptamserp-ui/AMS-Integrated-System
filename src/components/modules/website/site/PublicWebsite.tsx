@@ -13,8 +13,14 @@ import { ArrowLeft, ArrowRight, ChevronDown, ClipboardList, Globe, LogIn, Mail, 
 import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite } from '../../../../types';
 import { PETA_HALAMAN, TampilkanSeksi, TombolSitus, type ItemRfqPublik, type PropsSeksi } from './SiteSections';
 import { SorotanKatalog } from './SorotanKatalog';
-import { hrefTautan, selesaikanGambar, slugifyWebsite } from '../../../../utils/website';
-import { terapkanVarianProduk } from '../../../../utils/productCatalog';
+import {
+  adalahKonfigurasiSitus,
+  hrefTautan,
+  muatSnapshot,
+  selesaikanGambar,
+  slugifyWebsite
+} from '../../../../utils/websitePrimitives';
+import { terapkanVarianProduk } from '../../../../utils/productCatalogPrimitives';
 import { tampilanEfektif, tumpukanFont } from '../../../../utils/tampilan';
 import {
   translateWebsiteUi,
@@ -88,28 +94,6 @@ const inisialLogo = (nama: string) =>
     .slice(0, 3)
     .map((k) => k[0].toUpperCase())
     .join('') || 'AMS';
-
-const adalahKonfigurasiSitus = (nilai: unknown): nilai is KonfigurasiSitus => {
-  if (!nilai || typeof nilai !== 'object') return false;
-  const kandidat = nilai as Record<string, unknown>;
-  const identitas = kandidat.identitas as Record<string, unknown> | undefined;
-  const hero = kandidat.hero as Record<string, unknown> | undefined;
-  return Boolean(identitas && typeof identitas.nama === 'string' && hero && typeof hero.judul === 'string');
-};
-
-async function muatSnapshot(url: string): Promise<KonfigurasiSitus | null> {
-  try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
-    const teks = await res.text();
-    const data = JSON.parse(teks) as unknown;
-    if (adalahKonfigurasiSitus(data)) return data;
-    const pembungkus = (data as { config?: unknown })?.config;
-    return adalahKonfigurasiSitus(pembungkus) ? pembungkus : null;
-  } catch {
-    return null;
-  }
-}
 
 function bacaQuery(): Rute {
   const params = new URLSearchParams(window.location.search);

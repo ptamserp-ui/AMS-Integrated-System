@@ -62,6 +62,7 @@ export const RBAC_RESOURCES: Array<{
   { id: 'product-catalog', label: 'Product Catalog & SKU', group: 'Sales & Marketing', actions: ['view', 'create', 'update', 'export'] },
   { id: 'hrd-pelatihan', label: 'Human Resources (HRD)', group: 'Supporting System', actions: ['view', 'create', 'update', 'delete', 'approve', 'export'] },
   { id: 'finance-akuntansi', label: 'Finance & Accounting', group: 'Supporting System', actions: ['view', 'create', 'update', 'approve', 'export'] },
+  { id: 'dokumen-internal', label: 'Internal Document & Quotation (CDAKB)', group: 'Utama', actions: ['view', 'create', 'update', 'delete', 'approve', 'export'] },
   { id: 'it-traceability', label: 'IT & Traceability Hub', group: 'Supporting System', actions: ['view', 'update', 'export'] },
   { id: 'rbac-admin', label: 'Manajemen Akun & RBAC Server', group: 'Keamanan & Audit', actions: ['view', 'create', 'update', 'delete'] },
   { id: 'audit-trail', label: 'Audit Trail Keamanan & Kepatuhan', group: 'Keamanan & Audit', actions: ['view', 'export'] }
@@ -125,6 +126,7 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
         'product-catalog': ['view', 'create', 'update', 'export'],
         'hrd-pelatihan': ['view', 'approve', 'export'],
         'finance-akuntansi': ['view', 'export'],
+        'dokumen-internal': ['view', 'create', 'update', 'delete', 'approve', 'export'],
         'it-traceability': ['view', 'update', 'export'],
         'rbac-admin': ['view', 'create', 'update', 'delete'],
         'audit-trail': ['view', 'export']
@@ -331,9 +333,25 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
       'gudang-mutasi': ['view', 'create', 'update']
     }
   };
+  const docInternalDefaults: Partial<Record<string, PermissionAction[]>> = {
+    it_admin: ['view', 'create', 'update', 'export'],
+    qa_manager: ['view', 'create', 'update', 'approve', 'export'],
+    qc_officer: ['view', 'create', 'update', 'export'],
+    kepala_gudang: ['view', 'create', 'update', 'approve', 'export'],
+    teknisi_elektromedik: ['view', 'create', 'update', 'export'],
+    manajer_produksi: ['view', 'create', 'update', 'approve', 'export'],
+    purchasing: ['view', 'create', 'update', 'export'],
+    sales_manager: ['view', 'create', 'update', 'approve', 'export'],
+    sales_medrep: ['view', 'create', 'update', 'export'],
+    auditor_internal: ['view', 'export'],
+    karyawan: ['view', 'create', 'update', 'export']
+  };
   for (const role of roles) {
     const additions = permissions[role.id];
     if (additions) Object.assign(role.permissions, additions);
+    if (!role.permissions['dokumen-internal'] && docInternalDefaults[role.id]) {
+      role.permissions['dokumen-internal'] = [...docInternalDefaults[role.id]!];
+    }
   }
 
   return roles;
@@ -476,6 +494,10 @@ export class ServerRbacStore {
             const defaultPermissions = defaultRolesById.get(role.id)?.permissions;
             if (defaultPermissions?.['product-catalog'] && !role.permissions?.['product-catalog']) {
               role.permissions = { ...role.permissions, 'product-catalog': [...defaultPermissions['product-catalog']] };
+              rolesBackfilled = true;
+            }
+            if (defaultPermissions?.['dokumen-internal'] && !role.permissions?.['dokumen-internal']) {
+              role.permissions = { ...role.permissions, 'dokumen-internal': [...defaultPermissions['dokumen-internal']] };
               rolesBackfilled = true;
             }
             const hasWarehouseView = role.permissions?.['gudang-logistik']?.includes('view');

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { lazy, Suspense, useState, useEffect, useMemo } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
 import { db } from '../../../services/pocketbase';
 import type { LogAuditTrail, UserRole } from '../../../types';
@@ -44,7 +44,7 @@ import {
 import { useDbTick } from '../../../hooks/useDbSync';
 import { verifikasiRantaiHash } from '../../../utils/gudang';
 import type { KategoriPenyimpananData } from '../../../utils/dataOrigin';
-import RbacManagementTab from './it/RbacManagementTab';
+const RbacManagementTab = lazy(() => import('./it/RbacManagementTab'));
 
 interface DbConfigResponse {
   activeDriver: 'firebase' | 'pocketbase';
@@ -718,10 +718,18 @@ VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com`,
 
       {/* Tab 0: Manajemen RBAC Server / User Account & Roles */}
       {activeTab === 'user-roles' && bolehRbac && sesiAktif && (
-        <RbacManagementTab
-          sesi={sesiAktif}
-          onPermissionsUpdated={onPermissionsUpdated}
-        />
+        <Suspense
+          fallback={
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+              Memuat manajemen RBAC…
+            </div>
+          }
+        >
+          <RbacManagementTab
+            sesi={sesiAktif}
+            onPermissionsUpdated={onPermissionsUpdated}
+          />
+        </Suspense>
       )}
 
       {/* Tab 1: Storage, Sync & Pemisahan Data Dummy vs User */}

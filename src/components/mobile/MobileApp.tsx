@@ -23,7 +23,7 @@ import LogoAplikasi, {
   terapkanFaviconAplikasi,
   useIdentitasVisualAplikasi
 } from '../common/LogoAplikasi';
-import { KartuMasuk } from '../modules/website/site/HalamanDepan';
+import KartuMasuk from '../modules/website/site/KartuMasuk';
 import { OfflineIndicator } from '../pwa/OfflineIndicator';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { MobileAbsensiView } from './MobileAbsensiView';

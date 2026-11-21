@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
 import {
   Building2,
@@ -9,13 +9,14 @@ import {
   Target,
   HardHat
 } from 'lucide-react';
-import CoreHRModule from './hris/CoreHRModule';
-import TimeAttendanceModule from './hris/TimeAttendanceModule';
-import PayrollModule from './hris/PayrollModule';
-import RecruitmentModule from './hris/RecruitmentModule';
-import LearningModule from './hris/LearningModule';
-import PerformanceModule from './hris/PerformanceModule';
-import HSEModule from './hris/HSEModule';
+
+const CoreHRModule = lazy(() => import('./hris/CoreHRModule'));
+const TimeAttendanceModule = lazy(() => import('./hris/TimeAttendanceModule'));
+const PayrollModule = lazy(() => import('./hris/PayrollModule'));
+const RecruitmentModule = lazy(() => import('./hris/RecruitmentModule'));
+const LearningModule = lazy(() => import('./hris/LearningModule'));
+const PerformanceModule = lazy(() => import('./hris/PerformanceModule'));
+const HSEModule = lazy(() => import('./hris/HSEModule'));
 
 type HrisTab = 'core' | 'attendance' | 'payroll' | 'recruitment' | 'learning' | 'performance' | 'hse';
 
@@ -79,13 +80,21 @@ export default function HRDModule() {
         })}
       </div>
 
-      {activeTab === 'core' && <CoreHRModule />}
-      {activeTab === 'attendance' && <TimeAttendanceModule />}
-      {activeTab === 'payroll' && <PayrollModule />}
-      {activeTab === 'recruitment' && <RecruitmentModule />}
-      {activeTab === 'learning' && <LearningModule />}
-      {activeTab === 'performance' && <PerformanceModule />}
-      {activeTab === 'hse' && <HSEModule />}
+      <Suspense
+        fallback={
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+            Memuat sub-modul HRIS…
+          </div>
+        }
+      >
+        {activeTab === 'core' && <CoreHRModule />}
+        {activeTab === 'attendance' && <TimeAttendanceModule />}
+        {activeTab === 'payroll' && <PayrollModule />}
+        {activeTab === 'recruitment' && <RecruitmentModule />}
+        {activeTab === 'learning' && <LearningModule />}
+        {activeTab === 'performance' && <PerformanceModule />}
+        {activeTab === 'hse' && <HSEModule />}
+      </Suspense>
     </div>
   );
 }

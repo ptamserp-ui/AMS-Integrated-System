@@ -1,27 +1,20 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import { db } from '../../services/pocketbase';
-import { selesaikanGambar } from '../../utils/website';
+import {
+  bacaIdentitasVisualRingan,
+  selesaikanGambar,
+  terapkanFaviconAplikasi,
+  type IdentitasVisualRingan
+} from '../../utils/websitePrimitives';
 
-export interface IdentitasVisualAplikasi {
-  nama: string;
-  logoUrl?: string;
-  faviconUrl?: string;
-}
+export type IdentitasVisualAplikasi = IdentitasVisualRingan;
 
 /**
  * Ambil identitas visual (logo & favicon) secara dinamis dari konfigurasi CMS Website
- * dan penyimpanan media aplikasi — tidak ada path gambar yang di-hardcode di komponen.
+ * dan penyimpanan media aplikasi — tanpa menyeret database ERP maupun data benih statis.
  */
 export function bacaIdentitasVisualAplikasi(): IdentitasVisualAplikasi {
-  const draf = db.getWebsiteDraft();
-  const logoUrl = selesaikanGambar(draf.identitas.logoUrl);
-  const faviconUrl = selesaikanGambar(draf.identitas.faviconUrl) ?? logoUrl;
-  return {
-    nama: draf.identitas.nama,
-    logoUrl,
-    faviconUrl
-  };
+  return bacaIdentitasVisualRingan();
 }
 
 /** Hook reaktif agar perubahan logo di CMS Website / Media langsung memperbarui seluruh aplikasi. */
@@ -41,37 +34,27 @@ export function useIdentitasVisualAplikasi(): IdentitasVisualAplikasi {
           : baru
       );
     };
-    const unsubDraft = db.subscribe('website_draft', segarkan);
-    const unsubPublished = db.subscribe('website_published', segarkan);
-    const unsubMedia = db.subscribe('website_media_v1', segarkan);
-    const unsubStorage = (e: StorageEvent) => {
+    const padaStorage = (e: StorageEvent) => {
       if (!e.key || e.key.includes('website')) segarkan();
     };
-    window.addEventListener('storage', unsubStorage);
+    const padaTulisLokal = (e: Event) => {
+      const detail = (e as CustomEvent<{ key?: string }>).detail;
+      if (!detail?.key || detail.key.includes('website')) segarkan();
+    };
+    window.addEventListener('storage', padaStorage);
+    window.addEventListener('ams:local-setting-write', padaTulisLokal);
+    window.addEventListener('ams:public-identity-update', segarkan);
     return () => {
-      unsubDraft();
-      unsubPublished();
-      unsubMedia();
-      window.removeEventListener('storage', unsubStorage);
+      window.removeEventListener('storage', padaStorage);
+      window.removeEventListener('ams:local-setting-write', padaTulisLokal);
+      window.removeEventListener('ams:public-identity-update', segarkan);
     };
   }, []);
 
   return identitas;
 }
 
-/** Sinkronkan elemen <link rel="icon"> browser dengan favicon / logo CMS aktif. */
-export function terapkanFaviconAplikasi(url?: string) {
-  if (!url || typeof document === 'undefined') return;
-  let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
-  if (!link) {
-    link = document.createElement('link');
-    link.rel = 'icon';
-    document.head.appendChild(link);
-  }
-  if (link.href !== url) {
-    link.href = url;
-  }
-}
+export { terapkanFaviconAplikasi };
 
 /**
  * Komponen logo standar aplikasi. Membaca URL gambar dari CMS/Media secara dinamis

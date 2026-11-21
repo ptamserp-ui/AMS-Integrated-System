@@ -1,10 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Construction, ExternalLink, RefreshCw } from 'lucide-react';
 import type { KonfigurasiSitus } from '../../../../types';
-import { db, KOLEKSI_OPERASIONAL_SITUS } from '../../../../services/pocketbase';
-import { selaraskanKontenOperasional, selesaikanGambar } from '../../../../utils/website';
-import { terapkanFaviconAplikasi } from '../../../common/LogoAplikasi';
-import PublicWebsite, { adalahKonfigurasiSitus, muatSnapshot } from './PublicWebsite';
+import {
+  adalahKonfigurasiSitus,
+  bacaSnapshotInline,
+  bacaWebsiteTerbitLokal,
+  muatSnapshot,
+  punyaDataOperasionalLokal,
+  selesaikanGambar,
+  terapkanFaviconAplikasi
+} from '../../../../utils/websitePrimitives';
+import PublicWebsite from './PublicWebsite';
 
 export type StatusTayangPublik = 'tayang' | 'belum' | 'tahan';
 type Status = 'memuat' | StatusTayangPublik;
@@ -17,13 +23,28 @@ function capWaktuSnapshot(cfg: KonfigurasiSitus): number {
 
 /**
  * Pasang pendengar real-time terhadap perubahan status stok gudang, izin edar, recall,
- * serta skema/kontrak harga dari basis data operasional (lintas modul, lintas tab, & PocketBase SSE).
+ * serta skema/kontrak harga dari basis data operasional bila perangkat menyimpan state operasional.
  */
 export function pasangPendengarOperasionalPublik(onSegarkan: (pemicu: string) => void): () => void {
-  const lepasKoleksi = db.subscribeKoleksi(KOLEKSI_OPERASIONAL_SITUS, (kunciKoleksi) => {
-    onSegarkan(kunciKoleksi);
-  });
+  let aktif = true;
+  let lepasKoleksi: (() => void) | undefined;
 
+  const pasangKoleksi = async () => {
+    const { db, KOLEKSI_OPERASIONAL_SITUS } = await import('../../../../services/pocketbase');
+    if (!aktif) return;
+    lepasKoleksi = db.subscribeKoleksi(KOLEKSI_OPERASIONAL_SITUS, (kunciKoleksi) => {
+      onSegarkan(kunciKoleksi);
+    });
+  };
+
+  if (ADALAH_PRATINJAU || punyaDataOperasionalLokal()) {
+    void pasangKoleksi();
+  }
+
+  const padaOperasional = () => {
+    if (!lepasKoleksi) void pasangKoleksi();
+    onSegarkan('db_collection_updated');
+  };
   const padaFokus = () => onSegarkan('window_focus');
   const padaVisibilitas = () => {
     if (document.visibilityState === 'visible') {
@@ -31,11 +52,14 @@ export function pasangPendengarOperasionalPublik(onSegarkan: (pemicu: string) =>
     }
   };
 
+  window.addEventListener('ams:db-collection-updated', padaOperasional);
   window.addEventListener('focus', padaFokus);
   document.addEventListener('visibilitychange', padaVisibilitas);
 
   return () => {
-    lepasKoleksi();
+    aktif = false;
+    lepasKoleksi?.();
+    window.removeEventListener('ams:db-collection-updated', padaOperasional);
     window.removeEventListener('focus', padaFokus);
     document.removeEventListener('visibilitychange', padaVisibilitas);
   };
@@ -43,50 +67,97 @@ export function pasangPendengarOperasionalPublik(onSegarkan: (pemicu: string) =>
 
 /** Hook penyelarasan real-time agar konfigurasi situs selalu mencerminkan stok & harga operasional terbaru. */
 export function useKonfigurasiOperasionalSinkron(dasar: KonfigurasiSitus | null): KonfigurasiSitus | null {
-  const [versiOperasional, setVersiOperasional] = useState(0);
+  const [hasil, setHasil] = useState<KonfigurasiSitus | null>(dasar);
 
   useEffect(() => {
-    return pasangPendengarOperasionalPublik(() => {
-      setVersiOperasional((v) => v + 1);
-    });
-  }, []);
+    setHasil(dasar);
+    if (!dasar) return;
+    if (!ADALAH_PRATINJAU && !punyaDataOperasionalLokal()) return;
 
-  return useMemo(() => {
-    void versiOperasional;
-    if (!dasar) return null;
-    return selaraskanKontenOperasional(dasar, db.getSumberOperasionalWebsite());
-  }, [dasar, versiOperasional]);
+    let aktif = true;
+    const selaraskan = async () => {
+      const [{ db }, { selaraskanKontenOperasional }] = await Promise.all([
+        import('../../../../services/pocketbase'),
+        import('../../../../utils/website')
+      ]);
+      if (!aktif) return;
+      setHasil(selaraskanKontenOperasional(dasar, db.getSumberOperasionalWebsite()));
+    };
+
+    void selaraskan();
+    const lepas = pasangPendengarOperasionalPublik(() => {
+      void selaraskan();
+    });
+    return () => {
+      aktif = false;
+      lepas();
+    };
+  }, [dasar]);
+
+  return hasil;
 }
 
-/** Rangkai sumber konten tayang: pilih snapshot paling mutakhir lalu selaraskan dengan stok & harga terkini. */
+/** Rangkai sumber konten tayang: pilih snapshot paling mutakhir lalu selaraskan bila ada data operasional lokal. */
 export async function tentukanKontenTayang(): Promise<{
   konfigurasi: KonfigurasiSitus | null;
   status: StatusTayangPublik;
 }> {
-  const dariServer = (await muatSnapshot('/api/website/published')) ?? (await muatSnapshot('/website-published.json'));
-  const lokal = db.getWebsiteTerbit();
+  const lokalRingan = bacaWebsiteTerbitLokal();
+  const inlineSnapshot = bacaSnapshotInline();
+  const dariServer =
+    (await muatSnapshot('/api/website/published')) ??
+    (await muatSnapshot('/website-published.json')) ??
+    inlineSnapshot;
 
   const terpilih =
-    dariServer && lokal
-      ? capWaktuSnapshot(lokal) >= capWaktuSnapshot(dariServer)
-        ? lokal
+    dariServer && lokalRingan
+      ? capWaktuSnapshot(lokalRingan) >= capWaktuSnapshot(dariServer)
+        ? lokalRingan
         : dariServer
-      : dariServer ?? lokal;
+      : dariServer ?? lokalRingan;
 
   if (!terpilih) return { konfigurasi: null, status: 'belum' };
 
-  const terselaraskan = selaraskanKontenOperasional(terpilih, db.getSumberOperasionalWebsite());
+  if (ADALAH_PRATINJAU || punyaDataOperasionalLokal()) {
+    const [{ db }, { selaraskanKontenOperasional }] = await Promise.all([
+      import('../../../../services/pocketbase'),
+      import('../../../../utils/website')
+    ]);
+    const terselaraskan = selaraskanKontenOperasional(terpilih, db.getSumberOperasionalWebsite());
+    return {
+      konfigurasi: terselaraskan,
+      status: terselaraskan.isPublished ? 'tayang' : 'tahan'
+    };
+  }
+
   return {
-    konfigurasi: terselaraskan,
-    status: terselaraskan.isPublished ? 'tayang' : 'tahan'
+    konfigurasi: terpilih,
+    status: terpilih.isPublished ? 'tayang' : 'tahan'
+  };
+}
+
+function bacaKontenAwalSinkron(): { konfigurasi: KonfigurasiSitus | null; status: Status } {
+  const inline = bacaSnapshotInline();
+  const lokal = bacaWebsiteTerbitLokal();
+  const kandidat =
+    inline && lokal
+      ? capWaktuSnapshot(lokal) >= capWaktuSnapshot(inline)
+        ? lokal
+        : inline
+      : inline ?? lokal;
+  if (!kandidat) {
+    return { konfigurasi: null, status: 'memuat' };
+  }
+  return {
+    konfigurasi: kandidat,
+    status: kandidat.isPublished ? 'tayang' : 'tahan'
   };
 }
 
 export default function PublicWebsiteApp() {
-  const [isi, setIsi] = useState<{ konfigurasi: KonfigurasiSitus | null; status: Status }>({
-    konfigurasi: null,
-    status: 'memuat'
-  });
+  const [isi, setIsi] = useState<{ konfigurasi: KonfigurasiSitus | null; status: Status }>(() =>
+    ADALAH_PRATINJAU ? { konfigurasi: null, status: 'memuat' } : bacaKontenAwalSinkron()
+  );
   const [drafPratinjau, setDrafPratinjau] = useState<KonfigurasiSitus | null>(null);
 
   const konfigurasiTayangSinkron = useKonfigurasiOperasionalSinkron(isi.konfigurasi);
@@ -109,6 +180,11 @@ export default function PublicWebsiteApp() {
   useEffect(() => {
     if (ADALAH_PRATINJAU) return;
     let batal = false;
+    let berhentiTerbit: (() => void) | undefined;
+    let publicWs: WebSocket | null = null;
+    let publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let diketahuiRevision = 0;
+
     const muatKonten = () => {
       tentukanKontenTayang().then((hasil) => {
         if (!batal) setIsi(hasil);
@@ -116,15 +192,113 @@ export default function PublicWebsiteApp() {
     };
 
     muatKonten();
-    void db.hydratePublicSettingsFromServer().then(() => {
-      if (!batal) muatKonten();
-    });
-    db.connectRealtimeSync();
-    const berhentiTerbit = db.subscribeKoleksi(['website_published'], muatKonten);
+
+    const padaMediaBerubah = () => {
+      muatKonten();
+    };
+    window.addEventListener('ams:media-uploaded', padaMediaBerubah);
+    window.addEventListener('ams:media-deleted', padaMediaBerubah);
+
+    const pasangWsPublikRingan = () => {
+      if (batal || typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/sync/ws`;
+      try {
+        const ws = new WebSocket(wsUrl);
+        publicWs = ws;
+        ws.onmessage = (ev: MessageEvent) => {
+          if (batal) return;
+          try {
+            const msg = JSON.parse(String(ev.data)) as {
+              type?: string;
+              key?: string;
+              value?: unknown;
+              revision?: number;
+              entries?: Record<string, { value?: unknown }>;
+            };
+            if (!msg?.type) return;
+            if (msg.type === 'sync:hello' && typeof msg.revision === 'number') {
+              if (diketahuiRevision > 0 && msg.revision > diketahuiRevision) {
+                muatKonten();
+              }
+              diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
+              return;
+            }
+            if (typeof msg.revision === 'number') {
+              diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
+            }
+            if (msg.type === 'sync:update' && msg.key === 'website_published' && adalahKonfigurasiSitus(msg.value)) {
+              setIsi({
+                konfigurasi: msg.value,
+                status: msg.value.isPublished ? 'tayang' : 'tahan'
+              });
+              return;
+            }
+            if (msg.type === 'sync:batch-update' && msg.entries?.website_published?.value && adalahKonfigurasiSitus(msg.entries.website_published.value)) {
+              const cfg = msg.entries.website_published.value;
+              setIsi({
+                konfigurasi: cfg,
+                status: cfg.isPublished ? 'tayang' : 'tahan'
+              });
+              return;
+            }
+            if (msg.type === 'media:uploaded' || msg.type === 'media:deleted') {
+              muatKonten();
+            }
+          } catch {
+            /* abaikan pesan tidak dikenal */
+          }
+        };
+        ws.onclose = () => {
+          if (publicWs === ws) publicWs = null;
+          if (!batal && !publicReconnectTimer) {
+            publicReconnectTimer = setTimeout(() => {
+              publicReconnectTimer = null;
+              pasangWsPublikRingan();
+            }, 4000);
+          }
+        };
+        ws.onerror = () => {
+          try {
+            ws.close();
+          } catch {
+            /* abaikan */
+          }
+        };
+      } catch {
+        /* fallback tetap aman via fetch */
+      }
+    };
+
+    const hubungkanOperasional = async () => {
+      const { db } = await import('../../../../services/pocketbase');
+      if (batal) return;
+      await db.hydratePublicSettingsFromServer().catch(() => {});
+      if (batal) return;
+      muatKonten();
+      db.connectRealtimeSync();
+      berhentiTerbit = db.subscribeKoleksi(['website_published'], muatKonten);
+    };
+
+    if (punyaDataOperasionalLokal()) {
+      void hubungkanOperasional();
+    } else {
+      pasangWsPublikRingan();
+    }
 
     return () => {
       batal = true;
-      berhentiTerbit();
+      window.removeEventListener('ams:media-uploaded', padaMediaBerubah);
+      window.removeEventListener('ams:media-deleted', padaMediaBerubah);
+      berhentiTerbit?.();
+      if (publicReconnectTimer) clearTimeout(publicReconnectTimer);
+      if (publicWs) {
+        try {
+          publicWs.close();
+        } catch {
+          /* abaikan */
+        }
+      }
     };
   }, []);
 

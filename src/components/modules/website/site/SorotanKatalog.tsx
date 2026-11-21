@@ -1,6 +1,6 @@
 import { ArrowRight, BadgeCheck, PackageSearch, Search, ShieldCheck } from 'lucide-react';
 import type { HalamanWebsite, KonfigurasiSitus } from '../../../../types';
-import { fotoProdukSitus, selesaikanGambar } from '../../../../utils/website';
+import { fotoProdukSitus, selesaikanGambar } from '../../../../utils/websitePrimitives';
 import { TombolSitus } from './SiteSections';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
@@ -69,7 +69,7 @@ export function SorotanKatalog({
         <div className="katalog-visual">
           <div className="katalog-visual-card">
             {gambarUtama ? (
-              <img src={gambarUtama} alt={produkUnggulan?.nama || hero.judul} loading="eager" />
+              <img src={gambarUtama} alt={produkUnggulan?.nama || hero.judul} loading="eager" decoding="async" />
             ) : (
               <div className="katalog-visual-fallback">
                 <PackageSearch className="w-16 h-16" />

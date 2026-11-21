@@ -36,7 +36,43 @@ export default defineConfig(() => {
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         workbox: {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-          navigateFallbackDenylist: [/^\/api\//]
+          navigateFallbackDenylist: [/^\/api\//],
+          globIgnores: [
+            '**/*Module*.js',
+            '**/*Tab-*.js',
+            '**/*Modal-*.js',
+            '**/ExecutiveOverview*.js',
+            '**/html2canvas*.js',
+            '**/index.es*.js',
+            '**/purify.es*.js',
+            '**/jspdf*.js',
+            '**/vendor-firebase*.js',
+            '**/erp-seed-data*.js'
+          ],
+          runtimeCaching: [
+            {
+              urlPattern: /^\/assets\/.*\.(?:js|css)$/i,
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'ams-assets-runtime',
+                expiration: {
+                  maxEntries: 80,
+                  maxAgeSeconds: 30 * 24 * 60 * 60
+                }
+              }
+            },
+            {
+              urlPattern: /^\/(?:fonts|site|brand)\/.*$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'ams-media-cache',
+                expiration: {
+                  maxEntries: 120,
+                  maxAgeSeconds: 30 * 24 * 60 * 60
+                }
+              }
+            }
+          ]
         },
         manifest: {
           id: '/mobile',
@@ -87,6 +123,35 @@ export default defineConfig(() => {
       alias: {
         '@': fileURLToPath(new URL('.', import.meta.url)),
       },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id: string) {
+            if (id.includes('node_modules')) {
+              if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
+                return 'vendor-react';
+              }
+              if (id.includes('/firebase/') || id.includes('/@firebase/')) {
+                return 'vendor-firebase';
+              }
+              if (id.includes('/pocketbase/')) {
+                return 'vendor-pocketbase';
+              }
+              if (id.includes('/motion/') || id.includes('/framer-motion/')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('/lucide-react/')) {
+                return 'vendor-lucide';
+              }
+            }
+            if (id.includes('/src/data/')) {
+              return 'erp-seed-data';
+            }
+            return undefined;
+          }
+        }
+      }
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
