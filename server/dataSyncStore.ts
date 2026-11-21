@@ -1,0 +1,348 @@
+import fs from 'fs';
+import path from 'path';
+import type { RbacResourceId, RoleDefinition } from '../src/types/index';
+
+export interface SyncEntry {
+  value: unknown;
+  version: number;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface PublicWebsiteMedia {
+  contentType: string;
+  bytes: Buffer;
+}
+
+interface AppStateDatabase {
+  version: number;
+  revision: number;
+  entries: Record<string, SyncEntry>;
+}
+
+export const PUBLIC_SYNC_KEYS = new Set<string>([
+  'website_published'
+]);
+
+export const LEGACY_RBAC_SYNC_KEYS = new Set(['rb_akun', 'rb_role']);
+
+const VALID_KEY_PATTERN = /^[a-zA-Z0-9_-]{1,80}$/;
+
+export function isLegacyRbacSyncKey(key: string): boolean {
+  return LEGACY_RBAC_SYNC_KEYS.has(key);
+}
+
+export function isValidSyncKey(key: string): boolean {
+  return VALID_KEY_PATTERN.test(key);
+}
+
+export function mapSyncKeyToResource(key: string): RbacResourceId {
+  if (key.startsWith('website_')) return 'website';
+  if (key === 'izin_edar' || key === 'sertifikat') return 'ra-pjt';
+  if (key === 'dokumen_mutu' || key === 'capa' || key === 'produk_kembalian' || key === 'audit_internal_iso') {
+    return 'qa-mutu';
+  }
+  if (key === 'inspeksi_qc') return 'qc-inspeksi';
+  if (key === 'laporan_ktd' || key === 'penarikan_produk') return 'pms-vigilance';
+  if (key === 'gudang_penerimaan') return 'gudang-penerimaan';
+  if (key === 'stok_gudang' || key === 'gudang_pergerakan') return 'gudang-mutasi';
+  if (key === 'log_suhu' || key === 'pest_control' || key.startsWith('gudang_')) {
+    return 'gudang-logistik';
+  }
+  if (key === 'layanan_teknis') return 'teknisi-service';
+  if (key === 'bets_produksi') return 'produksi-cpakb';
+  if (key === 'pemasok' || key === 'purchase_order') return 'purchasing-procurement';
+  if (key === 'product_catalog') return 'product-catalog';
+  if (
+    key === 'penjualan' ||
+    key.startsWith('sales_') ||
+    key.startsWith('surat_') ||
+    key.startsWith('listmonk_') ||
+    key.startsWith('quotation_') ||
+    key.startsWith('catalog_')
+  ) {
+    return 'sales-marketing';
+  }
+  if (
+    key === 'pelatihan' ||
+    key === 'pelatihan_personil' ||
+    key === 'sertifikasi_pegawai' ||
+    key.startsWith('hris_')
+  ) {
+    return 'hrd-pelatihan';
+  }
+  if (key === 'transaksi' || key === 'transaksi_keuangan' || key.startsWith('keuangan_')) {
+    return 'finance-akuntansi';
+  }
+  if (key === 'sistem_data_manifest') return 'it-traceability';
+  if (key === 'audit_trail') return 'audit-trail';
+  return 'overview';
+}
+
+export function canWriteSyncKey(role: RoleDefinition, key: string): boolean {
+  if (isLegacyRbacSyncKey(key)) return false;
+  // Log audit operasional dicatat otomatis saat user sah beraktivitas di modulnya
+  if (key === 'audit_trail') return true;
+  // Self-service mobile HRIS: absensi GPS & pengajuan cuti pribadi oleh karyawan/sales aktif
+  if (key === 'hris_absensi' || key === 'hris_cuti') return true;
+
+  // Manifest asal data (dummy vs user) diperbarui otomatis saat user sah menulis koleksi
+  if (key === 'sistem_data_manifest') return true;
+
+  const resource = mapSyncKeyToResource(key);
+  const perms = role.permissions[resource];
+  if (!Array.isArray(perms)) return false;
+
+  if (key === 'website_published') {
+    return perms.includes('publish');
+  }
+  return perms.includes('create') || perms.includes('update') || perms.includes('publish');
+}
+
+export function canDeleteSyncKey(role: RoleDefinition, key: string): boolean {
+  if (isLegacyRbacSyncKey(key)) return false;
+  const resource = mapSyncKeyToResource(key);
+  const perms = role.permissions[resource];
+  if (!Array.isArray(perms)) return false;
+  if (['gudang_penerimaan', 'stok_gudang', 'gudang_pergerakan'].includes(key)) {
+    return perms.includes('delete');
+  }
+  return perms.includes('delete') || perms.includes('update') || perms.includes('publish');
+}
+
+export class ServerDataSyncStore {
+  private readonly dbFile: string;
+  private state: AppStateDatabase;
+
+  constructor(dataDir: string) {
+    fs.mkdirSync(dataDir, { recursive: true });
+    this.dbFile = path.join(dataDir, 'app-state.json');
+    this.state = this.loadState();
+  }
+
+  private loadState(): AppStateDatabase {
+    if (fs.existsSync(this.dbFile)) {
+      try {
+        const raw = fs.readFileSync(this.dbFile, 'utf8');
+        const parsed = JSON.parse(raw) as Partial<AppStateDatabase>;
+        if (parsed && typeof parsed === 'object' && parsed.entries && typeof parsed.entries === 'object') {
+          return {
+            version: typeof parsed.version === 'number' ? parsed.version : 1,
+            revision: typeof parsed.revision === 'number' ? parsed.revision : 0,
+            entries: parsed.entries as Record<string, SyncEntry>
+          };
+        }
+      } catch {
+        /* fallback ke state kosong bila berkas korup */
+      }
+    }
+    const fresh: AppStateDatabase = { version: 1, revision: 0, entries: {} };
+    this.persist(fresh);
+    return fresh;
+  }
+
+  private persist(next: AppStateDatabase = this.state): void {
+    const tmp = `${this.dbFile}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
+    fs.renameSync(tmp, this.dbFile);
+  }
+
+  public getRevision(): number {
+    return this.state.revision;
+  }
+
+  public hasKey(key: string): boolean {
+    if (isLegacyRbacSyncKey(key)) return false;
+    return Object.prototype.hasOwnProperty.call(this.state.entries, key);
+  }
+
+  public getEntry(key: string): SyncEntry | undefined {
+    if (isLegacyRbacSyncKey(key)) return undefined;
+    return this.state.entries[key];
+  }
+
+  public getPublicWebsiteMedia(id: string, snapshot: unknown): PublicWebsiteMedia | null {
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(id)) return null;
+    if (!snapshot || typeof snapshot !== 'object' || (snapshot as { isPublished?: unknown }).isPublished !== true) {
+      return null;
+    }
+
+    const containsPublishedReference = (value: unknown): boolean => {
+      if (value === `media:${id}`) return true;
+      if (Array.isArray(value)) return value.some(containsPublishedReference);
+      if (value && typeof value === 'object') return Object.values(value).some(containsPublishedReference);
+      return false;
+    };
+    if (!containsPublishedReference(snapshot)) return null;
+
+    const daftar = this.state.entries.website_media_v1?.value;
+    if (!Array.isArray(daftar)) return null;
+    const media = daftar.find((item) => item && typeof item === 'object' && (item as { id?: unknown }).id === id) as
+      | { dataUrl?: unknown }
+      | undefined;
+    if (typeof media?.dataUrl !== 'string') return null;
+
+    const cocok = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/i.exec(media.dataUrl);
+    if (!cocok) return null;
+    const bytes = Buffer.from(cocok[2], 'base64');
+    if (bytes.length === 0 || bytes.length > 8 * 1024 * 1024) return null;
+    return { contentType: cocok[1].toLowerCase(), bytes };
+  }
+
+  public getPublicState(): { revision: number; entries: Record<string, SyncEntry> } {
+    const out: Record<string, SyncEntry> = {};
+    for (const key of PUBLIC_SYNC_KEYS) {
+      if (this.state.entries[key]) {
+        out[key] = this.state.entries[key];
+      }
+    }
+    return { revision: this.state.revision, entries: out };
+  }
+
+  public getAllState(sinceVersionMap?: Record<string, number>): {
+    revision: number;
+    entries: Record<string, SyncEntry>;
+  } {
+    if (!sinceVersionMap) {
+      const entries: Record<string, SyncEntry> = {};
+      for (const [key, entry] of Object.entries(this.state.entries)) {
+        if (!isLegacyRbacSyncKey(key)) entries[key] = entry;
+      }
+      return { revision: this.state.revision, entries };
+    }
+    const delta: Record<string, SyncEntry> = {};
+    for (const [key, entry] of Object.entries(this.state.entries)) {
+      if (!isLegacyRbacSyncKey(key) && (sinceVersionMap[key] ?? 0) < entry.version) {
+        delta[key] = entry;
+      }
+    }
+    return { revision: this.state.revision, entries: delta };
+  }
+
+  public setKey(
+    key: string,
+    value: unknown,
+    actorUsername: string
+  ): { entry: SyncEntry; revision: number } {
+    if (isLegacyRbacSyncKey(key)) {
+      throw new Error(`Legacy RBAC sync key "${key}" is no longer supported.`);
+    }
+    const prev = this.state.entries[key];
+    const nextVersion = (prev?.version ?? 0) + 1;
+    const nextRevision = this.state.revision + 1;
+    const entry: SyncEntry = {
+      value,
+      version: nextVersion,
+      updatedAt: new Date().toISOString(),
+      updatedBy: actorUsername
+    };
+    this.state.revision = nextRevision;
+    this.state.entries[key] = entry;
+    this.persist();
+    return { entry, revision: nextRevision };
+  }
+
+  public setBatch(
+    updates: Record<string, unknown>,
+    deletes: string[] = [],
+    actorUsername: string
+  ): {
+    updated: Record<string, SyncEntry>;
+    deleted: string[];
+    revision: number;
+  } {
+    const legacyKey = [...Object.keys(updates), ...deletes].find(isLegacyRbacSyncKey);
+    if (legacyKey) {
+      throw new Error(`Legacy RBAC sync key "${legacyKey}" is no longer supported.`);
+    }
+    const updated: Record<string, SyncEntry> = {};
+    const deleted: string[] = [];
+    const now = new Date().toISOString();
+    let changed = false;
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (!isValidSyncKey(key)) continue;
+      const prev = this.state.entries[key];
+      const entry: SyncEntry = {
+        value,
+        version: (prev?.version ?? 0) + 1,
+        updatedAt: now,
+        updatedBy: actorUsername
+      };
+      this.state.entries[key] = entry;
+      updated[key] = entry;
+      changed = true;
+    }
+
+    for (const key of deletes) {
+      if (!isValidSyncKey(key)) continue;
+      if (Object.prototype.hasOwnProperty.call(this.state.entries, key)) {
+        delete this.state.entries[key];
+        deleted.push(key);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.state.revision += 1;
+      this.persist();
+    }
+
+    return {
+      updated,
+      deleted,
+      revision: this.state.revision
+    };
+  }
+
+  public deleteKey(key: string): { deleted: boolean; revision: number } {
+    if (isLegacyRbacSyncKey(key)) {
+      throw new Error(`Legacy RBAC sync key "${key}" is no longer supported.`);
+    }
+    if (!this.hasKey(key)) {
+      return { deleted: false, revision: this.state.revision };
+    }
+    delete this.state.entries[key];
+    this.state.revision += 1;
+    this.persist();
+    return { deleted: true, revision: this.state.revision };
+  }
+
+  public resetAll(): number {
+    this.state.entries = {};
+    this.state.revision += 1;
+    this.persist();
+    return this.state.revision;
+  }
+
+  public hydrateFromCloud(
+    cloudEntries: Record<string, { value: unknown; version?: number; updatedAt?: string; updatedBy?: string }>
+  ): { appliedKeys: string[]; revision: number } {
+    const appliedKeys: string[] = [];
+    for (const [key, item] of Object.entries(cloudEntries)) {
+      if (!isValidSyncKey(key) || isLegacyRbacSyncKey(key) || !item || item.value === undefined) continue;
+      const existing = this.state.entries[key];
+      const incomingTime = item.updatedAt ? new Date(item.updatedAt).getTime() : 0;
+      const existingTime = existing?.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+      const shouldApply =
+        !existing ||
+        (Number.isFinite(incomingTime) && incomingTime > existingTime) ||
+        ((item.version ?? 0) > (existing.version ?? 0) && incomingTime >= existingTime);
+
+      if (shouldApply) {
+        this.state.entries[key] = {
+          value: item.value,
+          version: Math.max((existing?.version ?? 0) + 1, item.version ?? 1),
+          updatedAt: item.updatedAt || new Date().toISOString(),
+          updatedBy: item.updatedBy || 'firebase-sync'
+        };
+        appliedKeys.push(key);
+      }
+    }
+    if (appliedKeys.length > 0) {
+      this.state.revision += 1;
+      this.persist();
+    }
+    return { appliedKeys, revision: this.state.revision };
+  }
+}

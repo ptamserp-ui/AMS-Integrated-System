@@ -1,0 +1,843 @@
+/**
+ * SITUS PUBLIK AMS — dibaca di route /web tanpa chrome ERP.
+ *
+ * Urutan sumber konten (paling baru lebih diutamakan):
+ * 1. GET /api/website/published  → snapshot di server Express (dev & VPS/Caddy)
+ * 2. GET /website-published.json → snapshot statis ikut build untuk hosting statis
+ * 3. localStorage 'website_published' → hasil terbit pada perangkat ini
+ * Bentuk JSON divalidasi sebelum dipakai karena hosting statis dapat mengembalikan
+ * index.html (HTTP 200) untuk path yang tidak ada.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { ArrowLeft, ArrowRight, ChevronDown, ClipboardList, Globe, LogIn, Mail, Menu, Phone, X } from 'lucide-react';
+import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite } from '../../../../types';
+import { PETA_HALAMAN, TampilkanSeksi, TombolSitus, type ItemRfqPublik, type PropsSeksi } from './SiteSections';
+import { SorotanKatalog } from './SorotanKatalog';
+import {
+  adalahKonfigurasiSitus,
+  hrefTautan,
+  muatSnapshot,
+  selesaikanGambar,
+  slugifyWebsite
+} from '../../../../utils/websitePrimitives';
+import { terapkanVarianProduk } from '../../../../utils/productCatalogPrimitives';
+import { tampilanEfektif, tumpukanFont } from '../../../../utils/tampilan';
+import {
+  translateWebsiteUi,
+  WebsiteLanguageProvider,
+  type WebsiteLanguage
+} from './WebsiteLanguage';
+
+interface Rute {
+  halaman: HalamanWebsite;
+  kategoriKey?: string;
+  cari?: string;
+}
+
+const DAFTAR_HALAMAN: HalamanWebsite[] = [
+  'beranda',
+  'produk',
+  'solusi',
+  'layanan',
+  'sumber-daya',
+  'tentang',
+  'kontak'
+];
+
+const LABEL_HALAMAN: Record<HalamanWebsite, string> = {
+  beranda: 'Beranda',
+  produk: 'Katalog Produk',
+  solusi: 'Solusi',
+  layanan: 'Layanan',
+  'sumber-daya': 'Sumber Daya',
+  tentang: 'Tentang Kami',
+  kontak: 'Kontak & Penawaran'
+};
+
+const KUNCI_SESI_RFQ = 'ams_web_rfq_v1';
+const KUNCI_BAHASA_SITUS = 'ams_web_language';
+
+function bacaBahasaSitus(): WebsiteLanguage {
+  if (typeof window === 'undefined') return 'id';
+  try {
+    return window.localStorage.getItem(KUNCI_BAHASA_SITUS) === 'en' ? 'en' : 'id';
+  } catch {
+    return 'id';
+  }
+}
+
+function ubahKategori(
+  kategori: string | undefined,
+  sumber: KonfigurasiSitus,
+  tujuan: KonfigurasiSitus
+): string | undefined {
+  if (!kategori) return kategori;
+  const produkSumber = sumber.produk.item.find(
+    (produk) =>
+      produk.kategori.toLowerCase() === kategori.trim().toLowerCase() ||
+      slugifyWebsite(produk.kategori) === slugifyWebsite(kategori)
+  );
+  if (!produkSumber) return kategori;
+  return tujuan.produk.item.find((produk) => produk.id === produkSumber.id)?.kategori ?? kategori;
+}
+
+/** Kelas dasar tombol pil header: CTA utama dan tombol Masuk harus terlihat sama ukurannya. */
+const gayaTombolHeader =
+  'inline-flex items-center gap-1.5 whitespace-nowrap px-3.5 py-2 rounded-full text-xs font-bold transition-colors cursor-pointer';
+
+const gayaTombolMasuk = `border border-[var(--brand)] text-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_10%,white)] ${gayaTombolHeader}`;
+
+const inisialLogo = (nama: string) =>
+  nama
+    .split(/\s+/)
+    .filter((k) => k && k.toUpperCase() !== 'PT' && k.toUpperCase() !== 'CV')
+    .slice(0, 3)
+    .map((k) => k[0].toUpperCase())
+    .join('') || 'AMS';
+
+function bacaQuery(): Rute {
+  const params = new URLSearchParams(window.location.search);
+  const halaman = params.get('halaman') as HalamanWebsite | null;
+  const kategori = params.get('kategori')?.trim() || undefined;
+  const cari = params.get('cari')?.trim() || undefined;
+  return {
+    halaman: halaman && DAFTAR_HALAMAN.includes(halaman) ? halaman : kategori || cari ? 'produk' : 'beranda',
+    kategoriKey: kategori,
+    cari
+  };
+}
+
+function bacaSesiRfq(): ItemRfqPublik[] {
+  try {
+    const mentah = sessionStorage.getItem(KUNCI_SESI_RFQ);
+    if (!mentah) return [];
+    const data = JSON.parse(mentah) as unknown;
+    return Array.isArray(data) ? (data as ItemRfqPublik[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export default function PublicWebsite({
+  konfigurasi,
+  adaAksesDashboard = false,
+  pratinjau = false,
+  landasan = '/web/',
+  padaMasuk
+}: {
+  konfigurasi: KonfigurasiSitus;
+  adaAksesDashboard?: boolean;
+  pratinjau?: boolean;
+  /** Dasar URL yang ditulis router; halaman depan aplikasi memakai '/' supaya tautan tetap di dalam gerbang login. */
+  landasan?: string;
+  /** Tanpa callback ini tombol Masuk tidak dirender (mis. pratinjau draf di dashboard). */
+  padaMasuk?: () => void;
+}) {
+  const [rute, setRute] = useState<Rute>(bacaQuery);
+  const [menuTerbuka, setMenuTerbuka] = useState(false);
+  const [megaAktif, setMegaAktif] = useState<string | null>(null);
+  const [daftarRfq, setDaftarRfq] = useState<ItemRfqPublik[]>(bacaSesiRfq);
+  const [bahasa, setBahasa] = useState<WebsiteLanguage>(bacaBahasaSitus);
+  const [konfigurasiInggris, setKonfigurasiInggris] = useState<KonfigurasiSitus | null>(null);
+  const [versiTerjemahan, setVersiTerjemahan] = useState<number | null>(null);
+  const [bahasaMemuat, setBahasaMemuat] = useState(false);
+  const [galatBahasa, setGalatBahasa] = useState('');
+  const atasRef = useRef<HTMLDivElement>(null);
+  const versiSumber = konfigurasi.lastModifiedAt;
+
+  const muatTerjemahan = useCallback(async () => {
+    setBahasaMemuat(true);
+    setGalatBahasa('');
+    try {
+      const response = await fetch('/api/website/translation/en', { cache: 'no-store' });
+      let result: { config?: unknown; sourceVersion?: unknown; message?: unknown };
+      try {
+        result = (await response.json()) as typeof result;
+      } catch {
+        throw new Error('Layanan terjemahan tidak tersedia pada hosting ini.');
+      }
+      if (!response.ok) {
+        throw new Error(typeof result.message === 'string' ? result.message : 'Terjemahan situs tidak dapat dimuat.');
+      }
+      if (!adalahKonfigurasiSitus(result.config) || result.sourceVersion !== versiSumber) {
+        throw new Error('Konten terbit telah berubah. Muat ulang halaman, lalu coba bahasa Inggris lagi.');
+      }
+      setKonfigurasiInggris(result.config);
+      setVersiTerjemahan(versiSumber);
+    } catch (error) {
+      setBahasa('id');
+      setKonfigurasiInggris(null);
+      setVersiTerjemahan(null);
+      setGalatBahasa(error instanceof Error ? error.message : 'Terjemahan situs tidak dapat dimuat.');
+      try {
+        window.localStorage.setItem(KUNCI_BAHASA_SITUS, 'id');
+      } catch {
+        setGalatBahasa((pesan) => `${pesan} Pilihan bahasa tidak dapat disimpan di browser ini.`);
+      }
+    } finally {
+      setBahasaMemuat(false);
+    }
+  }, [versiSumber]);
+
+  useEffect(() => {
+    if (bahasa === 'en' && (!konfigurasiInggris || versiTerjemahan !== versiSumber) && !bahasaMemuat) {
+      void muatTerjemahan();
+    }
+  }, [bahasa, konfigurasiInggris, versiTerjemahan, versiSumber, bahasaMemuat, muatTerjemahan]);
+
+  const pilihBahasa = (bahasaBaru: WebsiteLanguage) => {
+    setGalatBahasa('');
+    if (bahasaBaru === 'id') {
+      setBahasa('id');
+      setBahasaMemuat(false);
+      try {
+        window.localStorage.setItem(KUNCI_BAHASA_SITUS, 'id');
+      } catch {
+        setGalatBahasa('Pilihan bahasa tidak dapat disimpan di browser ini.');
+      }
+      return;
+    }
+    setBahasa('en');
+    try {
+      window.localStorage.setItem(KUNCI_BAHASA_SITUS, 'en');
+    } catch {
+      setGalatBahasa('Pilihan bahasa tidak dapat disimpan di browser ini.');
+    }
+  };
+
+  const bahasaTampil: WebsiteLanguage =
+    bahasa === 'en' && konfigurasiInggris && versiTerjemahan === versiSumber ? 'en' : 'id';
+  const konfigurasiTampil = bahasaTampil === 'en' ? konfigurasiInggris ?? konfigurasi : konfigurasi;
+  const t = (text: string) => translateWebsiteUi(text, bahasaTampil);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(KUNCI_SESI_RFQ, JSON.stringify(daftarRfq));
+    } catch {
+      // Abaikan jika penyimpanan sesi penuh/diblokir
+    }
+  }, [daftarRfq]);
+
+  /** Selaraskan acuan harga & satuan item RFQ yang sudah dipilih bila modul operasional memperbarui skema harga. */
+  useEffect(() => {
+    setDaftarRfq((lama) => {
+      if (lama.length === 0) return lama;
+      const petaProduk = new Map(
+        konfigurasi.produk.item.flatMap((produk) => [
+          [produk.id, produk] as const,
+          ...(produk.varianSku ?? []).map((varian) => [
+            `${produk.id}::${varian.id}`,
+            terapkanVarianProduk(produk, varian)
+          ] as const)
+        ])
+      );
+      let berubah = false;
+      const baru = lama.map((item) => {
+        const terkini = petaProduk.get(item.produkId);
+        if (!terkini) return item;
+        const hargaBaru = terkini.hargaTayang;
+        const referensiBaru = terkini.referensiHarga;
+        const satuanBaru = terkini.satuan || item.satuan;
+        if (
+          item.hargaTayang === hargaBaru &&
+          item.referensiHarga === referensiBaru &&
+          item.satuan === satuanBaru
+        ) return item;
+        berubah = true;
+        return { ...item, hargaTayang: hargaBaru, referensiHarga: referensiBaru, satuan: satuanBaru };
+      });
+      return berubah ? baru : lama;
+    });
+  }, [konfigurasi.produk.item]);
+
+  useEffect(() => {
+    if (pratinjau) return;
+    const padaPopState = () => setRute(bacaQuery());
+    window.addEventListener('popstate', padaPopState);
+    return () => window.removeEventListener('popstate', padaPopState);
+  }, [pratinjau]);
+
+  const tulisUrlRute = useCallback(
+    (halaman: HalamanWebsite, kategoriKey?: string) => {
+      if (pratinjau) return;
+      if (halaman === 'beranda' && !kategoriKey) {
+        window.history.replaceState({}, '', landasan);
+        return;
+      }
+      const params = new URLSearchParams();
+      params.set('halaman', halaman);
+      if (kategoriKey) params.set('kategori', kategoriKey);
+      window.history.replaceState({}, '', `${landasan}?${params.toString()}`);
+    },
+    [pratinjau, landasan]
+  );
+
+  const kategoriRuteTampil =
+    bahasaTampil === 'en' && konfigurasiInggris
+      ? ubahKategori(rute.kategoriKey, konfigurasi, konfigurasiInggris)
+      : rute.kategoriKey;
+
+  const ke = useCallback(
+    (halaman: HalamanWebsite, kategoriKey?: string) => {
+      const kategoriAsli =
+        bahasaTampil === 'en' && konfigurasiInggris
+          ? ubahKategori(kategoriKey, konfigurasiInggris, konfigurasi)
+          : kategoriKey;
+      setRute({ halaman, kategoriKey: kategoriAsli });
+      setMenuTerbuka(false);
+      setMegaAktif(null);
+      tulisUrlRute(halaman, kategoriAsli);
+      atasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    [bahasaTampil, konfigurasi, konfigurasiInggris, tulisUrlRute]
+  );
+
+  const aturKategoriKatalog = useCallback(
+    (kategoriKey?: string) => {
+      const kategoriAsli =
+        bahasaTampil === 'en' && konfigurasiInggris
+          ? ubahKategori(kategoriKey, konfigurasiInggris, konfigurasi)
+          : kategoriKey;
+      setRute((lama) => ({ ...lama, kategoriKey: kategoriAsli }));
+      tulisUrlRute('produk', kategoriAsli);
+    },
+    [bahasaTampil, konfigurasi, konfigurasiInggris, tulisUrlRute]
+  );
+
+  const tambahKeRfq = useCallback((produk: ProdukWebsite, jumlah = 1) => {
+    const tambahan = Math.max(1, jumlah);
+    setDaftarRfq((lama) => {
+      const ada = lama.find((i) => i.produkId === produk.id);
+      if (ada) {
+        return lama.map((i) =>
+          i.produkId === produk.id ? { ...i, jumlah: i.jumlah + tambahan } : i
+        );
+      }
+      return [
+        ...lama,
+        {
+          produkId: produk.id,
+          nama: produk.nama,
+          tipeModel: produk.tipeModel,
+          kategori: produk.kategori,
+          nomorIzinEdar: produk.nomorIzinEdar,
+          produsen: produk.produsen,
+          satuan: produk.satuan || 'Unit',
+          jumlah: tambahan,
+          hargaTayang: produk.hargaTayang,
+          referensiHarga: produk.referensiHarga,
+          kodeSKU: produk.kodeSKU,
+          varianId: produk.varianId
+        }
+      ];
+    });
+  }, []);
+
+  const ubahJumlahRfq = useCallback((produkId: string, jumlah: number) => {
+    if (jumlah <= 0) {
+      setDaftarRfq((lama) => lama.filter((i) => i.produkId !== produkId));
+      return;
+    }
+    setDaftarRfq((lama) => lama.map((i) => (i.produkId === produkId ? { ...i, jumlah } : i)));
+  }, []);
+
+  const hapusDariRfq = useCallback((produkId: string) => {
+    setDaftarRfq((lama) => lama.filter((i) => i.produkId !== produkId));
+  }, []);
+
+  const kosongkanRfq = useCallback(() => {
+    setDaftarRfq([]);
+  }, []);
+
+  const ajukanPenawaranLangsung = useCallback(
+    (produk: ProdukWebsite, jumlah = 1) => {
+      tambahKeRfq(produk, jumlah);
+      ke('kontak');
+    },
+    [tambahKeRfq, ke]
+  );
+
+  useEffect(() => {
+    document.title = konfigurasiTampil.identitas.judulSitus || konfigurasiTampil.identitas.nama;
+    const meta =
+      document.querySelector('meta[name="description"]') ??
+      (() => {
+        const baru = document.createElement('meta');
+        baru.name = 'description';
+        document.head.appendChild(baru);
+        return baru;
+      })();
+    meta.setAttribute('content', konfigurasiTampil.identitas.metaDeskripsi || '');
+    const og =
+      document.querySelector('meta[property="og:title"]') ??
+      (() => {
+        const baru = document.createElement('meta');
+        baru.setAttribute('property', 'og:title');
+        document.head.appendChild(baru);
+        return baru;
+      })();
+    og.setAttribute('content', konfigurasiTampil.identitas.judulSitus || konfigurasiTampil.identitas.nama);
+  }, [konfigurasiTampil.identitas]);
+
+  const tema = tampilanEfektif(konfigurasiTampil);
+  const seksi =
+    rute.halaman === 'beranda'
+      ? tema.berandaUrutan
+      : PETA_HALAMAN[rute.halaman] ?? PETA_HALAMAN.beranda;
+  const labelBeranda = konfigurasiTampil.menu.find((m) => m.halaman === 'beranda')?.label || 'Beranda';
+  const propsSeksi: PropsSeksi = useMemo(
+    () => ({
+      cfg: konfigurasiTampil,
+      cfgAsli: konfigurasi,
+      ke,
+      batasProduk: rute.halaman === 'beranda' ? 6 : undefined,
+      kategoriAktif: kategoriRuteTampil,
+      kataKunciAwal: rute.cari,
+      onPilihKategori: aturKategoriKatalog,
+      daftarRfq,
+      onTambahRfq: tambahKeRfq,
+      onUbahJumlahRfq: ubahJumlahRfq,
+      onHapusRfq: hapusDariRfq,
+      onKosongkanRfq: kosongkanRfq,
+      onAjukanPenawaranLangsung: ajukanPenawaranLangsung
+    }),
+    [
+      konfigurasiTampil,
+      ke,
+      rute.halaman,
+      kategoriRuteTampil,
+      rute.cari,
+      aturKategoriKatalog,
+      daftarRfq,
+      tambahKeRfq,
+      ubahJumlahRfq,
+      hapusDariRfq,
+      kosongkanRfq,
+      ajukanPenawaranLangsung
+    ]
+  );
+
+  const menu = konfigurasiTampil.menu.filter((m) => m.isActive);
+
+  return (
+    <WebsiteLanguageProvider language={bahasaTampil}>
+    <div
+      className={`template-${tema.templateId} min-h-screen bg-slate-50 text-slate-900 font-sans antialiased selection:bg-[var(--brand)] selection:text-white`}
+      style={{
+        '--brand': tema.warnaUtama,
+        '--brand-aksen': tema.warnaAksen,
+        fontFamily: tumpukanFont(tema.fontId)
+      } as CSSProperties}
+      ref={atasRef}
+    >
+      {/* Header: identitas + navigasi + CTA (meniru advisains.id) */}
+      <header className="situs-header sticky top-0 z-40 bg-white border-b border-slate-200">
+        <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6">
+          <div className="flex items-center gap-4 py-3">
+            <button type="button" onClick={() => ke('beranda')} className="flex items-center gap-3 cursor-pointer">
+              {selesaikanGambar(konfigurasiTampil.identitas.logoUrl) ? (
+                <img
+                  src={selesaikanGambar(konfigurasiTampil.identitas.logoUrl)}
+                  alt={konfigurasiTampil.identitas.nama}
+                  className="h-10 w-auto object-contain"
+                />
+              ) : (
+                <span className="w-10 h-10 rounded-xl bg-[var(--brand)] text-white flex items-center justify-center text-base font-bold">
+                  {inisialLogo(konfigurasiTampil.identitas.nama)}
+                </span>
+              )}
+              <span className="text-left">
+                <span className="block text-sm sm:text-base font-bold text-slate-900 leading-tight">
+                  {konfigurasiTampil.identitas.nama}
+                </span>
+                <span className="block text-2xs sm:text-xs text-slate-500 leading-tight">
+                  {konfigurasiTampil.identitas.tagline}
+                </span>
+              </span>
+            </button>
+
+            <nav className="hidden lg:flex items-center gap-1 ml-auto">
+              {menu.map((item) =>
+                item.tipe === 'mega' && item.kolom?.length ? (
+                  <div
+                    key={item.id}
+                    className="relative"
+                    onMouseEnter={() => setMegaAktif(item.id)}
+                    onMouseLeave={() => setMegaAktif(null)}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setMegaAktif(megaAktif === item.id ? null : item.id)}
+                      className={`flex items-center gap-1 px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${
+                        rute.halaman === 'produk' ? 'text-[var(--brand)]' : 'text-slate-700 hover:text-[var(--brand)]'
+                      }`}
+                    >
+                      {item.label}
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${megaAktif === item.id ? 'rotate-180' : ''}`} />
+                    </button>
+                    {megaAktif === item.id && (
+                      <div className="absolute left-0 top-full pt-2 z-50">
+                        <div className="w-[580px] bg-white border border-slate-200 rounded-2xl shadow-lg p-5">
+                          <div className="grid grid-cols-2 gap-5">
+                            {item.kolom.map((kolom) => (
+                              <div key={kolom.id}>
+                                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{kolom.judul}</p>
+                                <ul className="mt-2 space-y-1">
+                                  {kolom.tautan
+                                    .filter((t) => t.isActive)
+                                    .map((t) => (
+                                      <li key={t.id}>
+                                        <button
+                                          type="button"
+                                          onClick={() => ke(t.halaman || 'produk', t.kategoriKey)}
+                                          className="text-left text-sm text-slate-600 hover:text-[var(--brand)] cursor-pointer py-0.5"
+                                        >
+                                          {t.label}
+                                        </button>
+                                      </li>
+                                    ))}
+                                </ul>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mt-4 pt-3.5 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-xs text-slate-500">
+                              {t('Cari berdasarkan merek prinsipal, nomor izin edar, dan stok gudang')}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => ke('produk')}
+                              className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--brand)] hover:text-[var(--brand)] whitespace-nowrap cursor-pointer"
+                            >
+                              {t('Buka Seluruh Katalog')}
+                              <ArrowRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => ke(item.halaman || 'beranda')}
+                    className={`px-3 py-2 text-sm font-semibold transition-colors cursor-pointer ${
+                      rute.halaman === item.halaman ? 'text-[var(--brand)]' : 'text-slate-700 hover:text-[var(--brand)]'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                )
+              )}
+            </nav>
+
+            <div className="hidden lg:flex items-center gap-2 ml-2">
+              {konfigurasiTampil.header.portalTeks && konfigurasiTampil.header.portalUrl && (
+                <a
+                  href={konfigurasiTampil.header.portalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-slate-600 hover:text-slate-900 px-2 whitespace-nowrap"
+                >
+                  {konfigurasiTampil.header.portalTeks}
+                </a>
+              )}
+              {daftarRfq.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => ke('kontak')}
+                  className={`${gayaTombolHeader} bg-[color-mix(in_srgb,var(--brand)_10%,white)] text-[var(--brand)] border border-[color-mix(in_srgb,var(--brand)_35%,white)] hover:bg-[color-mix(in_srgb,var(--brand)_14%,white)] tabular-nums`}
+                >
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  RFQ ({daftarRfq.length})
+                </button>
+              )}
+              <HeaderAksi teks={konfigurasiTampil.header.utamaTeks} cfg={konfigurasiTampil} ke={ke} varian="isi" />
+              <LanguageToggle language={bahasa} loading={bahasaMemuat} onChange={pilihBahasa} />
+              {padaMasuk && (
+                <button
+                  type="button"
+                  onClick={padaMasuk}
+                  className={gayaTombolMasuk}
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  {t('Masuk')}
+                </button>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setMenuTerbuka((b) => !b)}
+              className="ml-auto lg:hidden p-2 rounded-lg border border-slate-300 text-slate-700 cursor-pointer"
+              aria-label={t('Buka menu')}
+            >
+              {menuTerbuka ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+          </div>
+
+          {menuTerbuka && (
+            <div className="lg:hidden pb-4 space-y-1">
+              {menu.map((item) => (
+                <div key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => ke(item.halaman || (item.tipe === 'mega' ? 'produk' : 'beranda'))}
+                    className="w-full text-left px-3 py-2 text-sm font-semibold text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
+                  >
+                    {item.label}
+                  </button>
+                  {item.tipe === 'mega' &&
+                    item.kolom?.flatMap((k) => k.tautan).filter((t) => t.isActive).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => ke(t.halaman || 'produk', t.kategoriKey)}
+                        className="w-full text-left pl-8 pr-3 py-1.5 text-xs text-slate-500 hover:text-[var(--brand)] cursor-pointer"
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                </div>
+              ))}
+              <div className="flex gap-2 pt-2">
+                <HeaderAksi teks={konfigurasiTampil.header.utamaTeks} cfg={konfigurasiTampil} ke={ke} varian="isi" />
+                <LanguageToggle language={bahasa} loading={bahasaMemuat} onChange={pilihBahasa} />
+                {padaMasuk && (
+                  <button
+                    type="button"
+                    onClick={padaMasuk}
+                    className={gayaTombolMasuk}
+                  >
+                    <LogIn className="w-3.5 h-3.5" />
+                    {t('Masuk')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {galatBahasa && (
+        <p role="alert" className="mx-auto max-w-[1440px] px-4 sm:px-6 py-2 text-xs text-rose-700 bg-rose-50 border-b border-rose-200">
+          {galatBahasa}
+        </p>
+      )}
+
+      {/* Isi halaman */}
+      <main>
+        {rute.halaman !== 'beranda' && (
+          <div className="bg-white border-b border-slate-200">
+            <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 py-3 flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => ke('beranda')}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                {labelBeranda}
+              </button>
+              <span className="text-xs text-slate-400">/</span>
+              <button
+                type="button"
+                onClick={() => ke(rute.halaman)}
+                className="text-xs font-bold text-slate-800 uppercase tracking-wider hover:text-[var(--brand)] cursor-pointer"
+              >
+                {t(LABEL_HALAMAN[rute.halaman] ?? rute.halaman)}
+              </button>
+              {rute.kategoriKey && (
+                <button
+                  type="button"
+                  onClick={() => aturKategoriKatalog(undefined)}
+                  title="Hapus filter grup katalog"
+                  className="ml-auto inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--brand)] bg-[color-mix(in_srgb,var(--brand)_10%,white)] border border-[color-mix(in_srgb,var(--brand)_35%,white)] hover:bg-[color-mix(in_srgb,var(--brand)_14%,white)] rounded-full px-2.5 py-0.5 cursor-pointer"
+                >
+                  <span>{t('Grup:')} {rute.kategoriKey}</span>
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {seksi.map((kunci) =>
+          kunci === 'hero' && tema.templateId === 'remedi-vscode' && rute.halaman === 'beranda' ? (
+            <SorotanKatalog key={kunci} cfg={konfigurasiTampil} ke={ke} />
+          ) : (
+            <TampilkanSeksi key={kunci} kunci={kunci} propsSeksi={propsSeksi} />
+          )
+        )}
+        {(rute.halaman === 'kontak' || rute.halaman === 'beranda') && <SeksiSosial cfg={konfigurasiTampil} ke={ke} />}
+      </main>
+
+      {/* Footer multi-kolom */}
+      <footer className="situs-footer bg-slate-900 text-slate-300">
+        <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 py-12">
+          <div className="grid lg:grid-cols-[1.3fr_repeat(3,0.9fr)] gap-8">
+            <div>
+              <p className="text-base font-bold text-white">{konfigurasiTampil.identitas.nama}</p>
+              <p className="text-xs text-slate-400 mt-1">{konfigurasiTampil.identitas.tagline}</p>
+              <div className="mt-4 space-y-2 text-xs text-slate-400">
+                <p className="flex items-start gap-2">
+                  <Phone className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  {konfigurasiTampil.kontak.telepon}
+                </p>
+                <p className="flex items-start gap-2">
+                  <Mail className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  {konfigurasiTampil.kontak.email}
+                </p>
+                <p className="flex items-start gap-2">
+                  <Globe className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  {konfigurasiTampil.kontak.alamatKantor}
+                </p>
+              </div>
+              {adaAksesDashboard && (
+                <a
+                  href="/"
+                  className="inline-flex items-center gap-1.5 mt-4 text-xs font-semibold text-slate-400 hover:text-white"
+                >
+                  {t('Kelola konten lewat dashboard Website')}
+                </a>
+              )}
+            </div>
+            {konfigurasiTampil.footerKolom.map((kolom) => (
+              <div key={kolom.id}>
+                <p className="text-xs font-bold uppercase tracking-wider text-white">{kolom.judul}</p>
+                <ul className="mt-3 space-y-1.5">
+                  {kolom.tautan
+                    .filter((t) => t.isActive)
+                    .map((t) => (
+                      <li key={t.id}>
+                        <button
+                          type="button"
+                          onClick={() => ke(t.halaman || 'beranda', t.kategoriKey)}
+                          className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          {t.label}
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500 mt-8 border-t border-slate-800 pt-4">{konfigurasiTampil.footerCatatan}</p>
+        </div>
+      </footer>
+    </div>
+    </WebsiteLanguageProvider>
+  );
+}
+
+function HeaderAksi({
+  teks,
+  cfg,
+  ke,
+  varian
+}: {
+  teks: string;
+  cfg: KonfigurasiSitus;
+  ke: (h: HalamanWebsite, k?: string) => void;
+  varian: 'isi' | 'garis';
+}) {
+  if (!teks) return null;
+  const tautan = varian === 'isi' ? cfg.header.utamaTautan : cfg.header.cadanganTautan;
+  const kelas =
+    varian === 'isi'
+      ? 'bg-[var(--brand)] text-white hover:bg-[color-mix(in_srgb,var(--brand)_85%,black)] border border-[var(--brand)]'
+      : 'bg-white text-slate-800 hover:bg-slate-100 border border-slate-300';
+
+  if (tautan?.tipe === 'halaman') {
+    return (
+      <button
+        type="button"
+        onClick={() => ke((tautan.nilai as HalamanWebsite) || 'beranda')}
+        className={`${gayaTombolHeader} ${kelas}`}
+      >
+        {teks}
+      </button>
+    );
+  }
+  const href = tautan ? hrefTautan(tautan, cfg.kontak) : '#';
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        if (!tautan?.tipe || href === '#') {
+          e.preventDefault();
+          ke('kontak');
+        }
+      }}
+      className={`${gayaTombolHeader} ${kelas}`}
+      target={tautan?.tipe === 'url' ? '_blank' : undefined}
+      rel={tautan?.tipe === 'url' ? 'noopener noreferrer' : undefined}
+    >
+      {teks}
+    </a>
+  );
+}
+
+function LanguageToggle({
+  language,
+  loading,
+  onChange
+}: {
+  language: WebsiteLanguage;
+  loading: boolean;
+  onChange: (language: WebsiteLanguage) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={language === 'en' ? 'Website language' : 'Bahasa situs'}
+      className="inline-flex items-center rounded-full border border-slate-300 p-0.5 text-2xs font-bold"
+    >
+      {(['id', 'en'] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          disabled={loading && option === 'en'}
+          aria-pressed={language === option}
+          aria-label={option === 'en' ? 'Switch to English' : 'Beralih ke bahasa Indonesia'}
+          className={`min-w-8 rounded-full px-2 py-1 transition-colors cursor-pointer disabled:cursor-wait ${
+            language === option ? 'bg-[var(--brand)] text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          {loading && option === 'en' ? '…' : option.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SeksiSosial({ cfg, ke }: PropsSeksi) {
+  const daftar = cfg.sosial.item.filter((s) => s.isActive);
+  if (!cfg.sosial.isActive || daftar.length === 0) return null;
+  return (
+    <section className="bg-white border-b border-slate-200">
+      <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 py-8 flex flex-wrap items-center gap-3">
+        <p className="text-sm font-bold text-slate-800">{cfg.sosial.kepala.judul}</p>
+        {daftar.map((s) => (
+          <a
+            key={s.id}
+            href={s.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded-full border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            {s.label}
+          </a>
+        ))}
+        {cfg.sosial.kepala.teksTautan && (
+          <div className="ml-auto">
+            <TombolSitus teks={cfg.sosial.kepala.teksTautan} tautan={cfg.sosial.kepala.tautan} cfg={cfg} ke={ke} />
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export { muatSnapshot, adalahKonfigurasiSitus };

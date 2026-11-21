@@ -1,0 +1,641 @@
+/**
+ * RENDERER MEDAN GENERIK — satu komponen untuk semua jenis medan konten website.
+ *
+ * Nilai diakses lewat jalur bertitik (mis. 'kepala.judul') sehingga seksi dengan
+ * struktur bersarang tetap memakai definisi medan yang sama.
+ */
+import { useEffect, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, ImageOff, Plus, Trash2 } from 'lucide-react';
+import { HalamanWebsite, TautanWebsite } from '../../../../types';
+import { kompresGambarWebsite, selesaikanGambar, simpanMediaWebsite } from '../../../../utils/website';
+import type { Medan, NilaiMedan } from '../skema';
+
+export const KELAS_INPUT =
+  'w-full px-3 py-2 border border-slate-300 rounded-lg text-xs bg-white text-slate-900 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none';
+export const KELAS_LABEL = 'block font-semibold text-slate-700 text-xs mb-1';
+
+const HALAMAN: HalamanWebsite[] = ['beranda', 'produk', 'solusi', 'layanan', 'sumber-daya', 'tentang', 'kontak'];
+const LABEL_HALAMAN: Record<HalamanWebsite, string> = {
+  beranda: 'Beranda',
+  produk: 'Produk',
+  solusi: 'Solusi',
+  layanan: 'Layanan',
+  'sumber-daya': 'Sumber Daya',
+  tentang: 'Tentang Kami',
+  kontak: 'Kontak'
+};
+
+export function ambilJalur(objek: unknown, jalur: string): NilaiMedan {
+  return jalur.split('.').reduce<unknown>((acc, bagian) => {
+    if (acc === null || acc === undefined) return undefined;
+    return (acc as Record<string, unknown>)[bagian];
+  }, objek) as NilaiMedan;
+}
+
+/** Klon tidak-mutasi sepanjang jalur; bagian antara yang hilang dibuat sebagai objek. */
+export function setJalur<T>(objek: T, jalur: string, nilai: unknown): T {
+  const bagian = jalur.split('.');
+  const ganti = (acc: unknown, kedalaman: number): unknown => {
+    const kunci = bagian[kedalaman];
+    const dasar = (acc ?? {}) as Record<string, unknown>;
+    const salinan = Array.isArray(acc) ? [...(acc as unknown[])] : { ...dasar };
+    if (kedalaman === bagian.length - 1) {
+      (salinan as Record<string, unknown>)[kunci] = nilai;
+      return salinan;
+    }
+    (salinan as Record<string, unknown>)[kunci] = ganti(dasar[kunci], kedalaman + 1);
+    return salinan;
+  };
+  return ganti(objek, 0) as T;
+}
+
+function Bacaan({ petunjuk }: { petunjuk?: string }) {
+  if (!petunjuk) return null;
+  return <p className="text-2xs text-slate-500 mt-1 leading-relaxed">{petunjuk}</p>;
+}
+
+function MedanTeks({
+  nilai,
+  onChange,
+  multiline,
+  rows,
+  placeholder
+}: {
+  nilai: unknown;
+  onChange: (v: string) => void;
+  multiline?: boolean;
+  rows?: number;
+  placeholder?: string;
+}) {
+  if (multiline) {
+    return (
+      <textarea
+        value={String(nilai ?? '')}
+        rows={rows ?? 3}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${KELAS_INPUT} resize-y leading-relaxed`}
+      />
+    );
+  }
+  return (
+    <input
+      type="text"
+      value={String(nilai ?? '')}
+      placeholder={placeholder}
+      onChange={(e) => onChange(e.target.value)}
+      className={KELAS_INPUT}
+    />
+  );
+}
+
+/** Daftar string dengan satu baris per butir; state lokal menjaga baris kosong saat mengetik. */
+function MedanDaftarTeks({ nilai, onChange }: { nilai: unknown; onChange: (v: string[]) => void }) {
+  const daftar = Array.isArray(nilai) ? (nilai as unknown[]).map((n) => String(n ?? '')) : [];
+  const [teks, setTeks] = useState(daftar.join('\n'));
+  const suarKeluar = useRef(teks);
+  const pantul = daftar.join('\n');
+
+  useEffect(() => {
+    if (pantul !== suarKeluar.current) {
+      suarKeluar.current = pantul;
+      setTeks(pantul);
+    }
+  }, [pantul]);
+
+  return (
+    <textarea
+      value={teks}
+      rows={Math.max(3, daftar.length + 1)}
+      placeholder={'Satu butir per baris'}
+      onChange={(e) => {
+        const baru = e.target.value;
+        suarKeluar.current = baru;
+        setTeks(baru);
+        onChange(
+          baru
+            .split('\n')
+            .map((b) => b.trim())
+            .filter(Boolean)
+        );
+      }}
+      className={`${KELAS_INPUT} resize-y font-mono leading-relaxed`}
+    />
+  );
+}
+
+function MedanAngka({ nilai, onChange }: { nilai: unknown; onChange: (v: number) => void }) {
+  return (
+    <input
+      type="number"
+      value={Number(nilai ?? 0)}
+      onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
+      className={KELAS_INPUT}
+    />
+  );
+}
+
+function MedanPilihan({
+  nilai,
+  opsi,
+  onChange,
+  labelOpsi
+}: {
+  nilai: unknown;
+  opsi: string[];
+  onChange: (v: string) => void;
+  labelOpsi?: (o: string) => string;
+}) {
+  return (
+    <select value={String(nilai ?? '')} onChange={(e) => onChange(e.target.value)} className={KELAS_INPUT}>
+      {!opsi.includes(String(nilai ?? '')) && <option value={String(nilai ?? '')}>{String(nilai ?? '(kosong)')}</option>}
+      {opsi.map((o) => (
+        <option key={o} value={o}>
+          {labelOpsi ? labelOpsi(o) : o}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+const TIPE_TAUTAN: TautanWebsite['tipe'][] = ['halaman', 'url', 'whatsapp', 'email', 'telepon'];
+const LABEL_TIPE: Record<TautanWebsite['tipe'], string> = {
+  halaman: 'Halaman situs',
+  url: 'URL luar',
+  whatsapp: 'WhatsApp',
+  email: 'Surel',
+  telepon: 'Telepon'
+};
+
+function MedanTautan({ nilai, onChange }: { nilai: unknown; onChange: (v: TautanWebsite) => void }) {
+  const tautan = (nilai ?? { tipe: 'halaman' }) as TautanWebsite;
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <select
+        value={tautan.tipe}
+        onChange={(e) => {
+          const tipe = e.target.value as TautanWebsite['tipe'];
+          onChange({ tipe, nilai: tipe === 'halaman' ? 'beranda' : undefined });
+        }}
+        className={KELAS_INPUT}
+      >
+        {TIPE_TAUTAN.map((t) => (
+          <option key={t} value={t}>
+            {LABEL_TIPE[t]}
+          </option>
+        ))}
+      </select>
+      {tautan.tipe === 'halaman' ? (
+        <select
+          value={String(tautan.nilai ?? 'beranda')}
+          onChange={(e) => onChange({ tipe: 'halaman', nilai: e.target.value })}
+          className={KELAS_INPUT}
+        >
+          {HALAMAN.map((h) => (
+            <option key={h} value={h}>
+              {LABEL_HALAMAN[h]}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type="text"
+          value={String(tautan.nilai ?? '')}
+          placeholder={tautan.tipe === 'whatsapp' ? '628123456789' : tautan.tipe === 'email' ? 'pjt@anugrahmitraselaras.co.id' : 'https://'}
+          onChange={(e) => onChange({ tipe: tautan.tipe, nilai: e.target.value })}
+          className={KELAS_INPUT}
+        />
+      )}
+    </div>
+  );
+}
+
+function MedanGambar({
+  nilai,
+  onChange,
+  petunjuk,
+  keyMedan,
+  label
+}: {
+  nilai: unknown;
+  onChange: (v: string | undefined) => void;
+  petunjuk?: string;
+  keyMedan?: string;
+  label?: string;
+}) {
+  const [sedangOlah, setSedangOlah] = useState(false);
+  const [gagal, setGagal] = useState('');
+  const rujukan = String(nilai ?? '');
+  const pratinjau = selesaikanGambar(rujukan || undefined);
+
+  const kunciLower = (keyMedan ?? '').toLowerCase();
+  const labelLower = (label ?? '').toLowerCase();
+
+  let kelasKotak = 'w-full aspect-[3/2]'; // Default sesuai rekomendasi 1200×800 (hero, galeri, profil)
+  if (kunciLower.includes('favicon') || labelLower.includes('favicon')) {
+    kelasKotak = 'w-20 aspect-square'; // Favicon 64×64
+  } else if (kunciLower.includes('logo') || labelLower.includes('logo')) {
+    kelasKotak = kunciLower.includes('logo') ? 'w-44 aspect-[8/3]' : 'w-44 aspect-[2/1]'; // Logo identitas 400×150 / logo merek 400×200
+  } else if (kunciLower.includes('produk') || labelLower.includes('persegi') || labelLower.includes('square')) {
+    kelasKotak = 'w-32 sm:w-36 aspect-square'; // Produk 1000×1000
+  } else if (labelLower.includes('banner')) {
+    kelasKotak = 'w-full aspect-[16/9]'; // Banner slide 1600×900
+  } else if (labelLower.includes('solusi')) {
+    kelasKotak = 'w-full aspect-[4/3]'; // Solusi 800×600
+  } else if (labelLower.includes('artikel') || labelLower.includes('sampul')) {
+    kelasKotak = 'w-full aspect-[1200/630]'; // Sampul artikel 1200×630
+  }
+
+  const pilihBerkas = async (berkas?: File) => {
+    if (!berkas) return;
+    setSedangOlah(true);
+    setGagal('');
+    try {
+      const adalahLogoAtauIkon =
+        kunciLower.includes('logo') ||
+        labelLower.includes('logo') ||
+        kunciLower.includes('favicon') ||
+        labelLower.includes('favicon') ||
+        labelLower.includes('banner') ||
+        labelLower.includes('hero');
+      const dataUrl = await kompresGambarWebsite(berkas, 1280, 0.82, adalahLogoAtauIkon);
+      const id = `img-${Math.random().toString(36).slice(2, 9)}`;
+      const mediaTersimpan = simpanMediaWebsite({ id, nama: berkas.name, dataUrl, ukuran: berkas.size });
+      if (!mediaTersimpan.some((media) => media.id === id)) {
+        throw new Error('Penyimpanan media website penuh.');
+      }
+      onChange(`media:${id}`);
+    } catch {
+      setGagal('Gambar gagal diolah. Gunakan PNG/JPG di bawah 8 MB.');
+    } finally {
+      setSedangOlah(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2.5">
+      {/* Kotak Pratinjau Foto proporsional sesuai jenis gambar */}
+      <div className={`relative ${kelasKotak} rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center overflow-hidden group hover:border-emerald-500 transition-colors shadow-inner`}>
+        {pratinjau ? (
+          <>
+            <img src={pratinjau} alt="Pratinjau gambar" className="w-full h-full object-contain p-1.5 bg-slate-900/5" />
+            <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+              <label className="px-3 py-1.5 bg-white text-slate-800 rounded-lg text-2xs font-bold shadow-md hover:bg-slate-100 cursor-pointer">
+                {sedangOlah ? '…' : 'Ganti'}
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => void pilihBerkas(e.target.files?.[0])}
+                />
+              </label>
+              {rujukan && (
+                <button
+                  type="button"
+                  onClick={() => onChange(undefined)}
+                  className="px-3 py-1.5 bg-rose-600 text-white rounded-lg text-2xs font-bold shadow-md hover:bg-rose-700 cursor-pointer"
+                >
+                  Hapus
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <label className="flex flex-col items-center justify-center w-full h-full cursor-pointer p-3 text-center">
+            <ImageOff className="w-5 h-5 text-slate-400 mb-1" />
+            <span className="text-2xs font-bold text-slate-700 mb-0.5">
+              {sedangOlah ? 'Mengolah...' : 'Unggah Foto'}
+            </span>
+            <span className="text-3xs text-slate-400 hidden sm:inline">PNG/JPG (Max 8MB)</span>
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => void pilihBerkas(e.target.files?.[0])}
+            />
+          </label>
+        )}
+      </div>
+
+      {pratinjau && (
+        <div className="flex items-center gap-2">
+          <label className="px-3 py-1.5 rounded-lg border border-slate-300 text-2xs font-bold text-slate-700 hover:bg-slate-100 text-center cursor-pointer bg-white shadow-sm">
+            {sedangOlah ? 'Mengolah…' : 'Ganti Foto'}
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => void pilihBerkas(e.target.files?.[0])}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            className="px-3 py-1.5 rounded-lg border border-rose-300 text-2xs text-rose-600 hover:bg-rose-50 font-bold bg-white shadow-sm cursor-pointer"
+          >
+            Hapus
+          </button>
+        </div>
+      )}
+
+      <input
+        type="text"
+        value={rujukan.startsWith('media:') ? '' : rujukan}
+        placeholder="atau tempel URL gambar langsung https://…"
+        onChange={(e) => onChange(e.target.value || undefined)}
+        className={KELAS_INPUT}
+      />
+      {petunjuk && <Bacaan petunjuk={petunjuk} />}
+      {gagal && <p className="text-3xs font-semibold text-rose-700">{gagal}</p>}
+    </div>
+  );
+}
+
+export function MedanGambarBanyak({
+  nilai,
+  onChange,
+  petunjuk
+}: {
+  nilai: unknown;
+  onChange: (v: string[]) => void;
+  petunjuk?: string;
+}) {
+  const daftar = Array.isArray(nilai) ? nilai.filter((foto): foto is string => typeof foto === 'string') : [];
+  const [sedangOlah, setSedangOlah] = useState(false);
+  const [urlBaru, setUrlBaru] = useState('');
+  const [gagal, setGagal] = useState('');
+
+  const pilihBerkas = async (berkasTerpilih: FileList | null) => {
+    const berkas = Array.from(berkasTerpilih ?? []);
+    if (berkas.length === 0) return;
+    if (berkas.some((file) => file.size > 8 * 1024 * 1024)) {
+      setGagal('Ukuran maksimal 8 MB per foto.');
+      return;
+    }
+    setSedangOlah(true);
+    setGagal('');
+    try {
+      const referensiBaru = await Promise.all(
+        berkas.map(async (file) => {
+          const dataUrl = await kompresGambarWebsite(file, 1280, 0.82, true);
+          const id = `img-${Math.random().toString(36).slice(2, 9)}`;
+          const mediaTersimpan = simpanMediaWebsite({ id, nama: file.name, dataUrl, ukuran: file.size });
+          if (!mediaTersimpan.some((media) => media.id === id)) {
+            throw new Error('Penyimpanan media website penuh.');
+          }
+          return `media:${id}`;
+        })
+      );
+      onChange([...daftar, ...referensiBaru]);
+    } catch {
+      setGagal('Foto gagal diolah. Gunakan PNG atau JPG yang valid.');
+    } finally {
+      setSedangOlah(false);
+    }
+  };
+
+  const pindahFoto = (indeks: number, arah: -1 | 1) => {
+    const tujuan = indeks + arah;
+    if (tujuan < 0 || tujuan >= daftar.length) return;
+    const baru = [...daftar];
+    [baru[indeks], baru[tujuan]] = [baru[tujuan], baru[indeks]];
+    onChange(baru);
+  };
+
+  const tambahUrl = () => {
+    const url = urlBaru.trim();
+    if (!url) return;
+    onChange([...daftar, url]);
+    setUrlBaru('');
+    setGagal('');
+  };
+
+  return (
+    <div className="space-y-3">
+      {daftar.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {daftar.map((rujukan, indeks) => {
+            const pratinjau = selesaikanGambar(rujukan || undefined);
+            return (
+              <div key={`${indeks}-${rujukan}`} className="space-y-1.5">
+                <div className="relative aspect-square rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
+                  {pratinjau ? (
+                    <img src={pratinjau} alt={`Foto ${indeks + 1}`} className="w-full h-full object-contain p-1" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <ImageOff className="w-5 h-5 text-slate-400" />
+                    </div>
+                  )}
+                  {indeks === 0 && (
+                    <span className="absolute left-1 top-1 rounded bg-slate-900/75 text-white text-3xs px-1.5 py-0.5">
+                      Utama
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-1">
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => pindahFoto(indeks, -1)}
+                      disabled={sedangOlah || indeks === 0}
+                      aria-label={`Pindahkan foto ${indeks + 1} ke atas`}
+                      className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
+                    >
+                      <ArrowUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => pindahFoto(indeks, 1)}
+                      disabled={sedangOlah || indeks === daftar.length - 1}
+                      aria-label={`Pindahkan foto ${indeks + 1} ke bawah`}
+                      className="p-1 rounded text-slate-500 hover:bg-slate-100 disabled:opacity-30 cursor-pointer"
+                    >
+                      <ArrowDown className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onChange(daftar.filter((_, i) => i !== indeks))}
+                    disabled={sedangOlah}
+                    aria-label={`Hapus foto ${indeks + 1}`}
+                    className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer">
+        <Plus className="w-4 h-4" />
+        {sedangOlah ? 'Mengolah foto…' : 'Unggah satu atau beberapa foto'}
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          disabled={sedangOlah}
+          onChange={(e) => {
+            void pilihBerkas(e.target.files);
+            e.target.value = '';
+          }}
+        />
+      </label>
+
+      <div className="flex gap-2">
+        <input
+          type="url"
+          value={urlBaru}
+          placeholder="atau tambahkan URL gambar https://…"
+          disabled={sedangOlah}
+          onChange={(e) => setUrlBaru(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              tambahUrl();
+            }
+          }}
+          className={KELAS_INPUT}
+        />
+        <button
+          type="button"
+          onClick={tambahUrl}
+          disabled={sedangOlah || !urlBaru.trim()}
+          className="px-3 rounded-lg border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+        >
+          Tambah URL
+        </button>
+      </div>
+      {petunjuk && <Bacaan petunjuk={petunjuk} />}
+      {gagal && <p className="text-3xs font-semibold text-rose-700">{gagal}</p>}
+    </div>
+  );
+}
+
+function MedanBertingkat({
+  medan,
+  nilai,
+  onChange,
+  petunjuk
+}: {
+  medan: Extract<Medan, { kind: 'bertingkat' }>;
+  nilai: unknown;
+  onChange: (v: unknown[]) => void;
+  petunjuk?: string;
+}) {
+  const daftar = Array.isArray(nilai) ? [...(nilai as Record<string, unknown>[])] : [];
+
+  const ganti = (indeks: number, item: Record<string, unknown>) => {
+    const baru = [...daftar];
+    baru[indeks] = item;
+    onChange(baru);
+  };
+  const pindah = (indeks: number, arah: -1 | 1) => {
+    const tujuan = indeks + arah;
+    if (tujuan < 0 || tujuan >= daftar.length) return;
+    const baru = [...daftar];
+    [baru[indeks], baru[tujuan]] = [baru[tujuan], baru[indeks]];
+    onChange(baru);
+  };
+
+  return (
+    <div className="space-y-2">
+      {petunjuk && <Bacaan petunjuk={petunjuk} />}
+      {daftar.map((item, indeks) => (
+        <div key={indeks} className="border border-slate-200 rounded-lg bg-slate-50 p-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <span className="text-xs font-bold text-slate-600 truncate">{medan.judulItem(item)}</span>
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => pindah(indeks, -1)}
+                disabled={indeks === 0}
+                className="p-1 rounded text-slate-500 hover:bg-slate-200 disabled:opacity-30 cursor-pointer"
+                aria-label="Naik"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => pindah(indeks, 1)}
+                disabled={indeks === daftar.length - 1}
+                className="p-1 rounded text-slate-500 hover:bg-slate-200 disabled:opacity-30 cursor-pointer"
+                aria-label="Turun"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange(daftar.filter((_, i) => i !== indeks))}
+                className="p-1 rounded text-rose-600 hover:bg-rose-50 cursor-pointer"
+                aria-label="Hapus"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {medan.medan.map((m) => (
+              <MedanEditor
+                key={m.key}
+                medan={m}
+                nilai={ambilJalur(item, m.key)}
+                onChange={(v) => ganti(indeks, setJalur(item, m.key, v))}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={() => onChange([...daftar, medan.pabrik()])}
+        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-dashed border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-200 cursor-pointer"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        Tambah {medan.label}
+      </button>
+    </div>
+  );
+}
+
+export function MedanEditor({
+  medan,
+  nilai,
+  onChange
+}: {
+  medan: Medan;
+  nilai: NilaiMedan;
+  onChange: (nilai: NilaiMedan) => void;
+}) {
+  return (
+    <div>
+      <label className={KELAS_LABEL}>{medan.label}</label>
+      {medan.kind === 'teks' && <MedanTeks nilai={nilai} onChange={onChange} />}
+      {medan.kind === 'textarea' && <MedanTeks nilai={nilai} onChange={onChange} multiline rows={medan.rows} />}
+      {medan.kind === 'daftarTeks' && <MedanDaftarTeks nilai={nilai} onChange={onChange} />}
+      {medan.kind === 'angka' && <MedanAngka nilai={nilai} onChange={onChange} />}
+      {medan.kind === 'pilihan' && (
+        <MedanPilihan
+          nilai={nilai}
+          opsi={medan.opsi}
+          onChange={onChange}
+          labelOpsi={(o) => medan.labelOpsi?.[o] ?? LABEL_HALAMAN[o as HalamanWebsite] ?? o}
+        />
+      )}
+      {medan.kind === 'tautan' && <MedanTautan nilai={nilai} onChange={onChange} />}
+      {medan.kind === 'gambar' && <MedanGambar nilai={nilai} onChange={onChange} petunjuk={medan.petunjuk} keyMedan={medan.key} label={medan.label} />}
+      {medan.kind === 'gambarBanyak' && <MedanGambarBanyak nilai={nilai} onChange={onChange} petunjuk={medan.petunjuk} />}
+      {medan.kind === 'bertingkat' && (
+        <MedanBertingkat medan={medan} nilai={nilai} onChange={onChange} petunjuk={medan.petunjuk} />
+      )}
+      {medan.petunjuk && medan.kind !== 'gambar' && medan.kind !== 'gambarBanyak' && medan.kind !== 'bertingkat' && (
+        <Bacaan petunjuk={medan.petunjuk} />
+      )}
+    </div>
+  );
+}
+
+export { LABEL_HALAMAN };

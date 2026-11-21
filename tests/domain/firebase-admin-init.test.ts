@@ -1,0 +1,452 @@
+import crypto from 'crypto';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  DEFAULT_FIRESTORE_DATABASE_ID,
+  getFirebaseAdminApp,
+  getFirebaseAdminAuth,
+  getFirebaseAdminDb,
+  getFirebaseAdminStatus,
+  initializeFirebaseAdmin,
+  maskClientEmail,
+  normalizePrivateKey,
+  resetFirebaseAdminForTests,
+  resolveFirebaseAdminConfig,
+  resolveFirestoreDatabaseId,
+  resolveWindowsFriendlyPath,
+  validateVpsFirebaseConfig
+} from '../../server/firebaseAdmin';
+
+function generateEphemeralRsaPrivateKeyPem(): string {
+  const { privateKey } = crypto.generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    privateKeyEncoding: {
+      type: 'pkcs8',
+      format: 'pem'
+    },
+    publicKeyEncoding: {
+      type: 'spki',
+      format: 'pem'
+    }
+  });
+  return privateKey;
+}
+
+describe('Firebase Admin SDK & Named Firestore Database (Windows VPS)', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(async () => {
+    await resetFirebaseAdminForTests();
+    while (tempDirs.length > 0) {
+      const dir = tempDirs.pop();
+      if (dir && fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('menormalisasi private key \\n dan menyamarkan email service account secara aman', () => {
+    const escaped = '"-----BEGIN PRIVATE KEY-----\\nABC123\\n-----END PRIVATE KEY-----\\n"';
+    expect(normalizePrivateKey(escaped)).toBe(
+      '-----BEGIN PRIVATE KEY-----\nABC123\n-----END PRIVATE KEY-----\n'
+    );
+    expect(maskClientEmail('firebase-adminsdk-xyz@sixth-cedar-f5v9p.iam.gserviceaccount.com')).toBe(
+      'fir***yz@sixth-cedar-f5v9p.iam.gserviceaccount.com'
+    );
+  });
+
+  it('mempertahankan path gaya Windows (C:\\AMS\\Secrets\\...) dan meresolve path relatif', () => {
+    const winPath = 'C:\\AMS\\Secrets\\firebase-service-account.json';
+    expect(resolveWindowsFriendlyPath(winPath, '/app/applet')).toBe(winPath);
+
+    const relPath = resolveWindowsFriendlyPath('secrets/sa.json', '/tmp/ams-vps');
+    expect(relPath).toBe(path.resolve('/tmp/ams-vps', 'secrets/sa.json'));
+  });
+
+  it('menggunakan mode unconfigured tanpa crash bila kredensial Admin SDK belum dipasang', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-empty-'));
+    tempDirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, 'firebase-applet-config.json'),
+      JSON.stringify({
+        projectId: 'sixth-cedar-f5v9p',
+        firestoreDatabaseId: DEFAULT_FIRESTORE_DATABASE_ID
+      }),
+      'utf8'
+    );
+
+    const status = initializeFirebaseAdmin({ rootDir: dir, env: {}, forceReinit: true });
+    expect(status.initialized).toBe(false);
+    expect(status.connected).toBe(false);
+    expect(status.credentialSource).toBe('unconfigured');
+    expect(status.projectId).toBe('sixth-cedar-f5v9p');
+    expect(status.databaseId).toBe(
+      'ai-studio-amsintegratedsys-a6cc9862-667b-4eea-be94-96098a1c9439'
+    );
+    expect(getFirebaseAdminApp()).toBeNull();
+    expect(getFirebaseAdminDb()).toBeNull();
+  });
+
+  it('melaporkan error yang jelas tanpa melempar exception bila file Service Account tidak ditemukan', () => {
+    const missingPath = path.join(os.tmpdir(), 'tidak-ada-service-account-ams.json');
+    const resolved = resolveFirebaseAdminConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        FIREBASE_PROJECT_ID: 'ams-staging-test',
+        FIREBASE_FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID,
+        FIREBASE_SERVICE_ACCOUNT_PATH: missingPath
+      }
+    });
+
+    expect(resolved.credentialSource).toBe('unconfigured');
+    expect(resolved.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+    expect(resolved.configError).toContain(missingPath);
+  });
+
+  it('menginisialisasi Firebase Admin App, Auth, dan Firestore bernama via FIREBASE_SERVICE_ACCOUNT_PATH', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-file-'));
+    tempDirs.push(dir);
+
+    const keyPath = path.join(dir, 'firebase-service-account.json');
+    const privateKey = generateEphemeralRsaPrivateKeyPem();
+    fs.writeFileSync(
+      keyPath,
+      JSON.stringify({
+        type: 'service_account',
+        project_id: 'sixth-cedar-f5v9p',
+        private_key_id: 'ephemeral-test-key',
+        private_key: privateKey,
+        client_email: 'firebase-adminsdk-ams@sixth-cedar-f5v9p.iam.gserviceaccount.com'
+      }),
+      'utf8'
+    );
+
+    const status = initializeFirebaseAdmin({
+      rootDir: dir,
+      env: {
+        FIREBASE_SERVICE_ACCOUNT_PATH: keyPath,
+        FIREBASE_FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID
+      },
+      forceReinit: true
+    });
+
+    expect(status.initialized).toBe(true);
+    expect(status.credentialSource).toBe('service-account-file');
+    expect(status.projectId).toBe('sixth-cedar-f5v9p');
+    expect(status.databaseId).toBe(
+      'ai-studio-amsintegratedsys-a6cc9862-667b-4eea-be94-96098a1c9439'
+    );
+    expect(status.serviceAccountEmailMasked).toBe(
+      'fir***ms@sixth-cedar-f5v9p.iam.gserviceaccount.com'
+    );
+
+    const db = getFirebaseAdminDb();
+    expect(db).not.toBeNull();
+    expect(db?.databaseId).toBe(
+      'ai-studio-amsintegratedsys-a6cc9862-667b-4eea-be94-96098a1c9439'
+    );
+    expect(getFirebaseAdminAuth()).not.toBeNull();
+    expect(getFirebaseAdminStatus().initialized).toBe(true);
+  });
+
+  it('mendukung FIREBASE_SERVICE_ACCOUNT_JSON dalam format Base64 dengan databaseId eksplisit', () => {
+    const privateKey = generateEphemeralRsaPrivateKeyPem();
+    const encoded = Buffer.from(
+      JSON.stringify({
+        project_id: 'ams-windows-staging',
+        client_email: 'staging-sa@ams-windows-staging.iam.gserviceaccount.com',
+        private_key: privateKey
+      }),
+      'utf8'
+    ).toString('base64');
+
+    const status = initializeFirebaseAdmin({
+      rootDir: os.tmpdir(),
+      env: {
+        FIREBASE_SERVICE_ACCOUNT_JSON: encoded,
+        FIREBASE_FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID
+      },
+      forceReinit: true
+    });
+
+    expect(status.initialized).toBe(true);
+    expect(status.credentialSource).toBe('service-account-json');
+    expect(status.projectId).toBe('ams-windows-staging');
+    expect(status.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+    expect(getFirebaseAdminDb()?.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+  });
+
+  it('mendukung pasangan FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY dengan escape \\n', () => {
+    const privateKeyEscaped = generateEphemeralRsaPrivateKeyPem().replace(/\n/g, '\\n');
+
+    const status = initializeFirebaseAdmin({
+      rootDir: os.tmpdir(),
+      env: {
+        FIREBASE_PROJECT_ID: 'ams-keypair-staging',
+        FIREBASE_FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID,
+        FIREBASE_CLIENT_EMAIL: 'keypair-sa@ams-keypair-staging.iam.gserviceaccount.com',
+        FIREBASE_PRIVATE_KEY: `"${privateKeyEscaped}"`
+      },
+      forceReinit: true
+    });
+
+    expect(status.initialized).toBe(true);
+    expect(status.credentialSource).toBe('env-keypair');
+    expect(status.projectId).toBe('ams-keypair-staging');
+    expect(getFirebaseAdminDb()?.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+  });
+
+  it('melindungi preview AI Studio (K_SERVICE=ais-dev-*) agar tetap memakai project dan databaseId bawaan', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-preview-'));
+    tempDirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, 'firebase-applet-config.json'),
+      JSON.stringify({
+        projectId: 'sixth-cedar-f5v9p',
+        firestoreDatabaseId: DEFAULT_FIRESTORE_DATABASE_ID
+      }),
+      'utf8'
+    );
+
+    const resolved = resolveFirebaseAdminConfig({
+      rootDir: dir,
+      env: {
+        K_SERVICE: 'ais-dev-5wlp3yc5jxvcxnp4msjgv6',
+        VITE_DEPLOYMENT_ENV: 'staging',
+        VITE_FIREBASE_PROJECT_ID: 'ams-staging',
+        VITE_FIRESTORE_DATABASE_ID: '(default)'
+      }
+    });
+
+    expect(resolved.projectId).toBe('sixth-cedar-f5v9p');
+    expect(resolved.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+  });
+
+  it('menonaktifkan koneksi Firebase production di preview AI Studio', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-prod-preview-'));
+    tempDirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, 'firebase-applet-config.json'),
+      JSON.stringify({
+        projectId: 'sixth-cedar-f5v9p',
+        firestoreDatabaseId: DEFAULT_FIRESTORE_DATABASE_ID
+      }),
+      'utf8'
+    );
+
+    const resolved = resolveFirebaseAdminConfig({
+      rootDir: dir,
+      env: {
+        K_SERVICE: 'ais-dev-preview',
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-system',
+          client_email: 'preview@ams-integrated-system.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(resolved.credentialSource).toBe('unconfigured');
+    expect(resolved.configError).toContain('dinonaktifkan pada preview AI Studio');
+  });
+
+  it('memvalidasi FIREBASE_SERVICE_ACCOUNT_JSON valid dan memuat FIRESTORE_DATABASE_ID eksplisit di VPS', () => {
+    const privateKey = generateEphemeralRsaPrivateKeyPem();
+    const saJson = JSON.stringify({
+      project_id: 'sixth-cedar-f5v9p',
+      client_email: 'vps-runner@sixth-cedar-f5v9p.iam.gserviceaccount.com',
+      private_key: privateKey
+    });
+
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'staging',
+        FIREBASE_SERVICE_ACCOUNT_JSON: saJson,
+        FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID
+      }
+    });
+
+    expect(validation.isVpsRuntime).toBe(true);
+    expect(validation.hasServiceAccountJson).toBe(true);
+    expect(validation.serviceAccountJsonValid).toBe(true);
+    expect(validation.serviceAccountJsonStatus).toBe('valid');
+    expect(validation.firestoreDatabaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+    expect(validation.databaseIdSource).toBe('FIRESTORE_DATABASE_ID');
+    expect(validation.databaseIdMatchesTarget).toBe(true);
+    expect(validation.readyForStableConnection).toBe(true);
+    expect(validation.errors).toEqual([]);
+  });
+
+  it('menerima target database staging eksplisit yang berbeda dari default AI Studio', () => {
+    const privateKey = generateEphemeralRsaPrivateKeyPem();
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'staging',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-staging',
+          client_email: 'vps-runner@ams-integrated-staging.iam.gserviceaccount.com',
+          private_key: privateKey
+        }),
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIRESTORE_EXPECTED_DATABASE_ID: '(default)'
+      }
+    });
+
+    expect(validation.firestoreDatabaseId).toBe('(default)');
+    expect(validation.databaseIdMatchesTarget).toBe(true);
+    expect(validation.warnings.some((warning) => warning.includes('berbeda dari target'))).toBe(false);
+    expect(validation.readyForStableConnection).toBe(true);
+  });
+
+  it('menolak rilis production bila target proyek dan database belum ditentukan eksplisit', () => {
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-system',
+          client_email: 'vps-runner@ams-integrated-system.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(validation.readyForStableConnection).toBe(false);
+    expect(validation.errors).toContain(
+      'FIREBASE_EXPECTED_PROJECT_ID wajib diset ke ams-integrated-system untuk rilis production.'
+    );
+    expect(validation.errors).toContain(
+      'FIRESTORE_EXPECTED_DATABASE_ID wajib diset eksplisit untuk rilis production.'
+    );
+  });
+
+  it('menolak Service Account production dari proyek selain target', () => {
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+        VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_FIRESTORE_DATABASE_ID: '(default)',
+        FIRESTORE_EXPECTED_DATABASE_ID: '(default)',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-staging',
+          client_email: 'vps-runner@ams-integrated-staging.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(validation.readyForStableConnection).toBe(false);
+    expect(validation.errors.some((error) => error.includes('tidak sesuai target'))).toBe(true);
+  });
+
+  it('menerima konfigurasi production hanya saat proyek dan seluruh ID database cocok', () => {
+    const validation = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        DEPLOYMENT_ENV: 'production',
+        FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-system',
+        VITE_FIREBASE_PROJECT_ID: 'ams-integrated-system',
+        FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_FIRESTORE_DATABASE_ID: '(default)',
+        FIRESTORE_EXPECTED_DATABASE_ID: '(default)',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: JSON.stringify({
+          project_id: 'ams-integrated-system',
+          client_email: 'vps-runner@ams-integrated-system.iam.gserviceaccount.com',
+          private_key: generateEphemeralRsaPrivateKeyPem()
+        })
+      }
+    });
+
+    expect(validation.projectIdMatchesTarget).toBe(true);
+    expect(validation.databaseIdMatchesTarget).toBe(true);
+    expect(validation.readyForStableConnection).toBe(true);
+    expect(validation.errors).toEqual([]);
+  });
+
+  it('melaporkan error saat FIREBASE_SERVICE_ACCOUNT_JSON tidak valid atau hilang tanpa fallback di VPS', () => {
+    const invalidRes = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        FIREBASE_PROJECT_ID: 'sixth-cedar-f5v9p',
+        FIREBASE_SERVICE_ACCOUNT_JSON: 'bukan-json-valid',
+        FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID
+      }
+    });
+    expect(invalidRes.serviceAccountJsonStatus).toBe('invalid');
+    expect(invalidRes.serviceAccountJsonValid).toBe(false);
+    expect(invalidRes.readyForStableConnection).toBe(false);
+    expect(invalidRes.errors.length).toBeGreaterThan(0);
+
+    const missingRes = validateVpsFirebaseConfig({
+      rootDir: os.tmpdir(),
+      env: {
+        FIREBASE_PROJECT_ID: 'sixth-cedar-f5v9p'
+      }
+    });
+    expect(missingRes.serviceAccountJsonStatus).toBe('missing');
+    expect(missingRes.readyForStableConnection).toBe(false);
+    expect(missingRes.firestoreDatabaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+    expect(missingRes.warnings.some((w) => w.includes('FIRESTORE_DATABASE_ID belum diset eksplisit'))).toBe(true);
+  });
+
+  it('mengabaikan placeholder FIREBASE_SERVICE_ACCOUNT_JSON jika FIREBASE_SERVICE_ACCOUNT_PATH valid tersedia', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-placeholder-'));
+    tempDirs.push(dir);
+    const keyPath = path.join(dir, 'sa.json');
+    fs.writeFileSync(
+      keyPath,
+      JSON.stringify({
+        project_id: 'sixth-cedar-f5v9p',
+        client_email: 'sa@sixth-cedar-f5v9p.iam.gserviceaccount.com',
+        private_key: generateEphemeralRsaPrivateKeyPem()
+      }),
+      'utf8'
+    );
+
+    const validation = validateVpsFirebaseConfig({
+      rootDir: dir,
+      env: {
+        FIREBASE_SERVICE_ACCOUNT_JSON: 'GANTI_DENGAN_SERVICE_ACCOUNT_JSON',
+        FIREBASE_SERVICE_ACCOUNT_PATH: keyPath,
+        FIRESTORE_DATABASE_ID: DEFAULT_FIRESTORE_DATABASE_ID
+      }
+    });
+
+    expect(validation.serviceAccountJsonStatus).toBe('placeholder');
+    expect(validation.hasAlternativeCredential).toBe(true);
+    expect(validation.credentialSource).toBe('service-account-file');
+    expect(validation.readyForStableConnection).toBe(true);
+  });
+
+  it('resolveFirestoreDatabaseId memberi prioritas pada FIRESTORE_DATABASE_ID lalu fallback ke target bernama', () => {
+    const res = resolveFirestoreDatabaseId({
+      rootDir: os.tmpdir(),
+      env: {
+        FIRESTORE_DATABASE_ID: `"${DEFAULT_FIRESTORE_DATABASE_ID}"`,
+        VITE_FIRESTORE_DATABASE_ID: '(default)'
+      }
+    });
+    expect(res.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+    expect(res.source).toBe('FIRESTORE_DATABASE_ID');
+    expect(res.matchesExpectedDatabaseId).toBe(true);
+  });
+});

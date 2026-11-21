@@ -1,0 +1,28 @@
+node_modules/
+build/
+dist/
+server.js
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+!.env.local.example
+!.env.staging.example
+!.env.production.example
+/data/
+/data-local/
+C:*AMS*
+C:*AMS Integrated System*/
+*.qoder.site
+dev-dist/
+*service-account*.json
+*firebase-adminsdk*.json
+
+
+# Local secrets and runtime data
+data-preview/.session-secret
+data-preview/rbac-db.json
+# Local secrets and runtime data
+data-preview/.session-secret
+data-preview/rbac-db.json

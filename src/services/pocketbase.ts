@@ -1,0 +1,5110 @@
+import PocketBase from 'pocketbase';
+import {
+  IzinEdarAlkes,
+  SertifikatPerusahaan,
+  DokumenMutu,
+  CAPARecord,
+  ProdukKembalian,
+  InspeksiQC,
+  StokGudang,
+  LogSuhu,
+  LogPestControl,
+  LayananTeknis,
+  BetsProduksi,
+  PemasokAlkes,
+  PurchaseOrderAlkes,
+  PenjualanAlkes,
+  LaporanKTD,
+  PenarikanProduk,
+  PelatihanPersonil,
+  SertifikasiPegawai,
+  TransaksiKeuangan,
+  StatusJurnal,
+  AkunCoA,
+  JurnalKeuangan,
+  PeriodeBuku,
+  TetapanPajak,
+  ValuasiBatch,
+  LogAuditTrail,
+  TraceabilityResult,
+  KaryawanHRIS,
+  GradeJabatan,
+  RiwayatMutasi,
+  JadwalShift,
+  LogAbsensi,
+  PengajuanCuti,
+  PerhitunganLembur,
+  SlipGaji,
+  KandidatATS,
+  SkillMatrix,
+  KpiKaryawan,
+  UmpanBalik360,
+  InsidenK3,
+  RekamMcu,
+  DistribusiApd,
+  PelangganB2B,
+  ProspekAlkes,
+  TeritorialPenjualan,
+  TenderAlkes,
+  KontrakHarga,
+  KunjunganMedRep,
+  PengetahuanProdukAlkes,
+  PraOrderMedRep,
+  SkemaHargaAlkes,
+  UnitSerialAlkes,
+  GaransiInstalasi,
+  KampanyeAlkes,
+  UnitDemoAlkes,
+  ProgramRebate,
+  RiwayatPenjualanBulanan,
+  DaftarSurat,
+  PelangganSurat,
+  KampanyeSurat,
+  TemplatSurat,
+  MediaSurat,
+  PesanTransaksional,
+  KonfigurasiSurat,
+  KonfigurasiSitus,
+  ProdukKatalog,
+  GudangFisik,
+  LokasiBin,
+  AturanSimpan,
+  TerimaBarang,
+  SuratJalan,
+  OpnameStok,
+  JejakPergerakan,
+  AmbangStok,
+  KejadianScanner,
+  LangkahPicking,
+  SinkronisasiLkpp,
+  KirimanSatuSehat,
+  KonfigurasiGudang,
+  RiwayatEksporEReport,
+  AuditInternalIso13485,
+  RoleDefinition,
+  ServerUserRecord
+} from '../types';
+import {
+  alokasiFEFOSadarKunci,
+  bangunBundleFhir,
+  bangunPayloadLkpp,
+  deviasiSuhu,
+  entriAntreanLkpp,
+  gerbangSuratJalan,
+  hitungSelisihOpname,
+  kodeBinDariLokasi,
+  lacakBatchSatuKlik,
+  minimalUmurEdBulanEfektif,
+  namaBerkasEReport,
+  nilaiUmurStok,
+  patchKunciStok,
+  statusUnitStok,
+  stokBebas,
+  susunRutePicking,
+  tambahJejakPergerakan,
+  tandaiGagalLkpp,
+  usulkanPenyesuaianOpname,
+  validasiKirimanSatuSehat,
+  validasiPemindaian,
+  type EntriPergerakanBaru,
+  type PeriodeEReport
+} from '../utils/gudang';
+import {
+  hitungRataRataTertimbangSku,
+  type PenyimpanganJurnal,
+  type RancanganJurnal,
+  susunJurnalBerantai,
+  ubahStatusJurnal,
+  verifikasiRantaiJurnal
+} from '../utils/akuntansi';
+import {
+  WEBSITE_MEDIA_KEY,
+  SumberKontenWebsite,
+  SumberOperasionalWebsite,
+  bangunKontenDefault,
+  diffKonfigurasi,
+  padukanKonten,
+  sinkronkanKonten,
+  VERSI_KONTEN_WEBSITE
+} from '../utils/website';
+import {
+  normalisasiProdukKatalog,
+  perluMigrasiProdukBawaanCms,
+  siapkanKatalogProduk
+} from '../utils/productCatalog';
+import {
+  auditOtomatisDokumenQA,
+  auditOtomatisDokumenQC
+} from '../utils/auditInternalIso13485';
+import {
+  KATALOG_KOLEKSI_DATA,
+  PETA_KATALOG_KOLEKSI,
+  bangunUlangRantaiJurnal,
+  bangunUlangRantaiPergerakan,
+  buatManifestDefault,
+  hitungRingkasanAsalKoleksi,
+  kumpulkanIdSeedDiedit,
+  normalisasiManifest,
+  saringHanyaDataUser,
+  type ManifestAsalData,
+  type RingkasanAsalKoleksi
+} from '../utils/dataOrigin';
+
+import {
+  INITIAL_IZIN_EDAR,
+  INITIAL_SERTIFIKAT,
+  INITIAL_DOKUMEN_MUTU,
+  INITIAL_CAPA,
+  INITIAL_PRODUK_KEMBALIAN,
+  INITIAL_INSPEKSI_QC,
+  INITIAL_STOK_GUDANG,
+  INITIAL_LOG_SUHU,
+  INITIAL_PEST_CONTROL,
+  INITIAL_LAYANAN_TEKNIS,
+  INITIAL_BETS_PRODUKSI,
+  INITIAL_PEMASOK,
+  INITIAL_PURCHASE_ORDER,
+  INITIAL_PENJUALAN,
+  INITIAL_LAPORAN_KTD,
+  INITIAL_RECALL,
+  INITIAL_PELATIHAN,
+  INITIAL_SERTIFIKASI_PEGAWAI,
+  INITIAL_TRANSAKSI,
+  INITIAL_AUDIT_TRAIL,
+  INITIAL_KARYAWAN_HRIS,
+  INITIAL_GRADING_JABATAN,
+  INITIAL_RIWAYAT_MUTASI,
+  INITIAL_JADWAL_SHIFT,
+  INITIAL_ABSENSI,
+  INITIAL_CUTI,
+  INITIAL_LEMBUR,
+  INITIAL_SLIP_GAJI,
+  INITIAL_KANDIDAT_ATS,
+  INITIAL_SKILL_MATRIX,
+  INITIAL_KPI_KARYAWAN,
+  INITIAL_UMPAN_BALIK_360,
+  INITIAL_INSIDEN_K3,
+  INITIAL_REKAM_MCU,
+  INITIAL_DISTRIBUSI_APD,
+  INITIAL_PELANGGAN_B2B,
+  INITIAL_PROSPEK_ALKES,
+  INITIAL_TERITORIAL_PENJUALAN,
+  INITIAL_TENDER_ALKES,
+  INITIAL_KONTRAK_HARGA,
+  INITIAL_KUNJUNGAN_MEDREP,
+  INITIAL_PENGETAHUAN_PRODUK,
+  INITIAL_PRA_ORDER_MEDREP,
+  INITIAL_SKEMA_HARGA,
+  INITIAL_UNIT_SERIAL,
+  INITIAL_GARANSI_INSTALASI,
+  INITIAL_KAMPANYE_ALKES,
+  INITIAL_UNIT_DEMO_ALKES,
+  INITIAL_PROGRAM_REBATE,
+  INITIAL_RIWAYAT_PENJUALAN_BULANAN,
+  INITIAL_DAFTAR_SURAT,
+  INITIAL_PELANGGAN_SURAT,
+  INITIAL_KAMPANYE_SURAT,
+  INITIAL_TEMPLAT_SURAT,
+  INITIAL_MEDIA_SURAT,
+  INITIAL_PESAN_TRANSAKSIONAL,
+  KONFIGURASI_SURAT_AWAL,
+  INITIAL_GUDANG_FISIK,
+  INITIAL_LOKASI_BIN,
+  INITIAL_ATURAN_SIMPAN,
+  INITIAL_TERIMA_BARANG,
+  INITIAL_SURAT_JALAN,
+  INITIAL_OPNAME_STOK,
+  INITIAL_JEJAK_PERGERAKAN,
+  INITIAL_AMBANG_STOK,
+  INITIAL_KEJADIAN_SCANNER,
+  INITIAL_SINKRONISASI_LKPP,
+  INITIAL_KIRIMAN_SATU_SEHAT,
+  KONFIGURASI_GUDANG_AWAL,
+  INITIAL_RIWAYAT_EKSPOR_EREPOR
+} from '../data/initialData';
+import {
+  INITIAL_COA,
+  INITIAL_JURNAL_KEUANGAN,
+  INITIAL_PERIODE_BUKU,
+  INITIAL_TETAPAN_PAJAK,
+  INITIAL_VALUASI_BATCH
+} from '../data/seedKeuangan';
+
+import {
+  attachFirestoreRealtimeSync,
+  authFirebase,
+  deleteSyncEntryFromFirestore,
+  fetchPublicSiteFromFirestore,
+  getFirebaseProjectInfo,
+  pullAllCloudStateFromFirestore,
+  pushArchiveConfigToFirestore,
+  pushPublicSiteToFirestore,
+  pushRbacSnapshotToFirestore,
+  pushSyncEntryToFirestore,
+  subscribeFirebaseAuthState
+} from './firebase';
+
+const PB_URL =
+  (typeof window !== 'undefined' && (window as unknown as { __PB_URL__?: string }).__PB_URL__) ||
+  (typeof window !== 'undefined' ? `${window.location.origin}/api/ams-pb` : 'http://127.0.0.1:8091');
+
+// PocketBase Client instance
+export const pb = new PocketBase(PB_URL);
+pb.autoCancellation(false);
+
+const STORAGE_PREFIX = 'ams_alkes_';
+
+/** Nama perusahaan lama yang mungkin masih tersimpan di basis data lokal perangkat. */
+const NAMA_LAMA: [string, string][] = [
+  ['PT AMS MEDIKA INTEGRASI INDONESIA', 'PT ANUGRAHMITRA SELARAS'],
+  ['PT AMS Medika Integrasi Indonesia', 'PT Anugrahmitra Selaras'],
+  ['PT AMS Manufaktur Alkes Indonesia', 'PT Anugrahmitra Selaras'],
+  ['PT AMS Alkes', 'PT Anugrahmitra Selaras'],
+  ['PT ANUGRAH MITRA SELARAS', 'PT ANUGRAHMITRA SELARAS'],
+  ['PT Anugrah Mitra Selaras', 'PT Anugrahmitra Selaras'],
+  ['Anugrah Mitra Selaras', 'Anugrahmitra Selaras'],
+  ['AMS Alkes Integrated System', 'AMS Integrated System'],
+  ['pjt@ams-medika.co.id', 'pjt@anugrahmitraselaras.co.id']
+];
+
+/** Koleksi basis data operasional yang memengaruhi status stok, kepatuhan edar, atau harga produk di situs publik. */
+export const KOLEKSI_OPERASIONAL_SITUS = [
+  'stok_gudang',
+  'gudang_pengaturan',
+  'sales_unit_serial',
+  'sales_skema_harga',
+  'sales_kontrak',
+  'sales_rebate',
+  'izin_edar',
+  'penarikan_produk',
+  'sales_pengetahuan_produk'
+] as const;
+
+export type KunciKoleksiOperasionalSitus = (typeof KOLEKSI_OPERASIONAL_SITUS)[number];
+
+const KANAL_REALTIME_AMS = 'ams_alkes_realtime_v1';
+const KUNCI_SESI_AUTH = 'ams_alkes_sesi_login_v2';
+const KUNCI_ANTREAN_SYNC = '__ams_pending_sync_v1';
+const KUNCI_LAST_SYNC_USER = '__ams_last_sync_user_v1';
+const KUNCI_MANIFEST_DATA = 'sistem_data_manifest';
+const LEGACY_RBAC_SYNC_KEYS = new Set(['rb_akun', 'rb_role']);
+
+function isLegacyRbacSyncKey(key: string): boolean {
+  return LEGACY_RBAC_SYNC_KEYS.has(key);
+}
+
+type SyncOp = { type: 'put'; value: unknown } | { type: 'delete' };
+export type StatusSinkronisasi = 'idle' | 'syncing' | 'pending' | 'offline' | 'error';
+
+class AMSDatabaseManager {
+  private listeners: Map<string, Set<() => void>> = new Map();
+  private remoteListeners: Set<(keys: string[], reason: string) => void> = new Set();
+  private rbacListeners: Set<() => void> = new Set();
+  private rbacActivityListeners: Set<() => void> = new Set();
+  private isOnlinePocketBase: boolean = false;
+  private pbRealtimeTerpasang: boolean = false;
+  private kanalSiaran: BroadcastChannel | null = null;
+  private connectionStatusText: string = 'Menghubungkan ke Server Real-Time Sync...';
+  private migrasiDraftAktif: boolean = false;
+  private isApplyingRemote: boolean = false;
+  private isInternalProvenanceOp: boolean = false;
+  private readonly clientTabId: string =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  private serverVersions: Record<string, number> = {};
+  private serverRevision: number = 0;
+  private lastSyncedAt: string | null = null;
+  private ws: WebSocket | null = null;
+  private wsConnected: boolean = false;
+  private wsShouldConnect: boolean = false;
+  private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private fallbackPollTimer: ReturnType<typeof setInterval> | null = null;
+  private currentWsToken: string | null = null;
+  private latestSyncOp: Map<string, SyncOp> = new Map();
+  private activeSyncKeys: Set<string> = new Set();
+  private pendingSyncKeys: Set<string> = new Set();
+  private syncRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private syncRetryCounts: Map<string, number> = new Map();
+  private syncStateStatus: StatusSinkronisasi = 'idle';
+  private lastSyncError: string | null = null;
+  private isOnlineBrowser: boolean =
+    typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+  private activeDbDriver: 'firebase' | 'pocketbase' = 'firebase';
+  private firebaseUserInfo: { uid: string; email: string; displayName: string } | null = null;
+  private firebaseSyncedAt: string | null = null;
+  private firebaseSyncError: string | null = null;
+  private firebaseUnsubRealtime: (() => void) | null = null;
+  private pocketbaseArchiveConfig: Record<string, unknown> | null = null;
+
+  constructor() {
+    const kunciMigrasi = 'ams_storage_normalized_v2';
+    const sudahMigrasi =
+      typeof localStorage !== 'undefined' && localStorage.getItem(kunciMigrasi) === '1';
+    if (!sudahMigrasi) {
+      this.ratakanNamaPerusahaan();
+      this.ratakanIstilahBatch();
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(kunciMigrasi, '1');
+        }
+      } catch {
+        /* abaikan bila penyimpanan privat/penuh */
+      }
+    }
+    this.muatAntreanSyncPersisten();
+    this.pasangPendengarLintasTab();
+    if (typeof window !== 'undefined') {
+      void this.initDatabaseDriverAndFirebase();
+    }
+  }
+
+  private async initDatabaseDriverAndFirebase() {
+    await this.muatKonfigurasiDriverServer();
+    subscribeFirebaseAuthState((fbUser) => {
+      if (fbUser && fbUser.emailVerified) {
+        this.firebaseUserInfo = {
+          uid: fbUser.uid,
+          email: fbUser.email || '',
+          displayName: fbUser.displayName || fbUser.email || 'Admin Firebase'
+        };
+        this.pasangRealtimeFirestore();
+      } else {
+        this.firebaseUserInfo = null;
+        if (this.firebaseUnsubRealtime) {
+          this.firebaseUnsubRealtime();
+          this.firebaseUnsubRealtime = null;
+        }
+      }
+      this.updateConnectionStatusLabel();
+    });
+
+    if (this.activeDbDriver === 'pocketbase') {
+      await this.checkPBConnection();
+    } else {
+      this.updateConnectionStatusLabel();
+    }
+  }
+
+  public async muatKonfigurasiDriverServer(): Promise<void> {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    try {
+      const token = this.getAuthTokenFromStorage();
+      const res = await fetch('/api/system/db-config', {
+        cache: 'no-store',
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        activeDriver?: 'firebase' | 'pocketbase';
+        pocketbaseArchive?: Record<string, unknown>;
+      };
+      if (data.activeDriver === 'firebase' || data.activeDriver === 'pocketbase') {
+        this.activeDbDriver = data.activeDriver;
+      }
+      if (data.pocketbaseArchive) {
+        this.pocketbaseArchiveConfig = data.pocketbaseArchive;
+      }
+      this.updateConnectionStatusLabel();
+    } catch {
+      /* abaikan bila server belum siap */
+    }
+  }
+
+  private pasangRealtimeFirestore() {
+    if (typeof window === 'undefined') return;
+    if (this.firebaseUnsubRealtime) return;
+    if (!authFirebase.currentUser?.emailVerified) return;
+
+    this.firebaseUnsubRealtime = attachFirestoreRealtimeSync({
+      onEntriesChanged: (entries) => {
+        const changed: string[] = [];
+        for (const [key, entry] of Object.entries(entries)) {
+          if (isLegacyRbacSyncKey(key)) continue;
+          if (this.pendingSyncKeys.has(key)) continue;
+          if (this.applyRemoteEntry(key, entry.value, undefined, true, false)) {
+            changed.push(key);
+          }
+        }
+        if (changed.length > 0) {
+          this.firebaseSyncedAt = new Date().toISOString();
+          this.emitRemoteUpdate(changed, 'firebase-firestore');
+        }
+      },
+      onRbacChanged: () => {
+        this.rbacActivityListeners.forEach((cb) => {
+          try {
+            cb();
+          } catch {
+            /* abaikan */
+          }
+        });
+      }
+    });
+  }
+
+  public getClientId(): string {
+    return this.clientTabId;
+  }
+
+  private muatAntreanSyncPersisten() {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const raw = localStorage.getItem(KUNCI_ANTREAN_SYNC);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        let antreanDibersihkan = false;
+        parsed.forEach((k) => {
+          if (typeof k !== 'string' || !k) return;
+          if (isLegacyRbacSyncKey(k)) {
+            antreanDibersihkan = true;
+            return;
+          }
+          this.pendingSyncKeys.add(k);
+        });
+        if (antreanDibersihkan) this.simpanAntreanSyncPersisten();
+      }
+    } catch {
+      /* abaikan antrean rusak */
+    }
+  }
+
+  private simpanAntreanSyncPersisten() {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const daftar = Array.from(this.pendingSyncKeys);
+      if (daftar.length === 0) {
+        localStorage.removeItem(KUNCI_ANTREAN_SYNC);
+      } else {
+        localStorage.setItem(KUNCI_ANTREAN_SYNC, JSON.stringify(daftar));
+      }
+    } catch {
+      /* abaikan bila storage penuh */
+    }
+  }
+
+  private getAuthTokenFromStorage(): string | null {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const raw = localStorage.getItem(KUNCI_SESI_AUTH);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { token?: string; expiresAt?: string } | null;
+      if (!parsed?.token) return null;
+      if (parsed.expiresAt && new Date(parsed.expiresAt).getTime() <= Date.now()) {
+        return null;
+      }
+      return parsed.token;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Pantau perubahan koleksi dari tab/jendela/iframe lain agar situs publik & modul operasional selalu sinkron. */
+  private pasangPendengarLintasTab() {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+
+    window.addEventListener('storage', (e: StorageEvent) => {
+      if (e.key === null) {
+        this.notifyLocal('all');
+        Array.from(this.listeners.keys()).forEach((kunci) => {
+          if (kunci !== 'all') this.notifyLocal(kunci);
+        });
+        return;
+      }
+      if (e.key === KUNCI_SESI_AUTH) {
+        if (!e.newValue) {
+          this.currentWsToken = null;
+          window.dispatchEvent(new CustomEvent('ams:auth-expired'));
+        } else {
+          this.rbacListeners.forEach((cb) => {
+            try {
+              cb();
+            } catch {
+              /* abaikan */
+            }
+          });
+        }
+        return;
+      }
+      if (e.key.startsWith(STORAGE_PREFIX)) {
+        const kunciKoleksi = e.key.slice(STORAGE_PREFIX.length);
+        this.notifyLocal(kunciKoleksi);
+      }
+    });
+
+    // Tangkap penulisan pengaturan lokal yang tidak memanggil db secara langsung (mis. utilitas website.ts)
+    window.addEventListener('ams:local-setting-write', (ev: Event) => {
+      const detail = (ev as CustomEvent<{ key?: string; value?: unknown }>).detail;
+      if (!detail?.key) return;
+      this.notify(detail.key);
+      if (!this.isApplyingRemote && detail.value !== undefined) {
+        this.enqueueKeySync(detail.key, { type: 'put', value: detail.value });
+      }
+    });
+
+    window.addEventListener('online', () => {
+      this.isOnlineBrowser = true;
+      this.updateConnectionStatusLabel();
+      void this.flushPendingSync();
+      if (this.wsShouldConnect) {
+        void this.syncFromServer(true);
+      }
+    });
+
+    window.addEventListener('offline', () => {
+      this.isOnlineBrowser = false;
+      this.updateConnectionStatusLabel();
+    });
+
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          this.isOnlineBrowser = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+          if (this.pendingSyncKeys.size > 0) {
+            void this.flushPendingSync();
+          }
+          if (this.wsShouldConnect) {
+            void this.syncFromServer(true);
+          }
+        }
+      });
+    }
+
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        this.kanalSiaran = new BroadcastChannel(KANAL_REALTIME_AMS);
+        this.kanalSiaran.onmessage = (pesan: MessageEvent<{ type?: string; collectionKey?: string }>) => {
+          const data = pesan.data;
+          if (data?.type === 'ams-db-update' && typeof data.collectionKey === 'string') {
+            this.notifyLocal(data.collectionKey);
+          }
+        };
+      } catch {
+        this.kanalSiaran = null;
+      }
+    }
+  }
+
+  private pasangRealtimePocketBase() {
+    // Penjaga Node: skrip tanpa EventSource tidak menerima siaran, tanpa ini proses uji mati dengan exit 1.
+    if (typeof window === 'undefined') return;
+    if (this.pbRealtimeTerpasang || !this.isOnlinePocketBase) return;
+    this.pbRealtimeTerpasang = true;
+    for (const koleksi of [...KOLEKSI_OPERASIONAL_SITUS, 'website_published']) {
+      pb.collection(koleksi)
+        .subscribe('*', () => {
+          this.notifyLocal(koleksi);
+        })
+        .catch(() => {
+          /* koleksi belum diprovisi pada PocketBase atau koneksi SSE terputus: fallback ke penyimpanan lokal */
+        });
+    }
+  }
+
+  /** Migrasi sekali jalan: konten lama di localStorage memakai nama entitas terbaru. */
+  private ratakanNamaPerusahaan() {
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const kunciPenuh = localStorage.key(i);
+        if (!kunciPenuh || !kunciPenuh.startsWith(STORAGE_PREFIX) || kunciPenuh === WEBSITE_MEDIA_KEY) continue;
+        const tersimpan = localStorage.getItem(kunciPenuh);
+        if (!tersimpan || !NAMA_LAMA.some(([lama]) => tersimpan.includes(lama))) continue;
+        const baru = NAMA_LAMA.reduce((acc, [lama, ganti]) => acc.split(lama).join(ganti), tersimpan);
+        localStorage.setItem(kunciPenuh, baru);
+        this.notify(kunciPenuh.slice(STORAGE_PREFIX.length));
+      }
+    } catch {
+      /* penyimpanan penuh atau mode privat: konten tetap dibaca seperti adanya */
+    }
+  }
+
+  /** Migrasi sekali jalan: rekaman lama ada yang menulis istilah "bets". Kunci JSON
+   *  nomorBets dan enum WRITE_OFF_BETS ikut diratakan supaya terbaca skema sekarang. */
+  private ratakanIstilahBatch() {
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const kunciPenuh = localStorage.key(i);
+        if (!kunciPenuh || !kunciPenuh.startsWith(STORAGE_PREFIX) || kunciPenuh === WEBSITE_MEDIA_KEY) continue;
+        const tersimpan = localStorage.getItem(kunciPenuh);
+        if (!tersimpan) continue;
+        const baru = tersimpan
+          .split('"nomorBets"').join('"nomorBatch"')
+          .split('betsKedaluwarsaDilewati').join('batchKedaluwarsaDilewati')
+          .split('WRITE_OFF_BETS').join('WRITE_OFF_BATCH')
+          .replace(/\bBets\b/g, 'Batch')
+          .replace(/\bbets\b/g, 'batch');
+        if (baru === tersimpan) continue;
+        localStorage.setItem(kunciPenuh, baru);
+        this.notify(kunciPenuh.slice(STORAGE_PREFIX.length));
+      }
+    } catch {
+      /* penyimpanan penuh atau mode privat: konten tetap dibaca seperti adanya */
+    }
+  }
+
+  private updateConnectionStatusLabel() {
+    if (!this.isOnlineBrowser) {
+      this.syncStateStatus = 'offline';
+      this.connectionStatusText =
+        this.pendingSyncKeys.size > 0
+          ? `Offline — ${this.pendingSyncKeys.size} perubahan menunggu jaringan`
+          : 'Offline — Penyimpanan Lokal Aktif';
+    } else if (this.activeSyncKeys.size > 0) {
+      this.syncStateStatus = 'syncing';
+      this.connectionStatusText = 'Menyinkronkan Perubahan ke Server & Cloud...';
+    } else if (this.pendingSyncKeys.size > 0) {
+      this.syncStateStatus = this.lastSyncError ? 'error' : 'pending';
+      this.connectionStatusText = this.lastSyncError
+        ? `${this.pendingSyncKeys.size} Perubahan Tertunda (${this.lastSyncError})`
+        : `${this.pendingSyncKeys.size} Perubahan Menunggu Sinkronisasi`;
+    } else if (this.activeDbDriver === 'firebase' && this.firebaseUserInfo) {
+      this.syncStateStatus = 'idle';
+      this.connectionStatusText = `Firebase Firestore Aktif (${this.firebaseUserInfo.email})`;
+    } else if (this.wsConnected && this.activeDbDriver === 'firebase') {
+      this.syncStateStatus = 'idle';
+      this.connectionStatusText = 'Mode Firebase — Hubungkan Google Sync agar Persisten Lintas Re-publish';
+    } else if (this.wsConnected) {
+      this.syncStateStatus = 'idle';
+      this.connectionStatusText = 'Server Real-Time Sync Aktif (WebSocket Terhubung)';
+    } else if (this.isOnlinePocketBase) {
+      this.syncStateStatus = 'idle';
+      this.connectionStatusText = 'PocketBase Terhubung (Real-time)';
+    } else if (this.wsShouldConnect) {
+      this.syncStateStatus = 'idle';
+      this.connectionStatusText = 'Server Sync Aktif (Mode HTTP Polling)';
+    } else {
+      this.syncStateStatus = 'idle';
+      this.connectionStatusText = 'Penyimpanan Lokal Aktif (Offline-First)';
+    }
+    this.notifyLocal('connection_status');
+  }
+
+  private async checkPBConnection() {
+    if (this.activeDbDriver !== 'pocketbase') {
+      this.isOnlinePocketBase = false;
+      this.updateConnectionStatusLabel();
+      return;
+    }
+    try {
+      const health = await pb.health.check();
+      this.isOnlinePocketBase = Boolean(health && health.code === 200);
+      if (this.isOnlinePocketBase) {
+        this.pasangRealtimePocketBase();
+      }
+    } catch {
+      this.isOnlinePocketBase = false;
+    }
+    this.updateConnectionStatusLabel();
+  }
+
+  public getConnectionStatus() {
+    const originUrl =
+      typeof window !== 'undefined' ? `${window.location.origin}/api/sync/ws` : PB_URL;
+    const fbProject = getFirebaseProjectInfo();
+    return {
+      isPocketBaseConnected:
+        this.activeDbDriver === 'firebase'
+          ? Boolean(this.firebaseUserInfo) || this.wsConnected
+          : this.wsConnected || this.isOnlinePocketBase,
+      isPocketBaseServerReachable: this.isOnlinePocketBase,
+      isRealtimeSyncConnected: this.wsConnected,
+      isServerSyncActive: Boolean(this.getAuthTokenFromStorage()) && this.isOnlineBrowser,
+      activeDbDriver: this.activeDbDriver,
+      firebaseConnected: Boolean(this.firebaseUserInfo),
+      firebaseEmail: this.firebaseUserInfo?.email || null,
+      firebaseProjectId: fbProject.projectId,
+      firebaseDatabaseId: fbProject.firestoreDatabaseId,
+      firebaseSyncedAt: this.firebaseSyncedAt,
+      firebaseSyncError: this.firebaseSyncError,
+      pocketbaseArchived: true,
+      revision: this.serverRevision,
+      lastSyncedAt: this.lastSyncedAt,
+      clientId: this.clientTabId,
+      statusLabel: this.connectionStatusText,
+      url: this.wsConnected || this.wsShouldConnect ? originUrl : PB_URL,
+      pendingCount: this.pendingSyncKeys.size,
+      pendingKeys: Array.from(this.pendingSyncKeys),
+      syncState: this.syncStateStatus,
+      lastSyncError: this.lastSyncError,
+      pocketbaseUrl: PB_URL
+    };
+  }
+
+  /**
+   * Tarik koleksi HRIS & CRM langsung dari Server PocketBase AMS (/api/ams-pb -> port 8091).
+   * Bila instance PocketBase lokal belum dijalankan, aplikasi tetap aman memakai Server Real-Time Sync + Cache Offline.
+   */
+  public async syncFromPocketBaseAMS(): Promise<{
+    pocketbaseOnline: boolean;
+    updatedCollections: string[];
+    syncedAt: string;
+  }> {
+    const KOLEKSI_MOBILE_PB = [
+      'hris_karyawan',
+      'hris_shift',
+      'hris_absensi',
+      'hris_cuti',
+      'hris_slip_gaji',
+      'sales_pelanggan',
+      'sales_prospek',
+      'sales_kunjungan',
+      'sales_pra_order',
+      'penjualan',
+      'sales_tender',
+      'sales_pengetahuan_produk'
+    ] as const;
+
+    const syncedAt = new Date().toISOString();
+    try {
+      const health = await pb.health.check();
+      const online = Boolean(health && health.code === 200);
+      this.isOnlinePocketBase = online;
+      if (!online) {
+        this.updateConnectionStatusLabel();
+        return { pocketbaseOnline: false, updatedCollections: [], syncedAt };
+      }
+      this.pasangRealtimePocketBase();
+      const updatedCollections: string[] = [];
+      await Promise.all(
+        KOLEKSI_MOBILE_PB.map(async (coll) => {
+          try {
+            const records = await pb.collection(coll).getFullList({ requestKey: null });
+            if (Array.isArray(records) && records.length > 0) {
+              if (this.applyRemoteEntry(coll, records, undefined, true)) {
+                updatedCollections.push(coll);
+              }
+            }
+          } catch {
+            /* koleksi belum tersedia atau akses koleksi terkunci di PocketBase */
+          }
+        })
+      );
+      if (updatedCollections.length > 0) {
+        this.lastSyncedAt = syncedAt;
+        this.emitRemoteUpdate(updatedCollections, 'pocketbase-ams');
+      }
+      this.updateConnectionStatusLabel();
+      return { pocketbaseOnline: true, updatedCollections, syncedAt };
+    } catch {
+      this.isOnlinePocketBase = false;
+      this.updateConnectionStatusLabel();
+      return { pocketbaseOnline: false, updatedCollections: [], syncedAt };
+    }
+  }
+
+  public subscribe(collectionKey: string, callback: () => void): () => void {
+    if (!this.listeners.has(collectionKey)) {
+      this.listeners.set(collectionKey, new Set());
+    }
+    this.listeners.get(collectionKey)!.add(callback);
+    return () => {
+      this.listeners.get(collectionKey)?.delete(callback);
+    };
+  }
+
+  public subscribeRemoteUpdate(callback: (keys: string[], reason: string) => void): () => void {
+    this.remoteListeners.add(callback);
+    return () => {
+      this.remoteListeners.delete(callback);
+    };
+  }
+
+  public subscribeRbacUpdated(callback: () => void): () => void {
+    this.rbacListeners.add(callback);
+    return () => {
+      this.rbacListeners.delete(callback);
+    };
+  }
+
+  public subscribeRbacActivity(callback: () => void): () => void {
+    this.rbacActivityListeners.add(callback);
+    return () => {
+      this.rbacActivityListeners.delete(callback);
+    };
+  }
+
+  private emitRemoteUpdate(keys: string[], reason: string) {
+    if (keys.length === 0) return;
+    if (typeof window !== 'undefined') {
+      if (keys.some((k) => k === 'all' || k.startsWith('website'))) {
+        window.dispatchEvent(new CustomEvent('ams:public-identity-update'));
+      }
+      if (
+        keys.some(
+          (k) =>
+            k === 'all' ||
+            (KOLEKSI_OPERASIONAL_SITUS as readonly string[]).includes(k)
+        )
+      ) {
+        window.dispatchEvent(new CustomEvent('ams:db-collection-updated', { detail: { keys, reason } }));
+      }
+    }
+    this.remoteListeners.forEach((cb) => {
+      try {
+        cb(keys, reason);
+      } catch (e) {
+        console.error('Error in remote listener callback', e);
+      }
+    });
+  }
+
+  private bacaOperasiDariLocalStorage(key: string): SyncOp {
+    try {
+      if (typeof localStorage === 'undefined') return { type: 'delete' };
+      const raw = localStorage.getItem(STORAGE_PREFIX + key);
+      if (raw === null) return { type: 'delete' };
+      return { type: 'put', value: JSON.parse(raw) };
+    } catch {
+      return { type: 'delete' };
+    }
+  }
+
+  private jadwalkanUlangSync(key: string) {
+    if (typeof window === 'undefined') return;
+    if (this.syncRetryTimers.has(key)) return;
+    const percobaan = (this.syncRetryCounts.get(key) ?? 0) + 1;
+    this.syncRetryCounts.set(key, percobaan);
+    const jeda = Math.min(30_000, 1500 * 2 ** Math.min(percobaan - 1, 5));
+    const timer = setTimeout(() => {
+      this.syncRetryTimers.delete(key);
+      if (!this.pendingSyncKeys.has(key)) return;
+      if (!this.activeSyncKeys.has(key)) {
+        void this.drainKeySync(key);
+      }
+    }, jeda);
+    this.syncRetryTimers.set(key, timer);
+  }
+
+  private enqueueKeySync(key: string, op: SyncOp) {
+    if (isLegacyRbacSyncKey(key)) return;
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    this.pendingSyncKeys.add(key);
+    this.latestSyncOp.set(key, op);
+    this.simpanAntreanSyncPersisten();
+    const timer = this.syncRetryTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      this.syncRetryTimers.delete(key);
+    }
+    this.syncRetryCounts.delete(key);
+    this.updateConnectionStatusLabel();
+
+    if (!this.getAuthTokenFromStorage() || !this.isOnlineBrowser) return;
+    if (this.activeSyncKeys.has(key)) return;
+    void this.drainKeySync(key);
+  }
+
+  private async drainKeySync(key: string) {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    this.activeSyncKeys.add(key);
+    this.updateConnectionStatusLabel();
+    try {
+      while (this.pendingSyncKeys.has(key) || this.latestSyncOp.has(key)) {
+        const op = this.latestSyncOp.get(key) ?? this.bacaOperasiDariLocalStorage(key);
+        this.latestSyncOp.set(key, op);
+
+        const token = this.getAuthTokenFromStorage();
+        if (!token || !this.isOnlineBrowser) {
+          break;
+        }
+
+        try {
+          const url = `/api/sync/keys/${encodeURIComponent(key)}`;
+          const headers: Record<string, string> = {
+            Authorization: `Bearer ${token}`,
+            'X-Sync-Client-Id': this.clientTabId
+          };
+          let res: Response;
+          if (op.type === 'put') {
+            headers['Content-Type'] = 'application/json';
+            res = await fetch(url, {
+              method: 'PUT',
+              credentials: 'include',
+              headers,
+              body: JSON.stringify({ value: op.value, clientId: this.clientTabId })
+            });
+          } else {
+            res = await fetch(url, {
+              method: 'DELETE',
+              credentials: 'include',
+              headers
+            });
+          }
+
+          if (res.status === 401 && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('ams:auth-expired'));
+            this.lastSyncError = 'Sesi berakhir';
+            break;
+          }
+
+          if (res.status === 400 || res.status === 403) {
+            const errPayload = (await res.json().catch(() => null)) as { pesan?: string } | null;
+            this.lastSyncError = errPayload?.pesan || `HTTP ${res.status}`;
+            if (this.latestSyncOp.get(key) === op) {
+              this.latestSyncOp.delete(key);
+              this.pendingSyncKeys.delete(key);
+              this.syncRetryCounts.delete(key);
+              this.simpanAntreanSyncPersisten();
+            }
+            continue;
+          }
+
+          if (!res.ok) {
+            this.lastSyncError = `Server HTTP ${res.status}`;
+            this.jadwalkanUlangSync(key);
+            break;
+          }
+
+          const payload = (await res.json().catch(() => null)) as {
+            version?: number;
+            revision?: number;
+          } | null;
+          if (typeof payload?.version === 'number') {
+            this.serverVersions[key] = Math.max(this.serverVersions[key] ?? 0, payload.version);
+          }
+          if (typeof payload?.revision === 'number') {
+            this.serverRevision = Math.max(this.serverRevision, payload.revision);
+          }
+          this.lastSyncedAt = new Date().toISOString();
+          this.lastSyncError = null;
+
+          // Cerminkan juga ke Firebase Firestore bila mode pengembangan aktif & terautentikasi
+          if (this.activeDbDriver === 'firebase' && authFirebase.currentUser?.emailVerified) {
+            void this.mirrorOpToFirestore(key, op, payload?.version ?? this.serverVersions[key] ?? 1);
+          }
+
+          // Hapus hanya bila belum ada mutasi baru yang masuk selama request berjalan
+          if (this.latestSyncOp.get(key) === op) {
+            this.latestSyncOp.delete(key);
+            this.pendingSyncKeys.delete(key);
+            this.syncRetryCounts.delete(key);
+            this.simpanAntreanSyncPersisten();
+          }
+        } catch {
+          this.lastSyncError = 'Koneksi server terputus';
+          this.jadwalkanUlangSync(key);
+          break;
+        }
+      }
+    } finally {
+      this.activeSyncKeys.delete(key);
+      this.updateConnectionStatusLabel();
+    }
+  }
+
+  public async flushPendingSync(): Promise<{ synced: number; remaining: number }> {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') {
+      return { synced: 0, remaining: this.pendingSyncKeys.size };
+    }
+    const token = this.getAuthTokenFromStorage();
+    if (!token || !this.isOnlineBrowser) {
+      return { synced: 0, remaining: this.pendingSyncKeys.size };
+    }
+
+    const keys = Array.from(this.pendingSyncKeys).filter((k) => !this.activeSyncKeys.has(k));
+    if (keys.length === 0) {
+      return { synced: 0, remaining: this.pendingSyncKeys.size };
+    }
+
+    if (keys.length === 1) {
+      await this.drainKeySync(keys[0]);
+      return {
+        synced: this.pendingSyncKeys.has(keys[0]) ? 0 : 1,
+        remaining: this.pendingSyncKeys.size
+      };
+    }
+
+    const updates: Record<string, unknown> = {};
+    const deletes: string[] = [];
+    const snapshotOps = new Map<string, SyncOp>();
+
+    for (const k of keys) {
+      this.activeSyncKeys.add(k);
+      const timer = this.syncRetryTimers.get(k);
+      if (timer) {
+        clearTimeout(timer);
+        this.syncRetryTimers.delete(k);
+      }
+      const op = this.latestSyncOp.get(k) ?? this.bacaOperasiDariLocalStorage(k);
+      this.latestSyncOp.set(k, op);
+      snapshotOps.set(k, op);
+      if (op.type === 'put') updates[k] = op.value;
+      else deletes.push(k);
+    }
+    this.updateConnectionStatusLabel();
+
+    let synced = 0;
+    try {
+      const res = await fetch('/api/sync/batch', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          'X-Sync-Client-Id': this.clientTabId
+        },
+        body: JSON.stringify({ updates, deletes, clientId: this.clientTabId })
+      });
+
+      if (res.status === 401) {
+        window.dispatchEvent(new CustomEvent('ams:auth-expired'));
+        this.lastSyncError = 'Sesi berakhir';
+        return { synced: 0, remaining: this.pendingSyncKeys.size };
+      }
+
+      if (res.ok) {
+        const payload = (await res.json().catch(() => null)) as {
+          revision?: number;
+          versions?: Record<string, number>;
+        } | null;
+        if (typeof payload?.revision === 'number') {
+          this.serverRevision = Math.max(this.serverRevision, payload.revision);
+        }
+        if (payload?.versions) {
+          for (const [k, v] of Object.entries(payload.versions)) {
+            if (typeof v === 'number') {
+              this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
+            }
+          }
+        }
+        this.lastSyncedAt = new Date().toISOString();
+        this.lastSyncError = null;
+        for (const k of keys) {
+          const snapOp = snapshotOps.get(k);
+          if (this.activeDbDriver === 'firebase' && snapOp && authFirebase.currentUser?.emailVerified) {
+            void this.mirrorOpToFirestore(k, snapOp, payload?.versions?.[k] ?? this.serverVersions[k] ?? 1);
+          }
+          if (this.latestSyncOp.get(k) === snapOp) {
+            this.latestSyncOp.delete(k);
+            this.pendingSyncKeys.delete(k);
+            this.syncRetryCounts.delete(k);
+            synced += 1;
+          }
+        }
+        this.simpanAntreanSyncPersisten();
+      } else {
+        // Fallback per-kunci bila salah satu item batch ditolak RBAC
+        for (const k of keys) {
+          this.activeSyncKeys.delete(k);
+        }
+        for (const k of keys) {
+          await this.drainKeySync(k);
+          if (!this.pendingSyncKeys.has(k)) synced += 1;
+        }
+        return { synced, remaining: this.pendingSyncKeys.size };
+      }
+    } catch {
+      this.lastSyncError = 'Koneksi server terputus';
+      for (const k of keys) {
+        this.jadwalkanUlangSync(k);
+      }
+    } finally {
+      for (const k of keys) {
+        this.activeSyncKeys.delete(k);
+      }
+      this.updateConnectionStatusLabel();
+    }
+
+    // Jika ada perubahan baru saat batch berlangsung, antrekan ulang
+    if (this.pendingSyncKeys.size > 0 && synced > 0) {
+      for (const sisa of Array.from(this.pendingSyncKeys)) {
+        if (!this.activeSyncKeys.has(sisa)) {
+          void this.drainKeySync(sisa);
+        }
+      }
+    }
+    return { synced, remaining: this.pendingSyncKeys.size };
+  }
+
+  public async syncNow(): Promise<{ ok: boolean; uploaded: number; downloaded: number; remaining: number }> {
+    const push = await this.flushPendingSync();
+    const pull = await this.syncFromServer(false);
+    return {
+      ok: push.remaining === 0,
+      uploaded: push.synced,
+      downloaded: pull.length,
+      remaining: push.remaining
+    };
+  }
+
+  public prepareSessionSync(userId?: string | null): void {
+    this.serverVersions = {};
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const prevUserId = localStorage.getItem(KUNCI_LAST_SYNC_USER);
+      if (userId) {
+        if (prevUserId && prevUserId !== userId) {
+          this.pendingSyncKeys.clear();
+          this.latestSyncOp.clear();
+          for (const timer of this.syncRetryTimers.values()) {
+            clearTimeout(timer);
+          }
+          this.syncRetryTimers.clear();
+          this.syncRetryCounts.clear();
+          this.simpanAntreanSyncPersisten();
+          this.isApplyingRemote = true;
+          try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+              const k = localStorage.key(i);
+              if (k && k.startsWith(STORAGE_PREFIX) && k !== KUNCI_SESI_AUTH) {
+                localStorage.removeItem(k);
+              }
+            }
+          } finally {
+            this.isApplyingRemote = false;
+          }
+        }
+        localStorage.setItem(KUNCI_LAST_SYNC_USER, userId);
+      }
+    } catch {
+      /* abaikan error storage */
+    }
+    this.updateConnectionStatusLabel();
+  }
+
+  private applyRemoteEntry(
+    key: string,
+    value: unknown,
+    version?: number,
+    notifyIndividual = true,
+    forceApply = false
+  ): boolean {
+    if (isLegacyRbacSyncKey(key)) return false;
+    if (typeof localStorage === 'undefined') return false;
+    if (!forceApply && typeof version === 'number' && (this.serverVersions[key] ?? 0) >= version) {
+      return false;
+    }
+    if (typeof version === 'number') {
+      this.serverVersions[key] = version;
+    }
+    const serialized = JSON.stringify(value);
+    const prevRaw = localStorage.getItem(STORAGE_PREFIX + key);
+    if (prevRaw === serialized) {
+      return false;
+    }
+    this.isApplyingRemote = true;
+    try {
+      localStorage.setItem(STORAGE_PREFIX + key, serialized);
+      if (notifyIndividual) {
+        this.notify(key);
+      }
+    } finally {
+      this.isApplyingRemote = false;
+    }
+    return true;
+  }
+
+  private applyRemoteDelete(key: string, reason = 'ws'): boolean {
+    if (isLegacyRbacSyncKey(key)) return false;
+    delete this.serverVersions[key];
+    if (typeof localStorage === 'undefined') return false;
+    const hadKey = localStorage.getItem(STORAGE_PREFIX + key) !== null;
+    this.isApplyingRemote = true;
+    try {
+      localStorage.removeItem(STORAGE_PREFIX + key);
+      this.notify(key);
+    } finally {
+      this.isApplyingRemote = false;
+    }
+    if (hadKey) {
+      this.emitRemoteUpdate([key], reason);
+    }
+    return hadKey;
+  }
+
+  public async hydratePublicSettingsFromServer(): Promise<string[]> {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return [];
+    const changed: string[] = [];
+    try {
+      const res = await fetch('/api/sync/public-settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          revision?: number;
+          entries?: Record<string, { value: unknown; version: number }>;
+        };
+        if (typeof data.revision === 'number') {
+          this.serverRevision = Math.max(this.serverRevision, data.revision);
+        }
+        for (const [key, entry] of Object.entries(data.entries || {})) {
+          if (this.applyRemoteEntry(key, entry.value, entry.version, true)) {
+            changed.push(key);
+          }
+        }
+      }
+    } catch {
+      /* abaikan kegagalan HTTP sementara */
+    }
+
+    // Jika baru re-publish & snapshot server belum ada atau ingin membandingkan Firestore publik
+    if (this.activeDbDriver === 'firebase') {
+      try {
+        const pubSite = await fetchPublicSiteFromFirestore();
+        if (pubSite && pubSite.identitas && pubSite.hero) {
+          if (this.applyRemoteEntry('website_published', pubSite, undefined, true, !changed.includes('website_published'))) {
+            if (!changed.includes('website_published')) changed.push('website_published');
+          }
+        }
+      } catch {
+        /* abaikan bila Firestore publik belum ditulis atau offline */
+      }
+    }
+
+    if (changed.length > 0) {
+      this.lastSyncedAt = new Date().toISOString();
+      this.emitRemoteUpdate(changed, 'hydrate-public');
+    }
+    return changed;
+  }
+
+  public async syncFromServer(deltaOnly = false): Promise<string[]> {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') return [];
+    const token = this.getAuthTokenFromStorage();
+    if (!token) {
+      return this.hydratePublicSettingsFromServer();
+    }
+    try {
+      const hasKnown = deltaOnly && Object.keys(this.serverVersions).length > 0;
+      const url = hasKnown
+        ? `/api/sync/state?versions=${encodeURIComponent(JSON.stringify(this.serverVersions))}`
+        : '/api/sync/state';
+      const res = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.status === 401) {
+        window.dispatchEvent(new CustomEvent('ams:auth-expired'));
+        return [];
+      }
+      if (!res.ok) return [];
+      const data = (await res.json()) as {
+        revision?: number;
+        entries?: Record<string, { value: unknown; version: number }>;
+      };
+      if (typeof data.revision === 'number') {
+        this.serverRevision = Math.max(this.serverRevision, data.revision);
+      }
+      const changed: string[] = [];
+      const remoteEntries = data.entries || {};
+      const remoteManifest = remoteEntries[KUNCI_MANIFEST_DATA]?.value as Partial<ManifestAsalData> | undefined;
+      const remotePurged = Boolean(remoteManifest?.dummyDihapus);
+
+      const forceApply = !deltaOnly;
+
+      // Pastikan manifest diterapkan terlebih dahulu agar penanda dummyDihapus aktif sebelum koleksi lain
+      if (remoteEntries[KUNCI_MANIFEST_DATA]) {
+        const me = remoteEntries[KUNCI_MANIFEST_DATA];
+        if (!this.pendingSyncKeys.has(KUNCI_MANIFEST_DATA) || remotePurged) {
+          if (this.applyRemoteEntry(KUNCI_MANIFEST_DATA, me.value, me.version, true, forceApply)) {
+            changed.push(KUNCI_MANIFEST_DATA);
+          }
+        }
+      }
+
+      for (const [key, entry] of Object.entries(remoteEntries)) {
+        if (key === KUNCI_MANIFEST_DATA) continue;
+        // Jangan timpa kunci yang belum selesai dikirim ke server kecuali server baru saja melakukan purge
+        if (this.pendingSyncKeys.has(key) && !remotePurged) {
+          continue;
+        }
+        if (this.applyRemoteEntry(key, entry.value, entry.version, true, forceApply)) {
+          changed.push(key);
+        }
+      }
+      this.lastSyncedAt = new Date().toISOString();
+      if (changed.length > 0) {
+        this.emitRemoteUpdate(changed, deltaOnly ? 'delta' : 'hydrate');
+      }
+      if (this.pendingSyncKeys.size > 0 && !remotePurged) {
+        void this.flushPendingSync();
+      }
+      return changed;
+    } catch {
+      return [];
+    }
+  }
+
+  private startFallbackPolling() {
+    if (typeof window === 'undefined' || this.fallbackPollTimer) return;
+    this.fallbackPollTimer = setInterval(() => {
+      if (this.wsConnected || !this.wsShouldConnect) return;
+      void this.syncFromServer(true);
+    }, 5000);
+  }
+
+  private stopFallbackPolling() {
+    if (this.fallbackPollTimer) {
+      clearInterval(this.fallbackPollTimer);
+      this.fallbackPollTimer = null;
+    }
+  }
+
+  public connectRealtimeSync(token?: string | null): void {
+    if (typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
+    const effectiveToken = token !== undefined ? token : this.getAuthTokenFromStorage();
+    this.currentWsToken = effectiveToken || null;
+    this.wsShouldConnect = true;
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ type: 'sync:auth', token: this.currentWsToken || '' }));
+      } catch {
+        /* abaikan bila socket baru putus */
+      }
+      void this.syncFromServer(true);
+      return;
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+      return;
+    }
+
+    if (this.wsReconnectTimer) {
+      clearTimeout(this.wsReconnectTimer);
+      this.wsReconnectTimer = null;
+    }
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/sync/ws${
+      this.currentWsToken ? `?token=${encodeURIComponent(this.currentWsToken)}` : ''
+    }`;
+
+    try {
+      const socket = new WebSocket(wsUrl);
+      this.ws = socket;
+
+      socket.onopen = () => {
+        if (this.ws !== socket) return;
+        this.wsConnected = true;
+        this.stopFallbackPolling();
+        this.updateConnectionStatusLabel();
+        const latestToken = this.currentWsToken || this.getAuthTokenFromStorage();
+        if (latestToken) {
+          try {
+            socket.send(JSON.stringify({ type: 'sync:auth', token: latestToken }));
+          } catch {
+            /* abaikan bila socket baru putus */
+          }
+        }
+        void this.flushPendingSync().then(() => this.syncFromServer(true));
+      };
+
+      socket.onmessage = (ev: MessageEvent) => {
+        try {
+          const msg = JSON.parse(String(ev.data)) as {
+            type?: string;
+            key?: string;
+            value?: unknown;
+            version?: number;
+            revision?: number;
+            sourceClientId?: string | null;
+            entries?: Record<string, { value: unknown; version: number }>;
+            deleted?: string[];
+          };
+          if (!msg || typeof msg.type !== 'string') return;
+
+          if (msg.type === 'sync:hello') {
+            if (typeof msg.revision === 'number' && msg.revision > this.serverRevision) {
+              void this.syncFromServer(true);
+            }
+            return;
+          }
+
+          if (msg.type === 'sync:update' && typeof msg.key === 'string') {
+            if (typeof msg.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, msg.revision);
+            }
+            if (msg.sourceClientId === this.clientTabId) {
+              if (typeof msg.version === 'number') {
+                this.serverVersions[msg.key] = Math.max(this.serverVersions[msg.key] ?? 0, msg.version);
+              }
+              return;
+            }
+            if (this.applyRemoteEntry(msg.key, msg.value, msg.version, true)) {
+              this.lastSyncedAt = new Date().toISOString();
+              this.emitRemoteUpdate([msg.key], 'ws');
+            }
+            return;
+          }
+
+          if (msg.type === 'sync:batch-update') {
+            if (typeof msg.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, msg.revision);
+            }
+            const entries = msg.entries || {};
+            const deleted = Array.isArray(msg.deleted) ? msg.deleted : [];
+            if (msg.sourceClientId === this.clientTabId) {
+              for (const [k, entry] of Object.entries(entries)) {
+                if (typeof entry?.version === 'number') {
+                  this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, entry.version);
+                }
+              }
+              return;
+            }
+            const changed: string[] = [];
+            if (entries[KUNCI_MANIFEST_DATA]) {
+              const me = entries[KUNCI_MANIFEST_DATA];
+              if (this.applyRemoteEntry(KUNCI_MANIFEST_DATA, me.value, me.version, true)) {
+                changed.push(KUNCI_MANIFEST_DATA);
+              }
+            }
+            for (const [k, entry] of Object.entries(entries)) {
+              if (k === KUNCI_MANIFEST_DATA) continue;
+              if (this.applyRemoteEntry(k, entry.value, entry.version, true)) {
+                changed.push(k);
+              }
+            }
+            for (const k of deleted) {
+              if (this.applyRemoteDelete(k, 'ws-batch')) {
+                changed.push(k);
+              }
+            }
+            if (changed.length > 0) {
+              this.lastSyncedAt = new Date().toISOString();
+              this.emitRemoteUpdate(changed, 'ws-batch');
+            }
+            return;
+          }
+
+          if (msg.type === 'sync:delete' && typeof msg.key === 'string') {
+            if (typeof msg.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, msg.revision);
+            }
+            if (msg.sourceClientId === this.clientTabId) return;
+            this.applyRemoteDelete(msg.key, 'ws');
+            return;
+          }
+
+          if (msg.type === 'sync:reset') {
+            this.serverVersions = {};
+            if (typeof msg.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, msg.revision);
+            }
+            if (msg.sourceClientId === this.clientTabId) return;
+            this.isApplyingRemote = true;
+            try {
+              if (typeof localStorage !== 'undefined') {
+                for (let i = localStorage.length - 1; i >= 0; i--) {
+                  const k = localStorage.key(i);
+                  if (k && k.startsWith(STORAGE_PREFIX) && k !== KUNCI_SESI_AUTH) {
+                    localStorage.removeItem(k);
+                  }
+                }
+              }
+              this.notifyLocal('all');
+              Array.from(this.listeners.keys()).forEach((k) => {
+                if (k !== 'all') this.notifyLocal(k);
+              });
+            } finally {
+              this.isApplyingRemote = false;
+            }
+            this.emitRemoteUpdate(['all'], 'reset');
+            return;
+          }
+
+          if (msg.type === 'rbac:updated' || msg.type === 'rbac:setup-updated') {
+            this.rbacListeners.forEach((cb) => {
+              try {
+                cb();
+              } catch {
+                /* abaikan */
+              }
+            });
+            this.rbacActivityListeners.forEach((cb) => {
+              try {
+                cb();
+              } catch {
+                /* abaikan */
+              }
+            });
+            return;
+          }
+
+          if (msg.type === 'rbac:activity') {
+            this.rbacActivityListeners.forEach((cb) => {
+              try {
+                cb();
+              } catch {
+                /* abaikan */
+              }
+            });
+            return;
+          }
+
+          if (msg.type === 'rbac:session-revoked') {
+            this.currentWsToken = null;
+            try {
+              if (typeof localStorage !== 'undefined') {
+                localStorage.removeItem(KUNCI_SESI_AUTH);
+              }
+            } catch {
+              /* abaikan */
+            }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('ams:auth-expired'));
+            }
+          }
+        } catch {
+          /* abaikan pesan tidak dikenal */
+        }
+      };
+
+      socket.onclose = () => {
+        if (this.ws === socket) {
+          this.ws = null;
+        }
+        this.wsConnected = false;
+        this.updateConnectionStatusLabel();
+        if (this.wsShouldConnect) {
+          this.startFallbackPolling();
+          if (!this.wsReconnectTimer) {
+            this.wsReconnectTimer = setTimeout(() => {
+              this.wsReconnectTimer = null;
+              if (this.wsShouldConnect) {
+                this.connectRealtimeSync(this.getAuthTokenFromStorage());
+              }
+            }, 3000);
+          }
+        }
+      };
+
+      socket.onerror = () => {
+        try {
+          socket.close();
+        } catch {
+          /* abaikan */
+        }
+      };
+    } catch {
+      this.wsConnected = false;
+      this.startFallbackPolling();
+      this.updateConnectionStatusLabel();
+    }
+  }
+
+  public disconnectRealtimeSync(): void {
+    this.wsShouldConnect = false;
+    this.stopFallbackPolling();
+    if (this.wsReconnectTimer) {
+      clearTimeout(this.wsReconnectTimer);
+      this.wsReconnectTimer = null;
+    }
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {
+        /* abaikan */
+      }
+      this.ws = null;
+    }
+    this.wsConnected = false;
+    this.updateConnectionStatusLabel();
+  }
+
+  /** Daftarkan satu pendengar ke beberapa koleksi sekaligus; mengembalikan fungsi pelepas tunggal. */
+  public subscribeKoleksi(
+    daftarKunci: readonly string[],
+    callback: (kunciKoleksi: string) => void
+  ): () => void {
+    const pelepas = daftarKunci.map((kunci) =>
+      this.subscribe(kunci, () => callback(kunci))
+    );
+    return () => {
+      pelepas.forEach((lepas) => lepas());
+    };
+  }
+
+  private notifyLocal(collectionKey: string) {
+    const panggil = (kunci: string) => {
+      const list = this.listeners.get(kunci);
+      if (!list) return;
+      list.forEach((cb) => {
+        try {
+          cb();
+        } catch (e) {
+          console.error('Error in listener callback', e);
+        }
+      });
+    };
+    panggil(collectionKey);
+    if (collectionKey !== 'all') {
+      panggil('all');
+    }
+  }
+
+  private notify(collectionKey: string) {
+    this.notifyLocal(collectionKey);
+    if (typeof window !== 'undefined') {
+      if (collectionKey === 'all' || collectionKey.startsWith('website')) {
+        window.dispatchEvent(new CustomEvent('ams:public-identity-update'));
+      }
+      if (
+        collectionKey === 'all' ||
+        (KOLEKSI_OPERASIONAL_SITUS as readonly string[]).includes(collectionKey)
+      ) {
+        window.dispatchEvent(
+          new CustomEvent('ams:db-collection-updated', { detail: { collectionKey } })
+        );
+      }
+    }
+    if (this.kanalSiaran) {
+      try {
+        this.kanalSiaran.postMessage({ type: 'ams-db-update', collectionKey });
+      } catch {
+        /* abaikan bila kanal sudah ditutup */
+      }
+    }
+  }
+
+  public getManifestData(): ManifestAsalData {
+    return normalisasiManifest(this.getJson<unknown>(KUNCI_MANIFEST_DATA));
+  }
+
+  public saveManifestData(
+    manifest: ManifestAsalData,
+    skipRemoteSync = false,
+    notifyListeners = true
+  ): void {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_PREFIX + KUNCI_MANIFEST_DATA, JSON.stringify(manifest));
+      }
+      if (notifyListeners) {
+        this.notify(KUNCI_MANIFEST_DATA);
+      }
+      if (!skipRemoteSync && !this.isApplyingRemote && !this.migrasiDraftAktif) {
+        this.enqueueKeySync(KUNCI_MANIFEST_DATA, { type: 'put', value: manifest });
+      }
+    } catch (e) {
+      console.error('Gagal menyimpan manifest asal data:', e);
+    }
+  }
+
+  private getCollection<T>(key: string, initial: T[]): T[] {
+    try {
+      if (typeof localStorage === 'undefined') {
+        const manifest = this.getManifestData();
+        const def = PETA_KATALOG_KOLEKSI.get(key);
+        if (manifest.dummyDihapus && def?.kategori === 'operasional') return [];
+        return initial;
+      }
+      const stored = localStorage.getItem(STORAGE_PREFIX + key);
+      if (!stored) {
+        const manifest = this.getManifestData();
+        const def = PETA_KATALOG_KOLEKSI.get(key);
+        const seedAwal = manifest.dummyDihapus && def?.kategori === 'operasional' ? ([] as T[]) : initial;
+        localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(seedAwal));
+        return seedAwal;
+      }
+      return JSON.parse(stored);
+    } catch {
+      return initial;
+    }
+  }
+
+  private setCollection<T>(key: string, data: T[]): void {
+    try {
+      if (typeof localStorage === 'undefined') {
+        this.notify(key);
+        return;
+      }
+      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(data));
+      if (
+        !this.isApplyingRemote &&
+        !this.migrasiDraftAktif &&
+        !this.isInternalProvenanceOp &&
+        key !== KUNCI_MANIFEST_DATA
+      ) {
+        const def = PETA_KATALOG_KOLEKSI.get(key);
+        if (def?.kategori === 'operasional') {
+          const manifest = this.getManifestData();
+          const lama = manifest.userEditedIds[key] || [];
+          const baru = kumpulkanIdSeedDiedit(key, data as unknown[], lama);
+          if (baru.length !== lama.length) {
+            this.saveManifestData({
+              ...manifest,
+              userEditedIds: { ...manifest.userEditedIds, [key]: baru }
+            });
+          }
+        }
+      }
+      this.notify(key);
+      if (!this.isApplyingRemote && !this.migrasiDraftAktif && !this.isInternalProvenanceOp) {
+        this.enqueueKeySync(key, { type: 'put', value: data });
+      }
+    } catch (e) {
+      console.error(`Gagal menyimpan data ${key}:`, e);
+    }
+  }
+
+  // --- CRUD Generic & Collection specific ---
+
+  // Izin Edar
+  public getIzinEdar(): IzinEdarAlkes[] {
+    return this.getCollection<IzinEdarAlkes>('izin_edar', INITIAL_IZIN_EDAR);
+  }
+  public saveIzinEdar(items: IzinEdarAlkes[]) {
+    this.setCollection('izin_edar', items);
+    this.logAudit('Regulatory Affairs', 'Pembaruan data izin edar alkes', items[0]?.nomorIzinEdar || '-');
+  }
+  public addIzinEdar(item: IzinEdarAlkes) {
+    const current = this.getIzinEdar();
+    this.saveIzinEdar([item, ...current]);
+  }
+
+  // Sertifikat
+  public getSertifikat(): SertifikatPerusahaan[] {
+    return this.getCollection<SertifikatPerusahaan>('sertifikat', INITIAL_SERTIFIKAT);
+  }
+  public saveSertifikat(items: SertifikatPerusahaan[]) {
+    this.setCollection('sertifikat', items);
+  }
+
+  // Dokumen Mutu
+  public getDokumenMutu(): DokumenMutu[] {
+    return this.getCollection<DokumenMutu>('dokumen_mutu', INITIAL_DOKUMEN_MUTU);
+  }
+  public saveDokumenMutu(items: DokumenMutu[]) {
+    this.setCollection('dokumen_mutu', items);
+  }
+
+  // CAPA
+  public getCAPA(): CAPARecord[] {
+    return this.getCollection<CAPARecord>('capa', INITIAL_CAPA);
+  }
+  public saveCAPA(items: CAPARecord[]) {
+    this.setCollection('capa', items);
+    this.logAudit('Quality Assurance', 'Pembaruan catatan CAPA ISO 13485', items[0]?.nomorCAPA || '-');
+  }
+  public addCAPA(item: CAPARecord) {
+    const current = this.getCAPA();
+    this.saveCAPA([item, ...current]);
+  }
+
+  // Produk Kembalian (Retur)
+  public getProdukKembalian(): ProdukKembalian[] {
+    return this.getCollection<ProdukKembalian>('produk_kembalian', INITIAL_PRODUK_KEMBALIAN);
+  }
+  public saveProdukKembalian(items: ProdukKembalian[]) {
+    this.setCollection('produk_kembalian', items);
+    this.logAudit('Quality Assurance', 'Pembaruan produk kembalian karantina', items[0]?.nomorRetur || '-');
+  }
+  public addProdukKembalian(item: ProdukKembalian) {
+    const current = this.getProdukKembalian();
+    this.saveProdukKembalian([item, ...current]);
+  }
+
+  // QC Inspeksi
+  public getInspeksiQC(): InspeksiQC[] {
+    return this.getCollection<InspeksiQC>('inspeksi_qc', INITIAL_INSPEKSI_QC);
+  }
+  public saveInspeksiQC(items: InspeksiQC[]) {
+    this.setCollection('inspeksi_qc', items);
+    this.logAudit('Quality Control', 'Pencatatan hasil inspeksi mutu batch', items[0]?.nomorBatch || '-');
+  }
+  public addInspeksiQC(item: InspeksiQC) {
+    const current = this.getInspeksiQC();
+    this.saveInspeksiQC([item, ...current]);
+  }
+
+  // Audit Internal ISO 13485:2016 & CDAKB
+  public getAuditInternal(lingkup?: 'QA' | 'QC' | 'SEMUA'): AuditInternalIso13485[] {
+    const manifest = this.getManifestData();
+    const sudahTersimpan =
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(STORAGE_PREFIX + 'audit_internal_iso') !== null;
+
+    let items: AuditInternalIso13485[];
+    if (sudahTersimpan) {
+      items = this.getCollection<AuditInternalIso13485>('audit_internal_iso', []);
+    } else if (manifest.dummyDihapus) {
+      items = this.getCollection<AuditInternalIso13485>('audit_internal_iso', []);
+    } else {
+      const defaultAudits: AuditInternalIso13485[] = [
+        auditOtomatisDokumenQA(this.getDokumenMutu(), this.getCAPA(), this.getProdukKembalian()),
+        auditOtomatisDokumenQC(this.getInspeksiQC(), this.getStokGudang())
+      ];
+      items = this.getCollection<AuditInternalIso13485>('audit_internal_iso', defaultAudits);
+      const seededIds = defaultAudits.map((a) => a.id);
+      if (seededIds.length > 0 && manifest.seededAuditIds.length === 0) {
+        this.saveManifestData({ ...manifest, seededAuditIds: seededIds }, true, false);
+      }
+    }
+
+    if (!lingkup || lingkup === 'SEMUA') return items;
+    return items.filter(a => lingkup === 'QA' ? a.lingkup.includes('QA') : a.lingkup.includes('QC'));
+  }
+  public saveAuditInternal(items: AuditInternalIso13485[]) {
+    this.setCollection('audit_internal_iso', items);
+    this.logAudit('Quality Assurance', 'Pembaruan catatan laporan Audit Internal ISO 13485', items[0]?.nomorAudit || '-');
+  }
+  public addAuditInternal(item: AuditInternalIso13485) {
+    const current = this.getAuditInternal();
+    this.saveAuditInternal([item, ...current]);
+  }
+  public jalankanAuditOtomatisQA(): AuditInternalIso13485 {
+    const hasil = auditOtomatisDokumenQA(
+      this.getDokumenMutu(),
+      this.getCAPA(),
+      this.getProdukKembalian()
+    );
+    this.addAuditInternal(hasil);
+    this.logAudit('Quality Assurance', `Eksekusi audit internal otomatis dokumen mutu (Skor: ${hasil.skorKepatuhan}%)`, hasil.nomorAudit);
+    return hasil;
+  }
+  public jalankanAuditOtomatisQC(): AuditInternalIso13485 {
+    const hasil = auditOtomatisDokumenQC(
+      this.getInspeksiQC(),
+      this.getStokGudang()
+    );
+    this.addAuditInternal(hasil);
+    this.logAudit('Quality Control', `Eksekusi audit internal otomatis pengawasan mutu (Skor: ${hasil.skorKepatuhan}%)`, hasil.nomorAudit);
+    return hasil;
+  }
+
+  // Stok Gudang
+  public getStokGudang(): StokGudang[] {
+    return this.getCollection<StokGudang>('stok_gudang', INITIAL_STOK_GUDANG);
+  }
+  public saveStokGudang(items: StokGudang[]) {
+    this.setCollection('stok_gudang', items);
+  }
+  public addStokGudang(item: StokGudang) {
+    const current = this.getStokGudang();
+    this.saveStokGudang([item, ...current]);
+  }
+
+  // Log Suhu
+  public getLogSuhu(): LogSuhu[] {
+    return this.getCollection<LogSuhu>('log_suhu', INITIAL_LOG_SUHU);
+  }
+  public saveLogSuhu(items: LogSuhu[]) {
+    this.setCollection('log_suhu', items);
+  }
+  public addLogSuhu(item: LogSuhu) {
+    const current = this.getLogSuhu();
+    this.saveLogSuhu([item, ...current.slice(0, 49)]); // keep last 50
+  }
+
+  // Pest Control
+  public getPestControl(): LogPestControl[] {
+    return this.getCollection<LogPestControl>('pest_control', INITIAL_PEST_CONTROL);
+  }
+  public savePestControl(items: LogPestControl[]) {
+    this.setCollection('pest_control', items);
+  }
+  public addPestControl(item: LogPestControl) {
+    const current = this.getPestControl();
+    this.savePestControl([item, ...current]);
+  }
+
+  // Layanan Teknis
+  public getLayananTeknis(): LayananTeknis[] {
+    return this.getCollection<LayananTeknis>('layanan_teknis', INITIAL_LAYANAN_TEKNIS);
+  }
+  public saveLayananTeknis(items: LayananTeknis[]) {
+    this.setCollection('layanan_teknis', items);
+    this.logAudit('Teknisi & Purna Jual', 'Pembaruan tiket instalasi/kalibrasi', items[0]?.nomorTiket || '-');
+  }
+  public addLayananTeknis(item: LayananTeknis) {
+    const current = this.getLayananTeknis();
+    this.saveLayananTeknis([item, ...current]);
+  }
+
+  // Manufaktur
+  public getBetsProduksi(): BetsProduksi[] {
+    return this.getCollection<BetsProduksi>('bets_produksi', INITIAL_BETS_PRODUKSI);
+  }
+  public saveBetsProduksi(items: BetsProduksi[]) {
+    this.setCollection('bets_produksi', items);
+    this.logAudit('Manufaktur CPAKB', 'Pembaruan Catatan Batch Produksi (BMR)', items[0]?.nomorBMR || '-');
+  }
+  public addBetsProduksi(item: BetsProduksi) {
+    const current = this.getBetsProduksi();
+    this.saveBetsProduksi([item, ...current]);
+  }
+
+  // Purchasing & Pemasok
+  public getPemasok(): PemasokAlkes[] {
+    return this.getCollection<PemasokAlkes>('pemasok', INITIAL_PEMASOK);
+  }
+  public savePemasok(items: PemasokAlkes[]) {
+    this.setCollection('pemasok', items);
+  }
+  public addPemasok(item: PemasokAlkes) {
+    const current = this.getPemasok();
+    this.savePemasok([item, ...current]);
+  }
+
+  public getPurchaseOrder(): PurchaseOrderAlkes[] {
+    return this.getCollection<PurchaseOrderAlkes>('purchase_order', INITIAL_PURCHASE_ORDER);
+  }
+  public savePurchaseOrder(items: PurchaseOrderAlkes[]) {
+    this.setCollection('purchase_order', items);
+    this.logAudit('Purchasing', 'Pembaruan Purchase Order resmi', items[0]?.nomorPO || '-');
+  }
+  public addPurchaseOrder(item: PurchaseOrderAlkes) {
+    const current = this.getPurchaseOrder();
+    this.savePurchaseOrder([item, ...current]);
+  }
+
+  // Sales
+  public getPenjualan(): PenjualanAlkes[] {
+    return this.getCollection<PenjualanAlkes>('penjualan', INITIAL_PENJUALAN);
+  }
+  public savePenjualan(items: PenjualanAlkes[]) {
+    this.setCollection('penjualan', items);
+    this.logAudit('Sales & Marketing', 'Pembaruan pesanan fasyankes', items[0]?.nomorPesanan || '-');
+  }
+  public addPenjualan(item: PenjualanAlkes) {
+    const current = this.getPenjualan();
+    this.savePenjualan([item, ...current]);
+  }
+
+  // PMS & Laporan KTD
+  public getLaporanKTD(): LaporanKTD[] {
+    return this.getCollection<LaporanKTD>('laporan_ktd', INITIAL_LAPORAN_KTD);
+  }
+  public saveLaporanKTD(items: LaporanKTD[]) {
+    this.setCollection('laporan_ktd', items);
+    this.logAudit('Post-Market Vigilance', 'Pencatatan laporan KTD e-Watch Alkes', items[0]?.nomorLaporanKTD || '-');
+  }
+  public addLaporanKTD(item: LaporanKTD) {
+    const current = this.getLaporanKTD();
+    this.saveLaporanKTD([item, ...current]);
+  }
+
+  // Penarikan Produk (Recall)
+  public getPenarikanProduk(): PenarikanProduk[] {
+    return this.getCollection<PenarikanProduk>('penarikan_produk', INITIAL_RECALL);
+  }
+  public savePenarikanProduk(items: PenarikanProduk[]) {
+    this.setCollection('penarikan_produk', items);
+    this.logAudit('Post-Market Vigilance', 'Pembaruan eksekusi penarikan produk (Recall)', items[0]?.nomorRecall || '-');
+  }
+  public addPenarikanProduk(item: PenarikanProduk) {
+    const current = this.getPenarikanProduk();
+    this.savePenarikanProduk([item, ...current]);
+  }
+
+  // HRD Pelatihan
+  public getPelatihan(): PelatihanPersonil[] {
+    return this.getCollection<PelatihanPersonil>('pelatihan', INITIAL_PELATIHAN);
+  }
+  public savePelatihan(items: PelatihanPersonil[]) {
+    this.setCollection('pelatihan', items);
+  }
+  public addPelatihan(item: PelatihanPersonil) {
+    const current = this.getPelatihan();
+    this.savePelatihan([item, ...current]);
+  }
+
+  public getSertifikasiPegawai(): SertifikasiPegawai[] {
+    return this.getCollection<SertifikasiPegawai>('sertifikasi_pegawai', INITIAL_SERTIFIKASI_PEGAWAI);
+  }
+  public saveSertifikasiPegawai(items: SertifikasiPegawai[]) {
+    this.setCollection('sertifikasi_pegawai', items);
+  }
+
+  // ============================ HRIS ============================
+
+  // Modul 1 — Core HR & Org Management
+  public getKaryawanHRIS(): KaryawanHRIS[] {
+    return this.getCollection<KaryawanHRIS>('hris_karyawan', INITIAL_KARYAWAN_HRIS);
+  }
+  public saveKaryawanHRIS(items: KaryawanHRIS[]) {
+    this.setCollection('hris_karyawan', items);
+  }
+  public addKaryawanHRIS(item: KaryawanHRIS) {
+    const current = this.getKaryawanHRIS();
+    this.saveKaryawanHRIS([item, ...current]);
+  }
+
+  public getGradingJabatan(): GradeJabatan[] {
+    return this.getCollection<GradeJabatan>('hris_grading', INITIAL_GRADING_JABATAN);
+  }
+  public saveGradingJabatan(items: GradeJabatan[]) {
+    this.setCollection('hris_grading', items);
+  }
+
+  // Riwayat mutasi memakai pola tabel temporal: satu baris aktif per karyawan
+  // (tanggalBerakhir = null), baris lama ditutup otomatis saat mutasi baru dicatat.
+  public getRiwayatMutasi(): RiwayatMutasi[] {
+    return this.getCollection<RiwayatMutasi>('hris_mutasi', INITIAL_RIWAYAT_MUTASI);
+  }
+  public saveRiwayatMutasi(items: RiwayatMutasi[]) {
+    this.setCollection('hris_mutasi', items);
+  }
+  public catatMutasi(item: RiwayatMutasi) {
+    const penutup = new Date(item.tanggalEfektif);
+    penutup.setDate(penutup.getDate() - 1);
+    const tanggalBerakhirInklusif = penutup.toISOString().split('T')[0];
+
+    const riwayat = this.getRiwayatMutasi().map(r =>
+      r.karyawanId === item.karyawanId && r.tanggalBerakhir === null
+        ? { ...r, tanggalBerakhir: tanggalBerakhirInklusif }
+        : r
+    );
+    this.saveRiwayatMutasi([item, ...riwayat]);
+
+    const karyawan = this.getKaryawanHRIS().map(k =>
+      k.id === item.karyawanId
+        ? { ...k, jabatan: item.jabatan, divisi: item.divisi, lokasi: item.lokasi, grade: item.grade }
+        : k
+    );
+    this.saveKaryawanHRIS(karyawan);
+    this.logAudit('HRIS — Core HR', 'Pencatatan mutasi jabatan/divisi karyawan', item.karyawanId);
+  }
+
+  // Modul 2 — Time & Attendance
+  public getJadwalShift(): JadwalShift[] {
+    return this.getCollection<JadwalShift>('hris_shift', INITIAL_JADWAL_SHIFT);
+  }
+  public saveJadwalShift(items: JadwalShift[]) {
+    this.setCollection('hris_shift', items);
+  }
+  public addJadwalShift(item: JadwalShift) {
+    const current = this.getJadwalShift();
+    this.saveJadwalShift([item, ...current]);
+  }
+
+  public getAbsensi(): LogAbsensi[] {
+    return this.getCollection<LogAbsensi>('hris_absensi', INITIAL_ABSENSI);
+  }
+  public saveAbsensi(items: LogAbsensi[]) {
+    this.setCollection('hris_absensi', items);
+  }
+  public addAbsensi(item: LogAbsensi) {
+    const current = this.getAbsensi();
+    this.saveAbsensi([item, ...current]);
+  }
+  public checkOutAbsensi(id: string, jamKeluar: string, lokasiKeluar?: string) {
+    const current = this.getAbsensi();
+    const updated = current.map((a) =>
+      a.id === id
+        ? {
+            ...a,
+            jamKeluar,
+            lokasi: lokasiKeluar ? `${a.lokasi} | Out: ${lokasiKeluar}` : a.lokasi
+          }
+        : a
+    );
+    this.saveAbsensi(updated);
+  }
+
+  public getCuti(): PengajuanCuti[] {
+    return this.getCollection<PengajuanCuti>('hris_cuti', INITIAL_CUTI);
+  }
+  public saveCuti(items: PengajuanCuti[]) {
+    this.setCollection('hris_cuti', items);
+  }
+  public addCuti(item: PengajuanCuti) {
+    const current = this.getCuti();
+    this.saveCuti([item, ...current]);
+    this.logAudit('HRIS — Cuti & Izin', `Pengajuan ${item.jenis} (${item.jumlahHari} hari)`, item.id, item.namaKaryawan, 'Karyawan');
+  }
+  public ubahStatusCuti(id: string, status: PengajuanCuti['status'], penyetuju: string) {
+    const current = this.getCuti();
+    const lama = current.find((c) => c.id === id);
+    if (!lama || lama.status === status) return;
+    this.saveCuti(
+      current.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              status,
+              disetujuiOleh: status === 'Disetujui' || status === 'Ditolak' ? penyetuju : c.disetujuiOleh
+            }
+          : c
+      )
+    );
+    this.logAudit('HRIS — Cuti & Izin', `Keputusan cuti ${status} oleh ${penyetuju}`, id, penyetuju, 'Manajemen HRIS', [
+      { kolom: 'status', nilaiLama: lama.status, nilaiBaru: status }
+    ]);
+  }
+
+  public getLembur(): PerhitunganLembur[] {
+    return this.getCollection<PerhitunganLembur>('hris_lembur', INITIAL_LEMBUR);
+  }
+  public saveLembur(items: PerhitunganLembur[]) {
+    this.setCollection('hris_lembur', items);
+  }
+  public addLembur(item: PerhitunganLembur) {
+    const current = this.getLembur();
+    this.saveLembur([item, ...current]);
+  }
+
+  // Modul 3 — Payroll, Benefits & Tax
+  public getSlipGaji(): SlipGaji[] {
+    return this.getCollection<SlipGaji>('hris_slip_gaji', INITIAL_SLIP_GAJI);
+  }
+  public saveSlipGaji(items: SlipGaji[]) {
+    this.setCollection('hris_slip_gaji', items);
+  }
+  public addSlipGaji(item: SlipGaji) {
+    const current = this.getSlipGaji();
+    this.saveSlipGaji([item, ...current]);
+    this.logAudit('HRIS — Payroll', `Penerbitan slip gaji periode ${item.periode}`, item.id);
+  }
+
+  // Modul 4 — Recruitment & Onboarding (ATS)
+  public getKandidatATS(): KandidatATS[] {
+    return this.getCollection<KandidatATS>('hris_ats', INITIAL_KANDIDAT_ATS);
+  }
+  public saveKandidatATS(items: KandidatATS[]) {
+    this.setCollection('hris_ats', items);
+  }
+  public addKandidatATS(item: KandidatATS) {
+    const current = this.getKandidatATS();
+    this.saveKandidatATS([item, ...current]);
+  }
+
+  // Modul 5 — Learning & Competency
+  public getSkillMatrix(): SkillMatrix[] {
+    return this.getCollection<SkillMatrix>('hris_skill_matrix', INITIAL_SKILL_MATRIX);
+  }
+  public saveSkillMatrix(items: SkillMatrix[]) {
+    this.setCollection('hris_skill_matrix', items);
+  }
+  public addSkillMatrix(item: SkillMatrix) {
+    const current = this.getSkillMatrix();
+    this.saveSkillMatrix([item, ...current]);
+  }
+
+  // Modul 6 — Performance & Talent
+  public getKpiKaryawan(): KpiKaryawan[] {
+    return this.getCollection<KpiKaryawan>('hris_kpi', INITIAL_KPI_KARYAWAN);
+  }
+  public saveKpiKaryawan(items: KpiKaryawan[]) {
+    this.setCollection('hris_kpi', items);
+  }
+  public addKpiKaryawan(item: KpiKaryawan) {
+    const current = this.getKpiKaryawan();
+    this.saveKpiKaryawan([item, ...current]);
+  }
+
+  public getUmpanBalik360(): UmpanBalik360[] {
+    return this.getCollection<UmpanBalik360>('hris_umpan_balik_360', INITIAL_UMPAN_BALIK_360);
+  }
+  public saveUmpanBalik360(items: UmpanBalik360[]) {
+    this.setCollection('hris_umpan_balik_360', items);
+  }
+
+  // Modul 7 — HSE / K3
+  public getInsidenK3(): InsidenK3[] {
+    return this.getCollection<InsidenK3>('hris_insiden_k3', INITIAL_INSIDEN_K3);
+  }
+  public saveInsidenK3(items: InsidenK3[]) {
+    this.setCollection('hris_insiden_k3', items);
+  }
+  public addInsidenK3(item: InsidenK3) {
+    const current = this.getInsidenK3();
+    this.saveInsidenK3([item, ...current]);
+    this.logAudit('HRIS — HSE/K3', `Pelaporan ${item.jenis} di ${item.area}`, item.nomorLaporan);
+  }
+
+  public getRekamMcu(): RekamMcu[] {
+    return this.getCollection<RekamMcu>('hris_mcu', INITIAL_REKAM_MCU);
+  }
+  public saveRekamMcu(items: RekamMcu[]) {
+    this.setCollection('hris_mcu', items);
+  }
+  public addRekamMcu(item: RekamMcu) {
+    const current = this.getRekamMcu();
+    this.saveRekamMcu([item, ...current]);
+  }
+
+  public getDistribusiApd(): DistribusiApd[] {
+    return this.getCollection<DistribusiApd>('hris_apd', INITIAL_DISTRIBUSI_APD);
+  }
+  public saveDistribusiApd(items: DistribusiApd[]) {
+    this.setCollection('hris_apd', items);
+  }
+  public addDistribusiApd(item: DistribusiApd) {
+    const current = this.getDistribusiApd();
+    this.saveDistribusiApd([item, ...current]);
+  }
+
+  // ============================ SALES & MARKETING ============================
+
+  private bentangPerubahan<T extends Record<string, unknown>>(lama: T, baru: Partial<T>) {
+    const nilaiTampil = (v: unknown) => {
+      if (v === undefined || v === null) return '-';
+      return typeof v === 'object' ? JSON.stringify(v) : String(v);
+    };
+    return Object.entries(baru)
+      .filter(([kolom, nilai]) => JSON.stringify((lama as Record<string, unknown>)[kolom]) !== JSON.stringify(nilai))
+      .map(([kolom, nilai]) => ({
+        kolom,
+        nilaiLama: nilaiTampil((lama as Record<string, unknown>)[kolom]),
+        nilaiBaru: nilaiTampil(nilai)
+      }));
+  }
+
+  // 1.1 B2B Customer Profiling — sekaligus Credit Limit & TOP
+  public getPelangganB2B(): PelangganB2B[] {
+    return this.getCollection<PelangganB2B>('sales_pelanggan', INITIAL_PELANGGAN_B2B);
+  }
+  public savePelangganB2B(items: PelangganB2B[]) {
+    this.setCollection('sales_pelanggan', items);
+  }
+  public addPelangganB2B(item: PelangganB2B) {
+    this.savePelangganB2B([item, ...this.getPelangganB2B()]);
+    this.logAudit('Sales & Marketing — CRM', 'Pencatatan master pelanggan B2B baru', item.kodePelanggan, 'Manajer Penjualan', 'Sales & Marketing');
+  }
+  public updatePelangganB2B(id: string, patch: Partial<PelangganB2B>) {
+    const current = this.getPelangganB2B();
+    const lama = current.find((p) => p.id === id);
+    if (!lama) return;
+    this.savePelangganB2B(current.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    this.logAudit(
+      'Sales & Marketing — CRM',
+      'Perubahan master pelanggan (batas kredit/TOP/status)',
+      lama.kodePelanggan,
+      'Manajer Penjualan',
+      'Sales & Marketing',
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  // 1.2 Lead & Opportunity Pipelines
+  public getProspek(): ProspekAlkes[] {
+    return this.getCollection<ProspekAlkes>('sales_prospek', INITIAL_PROSPEK_ALKES);
+  }
+  public saveProspek(items: ProspekAlkes[]) {
+    this.setCollection('sales_prospek', items);
+  }
+  public addProspek(item: ProspekAlkes) {
+    this.saveProspek([item, ...this.getProspek()]);
+    this.logAudit('Sales & Marketing — CRM', 'Pembukaan prospek baru pada pipeline', item.nomorProspek, 'Medical Representative', 'Sales & Marketing');
+  }
+  public majukanTahapProspek(id: string, tahap: ProspekAlkes['tahap']) {
+    const current = this.getProspek();
+    const lama = current.find((p) => p.id === id);
+    if (!lama || lama.tahap === tahap) return;
+    this.saveProspek(current.map((p) => (p.id === id ? { ...p, tahap } : p)));
+    this.logAudit('Sales & Marketing — CRM', 'Pergerakan tahap opportunity pipeline', lama.nomorProspek, 'Medical Representative', 'Sales & Marketing', [
+      { kolom: 'tahap', nilaiLama: lama.tahap, nilaiBaru: tahap }
+    ]);
+  }
+
+  // 1.3 Mapping Area & Sales Territory
+  public getTeritorial(): TeritorialPenjualan[] {
+    return this.getCollection<TeritorialPenjualan>('sales_teritorial', INITIAL_TERITORIAL_PENJUALAN);
+  }
+  public saveTeritorial(items: TeritorialPenjualan[]) {
+    this.setCollection('sales_teritorial', items);
+  }
+  public addTeritorial(item: TeritorialPenjualan) {
+    this.saveTeritorial([item, ...this.getTeritorial()]);
+  }
+
+  // 2.1 LPSE Scraper & Alert System
+  public getTender(): TenderAlkes[] {
+    return this.getCollection<TenderAlkes>('sales_tender', INITIAL_TENDER_ALKES);
+  }
+  public saveTender(items: TenderAlkes[]) {
+    this.setCollection('sales_tender', items);
+  }
+  public addTender(item: TenderAlkes) {
+    this.saveTender([item, ...this.getTender()]);
+    this.logAudit('Sales & Marketing — Tender', 'Entri pengumuman tender/LPSE baru', item.nomorPengumuman, 'Manajer Tender', 'Sales & Marketing');
+  }
+
+  // 2.2 Contract & Pricing Agreement
+  public getKontrakHarga(): KontrakHarga[] {
+    return this.getCollection<KontrakHarga>('sales_kontrak', INITIAL_KONTRAK_HARGA);
+  }
+  public saveKontrakHarga(items: KontrakHarga[]) {
+    this.setCollection('sales_kontrak', items);
+  }
+  public addKontrakHarga(item: KontrakHarga) {
+    this.saveKontrakHarga([item, ...this.getKontrakHarga()]);
+    this.logAudit('Sales & Marketing — Tender', 'Penerbitan kontrak penguncian harga', item.nomorKontrak, 'Manajer Tender', 'Sales & Marketing');
+  }
+
+  // 3.1 Visit Planner & Geo-Tagging
+  public getKunjunganMedRep(): KunjunganMedRep[] {
+    return this.getCollection<KunjunganMedRep>('sales_kunjungan', INITIAL_KUNJUNGAN_MEDREP);
+  }
+  public saveKunjunganMedRep(items: KunjunganMedRep[]) {
+    this.setCollection('sales_kunjungan', items);
+  }
+  public addKunjunganMedRep(item: KunjunganMedRep) {
+    this.saveKunjunganMedRep([item, ...this.getKunjunganMedRep()]);
+  }
+  public catatCheckInKunjungan(id: string, koordinat: { lat: number; lon: number }, jam: string) {
+    const current = this.getKunjunganMedRep();
+    const lama = current.find((k) => k.id === id);
+    if (!lama) return;
+    this.saveKunjunganMedRep(
+      current.map((k) => (k.id === id ? { ...k, koordinatCheckIn: koordinat, jamCheckIn: jam } : k))
+    );
+    this.logAudit('Sales & Marketing — SFA', 'Check-in kunjungan lapangan dengan geotag', `${lama.medRep} @ ${lama.tanggal}`, 'Medical Representative', 'Sales & Marketing', [
+      { kolom: 'koordinatCheckIn', nilaiLama: lama.koordinatCheckIn ? `${lama.koordinatCheckIn.lat}, ${lama.koordinatCheckIn.lon}` : 'belum check-in', nilaiBaru: `${koordinat.lat}, ${koordinat.lon}` }
+    ]);
+  }
+
+  // 3.2 Product Knowledge & Digital Brochure
+  public getPengetahuanProduk(): PengetahuanProdukAlkes[] {
+    return this.getCollection<PengetahuanProdukAlkes>('sales_pengetahuan_produk', INITIAL_PENGETAHUAN_PRODUK);
+  }
+  public savePengetahuanProduk(items: PengetahuanProdukAlkes[]) {
+    this.setCollection('sales_pengetahuan_produk', items);
+  }
+
+  // 3.3 Mobile Order Taking (Pre-Order)
+  public getPraOrder(): PraOrderMedRep[] {
+    return this.getCollection<PraOrderMedRep>('sales_pra_order', INITIAL_PRA_ORDER_MEDREP);
+  }
+  public savePraOrder(items: PraOrderMedRep[]) {
+    this.setCollection('sales_pra_order', items);
+  }
+  public addPraOrder(item: PraOrderMedRep) {
+    this.savePraOrder([item, ...this.getPraOrder()]);
+    this.logAudit('Sales & Marketing — SFA', 'Input pra-order dari aplikasi lapangan', item.nomorPraOrder, 'Medical Representative', 'Sales & Marketing');
+  }
+
+  // Konversi pra-order lapangan menjadi Sales Order resmi (jalur 3.3 -> 4)
+  public konversiPraOrderKeSalesOrder(praOrderId: string, jalurPenjualan: PenjualanAlkes['jalurPenjualan'], nomorBatch: string) {
+    const pra = this.getPraOrder().find((p) => p.id === praOrderId);
+    if (!pra) return null;
+    const pelanggan = this.getPelangganB2B().find((c) => c.id === pra.pelangganId);
+    const itemTerbaik = pra.item[0];
+    const pesanan: PenjualanAlkes = {
+      id: 'SO-' + Date.now(),
+      nomorPesanan: `SP-LAP-${pra.tanggal.slice(0, 4)}-${String(this.getPenjualan().length + 126).padStart(3, '0')}`,
+      fasyankes: pelanggan?.namaInstalasi ?? '-',
+      jalurPenjualan,
+      namaAlkes: itemTerbaik.namaAlkes,
+      nomorBatch,
+      jumlah: pra.item.reduce((total, i) => total + i.jumlah, 0),
+      satuan: 'Unit',
+      totalHarga: pra.item.reduce((total, i) => total + i.jumlah * i.hargaSatuan, 0),
+      statusVerifikasiEtikaIklan: 'Memenuhi Etika Promosi',
+      statusKirim: 'Verifikasi Pesanan',
+      tanggalPesanan: pra.tanggal,
+      pelangganId: pra.pelangganId,
+      hargaSatuan: itemTerbaik.hargaSatuan,
+      ppnPersen: 11
+    };
+    this.addPenjualan(pesanan);
+    this.savePraOrder(this.getPraOrder().map((p) => (p.id === praOrderId ? { ...p, statusPraOrder: 'Konversi Sales Order' } : p)));
+    this.logAudit('Sales & Marketing — Order', 'Konversi pra-order lapangan menjadi Sales Order', pesanan.nomorPesanan, 'Manajer Penjualan', 'Sales & Marketing', [
+      { kolom: 'statusPraOrder', nilaiLama: pra.statusPraOrder, nilaiBaru: 'Konversi Sales Order' }
+    ]);
+    return pesanan;
+  }
+
+  // 4.2 Multi-Level Pricing & Discount Engine
+  public getSkemaHarga(): SkemaHargaAlkes[] {
+    return this.getCollection<SkemaHargaAlkes>('sales_skema_harga', INITIAL_SKEMA_HARGA);
+  }
+  public saveSkemaHarga(items: SkemaHargaAlkes[]) {
+    this.setCollection('sales_skema_harga', items);
+  }
+  public addSkemaHarga(item: SkemaHargaAlkes) {
+    this.saveSkemaHarga([item, ...this.getSkemaHarga()]);
+    this.logAudit('Sales & Marketing — Order', 'Penerbitan skema harga berjenjang', item.namaSkema, 'Manajer Penjualan', 'Sales & Marketing');
+  }
+
+  // 5.1 Batch/Lot & Serial Number Tracking
+  public getUnitSerial(): UnitSerialAlkes[] {
+    return this.getCollection<UnitSerialAlkes>('sales_unit_serial', INITIAL_UNIT_SERIAL);
+  }
+  public saveUnitSerial(items: UnitSerialAlkes[]) {
+    this.setCollection('sales_unit_serial', items);
+  }
+  public addUnitSerial(item: UnitSerialAlkes) {
+    this.saveUnitSerial([item, ...this.getUnitSerial()]);
+  }
+
+  // 5.2 Warranty & Instalasi Base
+  public getGaransiInstalasi(): GaransiInstalasi[] {
+    return this.getCollection<GaransiInstalasi>('sales_garansi', INITIAL_GARANSI_INSTALASI);
+  }
+  public saveGaransiInstalasi(items: GaransiInstalasi[]) {
+    this.setCollection('sales_garansi', items);
+  }
+  public addGaransiInstalasi(item: GaransiInstalasi) {
+    this.saveGaransiInstalasi([item, ...this.getGaransiInstalasi()]);
+    this.logAudit('Sales & Marketing — Ketelusuran', 'Pencatatan instalasi & mulai masa garansi', item.nomorSerial, 'Teknisi Elektromedik', 'Operations & Technical');
+  }
+
+  // 6.1 Event & Simposium Manager
+  public getKampanye(): KampanyeAlkes[] {
+    return this.getCollection<KampanyeAlkes>('sales_kampanye', INITIAL_KAMPANYE_ALKES);
+  }
+  public saveKampanye(items: KampanyeAlkes[]) {
+    this.setCollection('sales_kampanye', items);
+  }
+  public addKampanye(item: KampanyeAlkes) {
+    this.saveKampanye([item, ...this.getKampanye()]);
+  }
+
+  // 6.2 Sample & Demo Unit Tracking
+  public getUnitDemo(): UnitDemoAlkes[] {
+    return this.getCollection<UnitDemoAlkes>('sales_unit_demo', INITIAL_UNIT_DEMO_ALKES);
+  }
+  public saveUnitDemo(items: UnitDemoAlkes[]) {
+    this.setCollection('sales_unit_demo', items);
+  }
+  public addUnitDemo(item: UnitDemoAlkes) {
+    this.saveUnitDemo([item, ...this.getUnitDemo()]);
+    this.logAudit('Sales & Marketing — Kampanye', 'Serah terima unit demo/sampel ke fasyankes', item.nomorBeritaAcara, 'Manajer Pemasaran', 'Sales & Marketing');
+  }
+
+  // 6.3 Loyalty & Rebate Program
+  public getProgramRebate(): ProgramRebate[] {
+    return this.getCollection<ProgramRebate>('sales_rebate', INITIAL_PROGRAM_REBATE);
+  }
+  public saveProgramRebate(items: ProgramRebate[]) {
+    this.setCollection('sales_rebate', items);
+  }
+  public addProgramRebate(item: ProgramRebate) {
+    this.saveProgramRebate([item, ...this.getProgramRebate()]);
+  }
+
+  // 7.2 Demand Forecasting — basis historis
+  public getRiwayatPenjualanBulanan(): RiwayatPenjualanBulanan[] {
+    return this.getCollection<RiwayatPenjualanBulanan>('sales_riwayat_bulanan', INITIAL_RIWAYAT_PENJUALAN_BULANAN);
+  }
+  public saveRiwayatPenjualanBulanan(items: RiwayatPenjualanBulanan[]) {
+    this.setCollection('sales_riwayat_bulanan', items);
+  }
+
+  // ==================== 8. Newsletter & Mailing List (mesin: listmonk) ====================
+
+  // 8.1 Subscriber lists
+  public getDaftarSurat(): DaftarSurat[] {
+    return this.getCollection<DaftarSurat>('surat_daftar', INITIAL_DAFTAR_SURAT);
+  }
+  public saveDaftarSurat(items: DaftarSurat[]) {
+    this.setCollection('surat_daftar', items);
+  }
+  public ubahDaftarSurat(id: string, patch: Partial<DaftarSurat>) {
+    const current = this.getDaftarSurat();
+    const lama = current.find((d) => d.id === id);
+    if (!lama) return;
+    this.saveDaftarSurat(current.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+    this.logAudit(
+      'Sales & Marketing — Newsletter',
+      'Perubahan konfigurasi subscriber list',
+      lama.nama,
+      'Manajer Pemasaran',
+      'Sales & Marketing',
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  // 8.2 Subscribers
+  public getPelangganSurat(): PelangganSurat[] {
+    return this.getCollection<PelangganSurat>('surat_subscriber', INITIAL_PELANGGAN_SURAT);
+  }
+  public savePelangganSurat(items: PelangganSurat[]) {
+    this.setCollection('surat_subscriber', items);
+  }
+  public tambahPelangganSurat(items: PelangganSurat[], keterangan: string) {
+    if (items.length === 0) return;
+    this.savePelangganSurat([...items, ...this.getPelangganSurat()]);
+    this.logAudit(
+      'Sales & Marketing — Newsletter',
+      keterangan,
+      items.length === 1 ? items[0].surel : `${items.length} subscriber baru`,
+      'Manajer Pemasaran',
+      'Sales & Marketing'
+    );
+  }
+  public ubahStatusPelangganSurat(id: string, status: PelangganSurat['status'], alasan: string) {
+    const current = this.getPelangganSurat();
+    const lama = current.find((s) => s.id === id);
+    if (!lama || lama.status === status) return;
+    this.savePelangganSurat(current.map((s) => (s.id === id ? { ...s, status } : s)));
+    this.logAudit('Sales & Marketing — Newsletter', `Perubahan status subscriber: ${alasan}`, lama.surel, 'Manajer Pemasaran', 'Sales & Marketing', [
+      { kolom: 'status', nilaiLama: lama.status, nilaiBaru: status }
+    ]);
+  }
+  public ubahKeanggotaanDaftar(ids: string[], daftarId: string, aksi: 'add' | 'remove') {
+    const current = this.getPelangganSurat();
+    const namaDaftar = this.getDaftarSurat().find((d) => d.id === daftarId)?.nama ?? daftarId;
+    this.savePelangganSurat(
+      current.map((s) => {
+        if (!ids.includes(s.id)) return s;
+        const keanggotaan = new Set(s.daftarIds);
+        if (aksi === 'add') keanggotaan.add(daftarId);
+        else keanggotaan.delete(daftarId);
+        return { ...s, daftarIds: Array.from(keanggotaan) };
+      })
+    );
+    this.logAudit(
+      'Sales & Marketing — Newsletter',
+      `${aksi === 'add' ? 'Menambahkan' : 'Mengeluarkan'} ${ids.length} subscriber ${aksi === 'add' ? 'ke' : 'dari'} daftar ${namaDaftar}`,
+      namaDaftar,
+      'Manajer Pemasaran',
+      'Sales & Marketing'
+    );
+  }
+
+  // 8.3 Campaigns
+  public getKampanyeSurat(): KampanyeSurat[] {
+    return this.getCollection<KampanyeSurat>('surat_kampanye', INITIAL_KAMPANYE_SURAT);
+  }
+  public saveKampanyeSurat(items: KampanyeSurat[]) {
+    this.setCollection('surat_kampanye', items);
+  }
+  /** Perubahan status + statistik dengan jejak old/new (hanya satu kampanye boleh mengirim). */
+  public ubahKampanyeSurat(id: string, patch: Partial<KampanyeSurat>, aktivitas: string, pengguna = 'Manajer Pemasaran') {
+    const current = this.getKampanyeSurat();
+    const lama = current.find((k) => k.id === id);
+    if (!lama) return;
+    this.saveKampanyeSurat(current.map((k) => (k.id === id ? { ...k, ...patch } : k)));
+    this.logAudit(
+      'Sales & Marketing — Newsletter',
+      aktivitas,
+      lama.nomorKampanye,
+      pengguna,
+      'Sales & Marketing',
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  // 8.4 Templates, media, transactional messages
+  public getTemplatSurat(): TemplatSurat[] {
+    return this.getCollection<TemplatSurat>('surat_templat', INITIAL_TEMPLAT_SURAT);
+  }
+  public saveTemplatSurat(items: TemplatSurat[]) {
+    this.setCollection('surat_templat', items);
+  }
+  public getMediaSurat(): MediaSurat[] {
+    return this.getCollection<MediaSurat>('surat_media', INITIAL_MEDIA_SURAT);
+  }
+  public saveMediaSurat(items: MediaSurat[]) {
+    this.setCollection('surat_media', items);
+  }
+  public getPesanTransaksional(): PesanTransaksional[] {
+    return this.getCollection<PesanTransaksional>('surat_tx', INITIAL_PESAN_TRANSAKSIONAL);
+  }
+  public savePesanTransaksional(items: PesanTransaksional[]) {
+    this.setCollection('surat_tx', items);
+  }
+
+  // 8.5 Settings (app.*, smtp.*, bounce.*) — tanpa kredensial
+  public getKonfigurasiSurat(): KonfigurasiSurat {
+    return this.getJson<KonfigurasiSurat>('surat_pengaturan') ?? KONFIGURASI_SURAT_AWAL;
+  }
+  public saveKonfigurasiSurat(patch: Partial<KonfigurasiSurat>) {
+    const lama = this.getKonfigurasiSurat();
+    this.setJson('surat_pengaturan', { ...lama, ...patch });
+    this.logAudit(
+      'Sales & Marketing — Newsletter',
+      'Perubahan pengaturan pengirim/antrean (app.*, smtp.*, bounce.*)',
+      'Pengaturan Newsletter',
+      'Administrator IT',
+      'Sales & Marketing',
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  // --- Perubahan status Sales Order dengan jejak old/new value (audit CDAKB & ISO 13485) ---
+  public updatePenjualan(id: string, patch: Partial<PenjualanAlkes>, pengguna = 'Manajer Penjualan') {
+    const current = this.getPenjualan();
+    const lama = current.find((s) => s.id === id);
+    if (!lama) return;
+    this.savePenjualan(current.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    this.logAudit(
+      'Sales & Marketing — Order',
+      'Perubahan data pesanan penjualan (harga/status/jumlah)',
+      lama.nomorPesanan,
+      pengguna,
+      'Sales & Marketing',
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as unknown as Record<string, unknown>)
+    );
+  }
+
+  // Pengiriman memicu empat efek lintas modul: alokasi FEFO multi-batch di gudang, mata rantai jejak
+  // pergerakan, surat jalan CDAKB, dan piutang di Keuangan. Jalur ini dulunya hanya mengurangi batch
+  // yang tertulis pada pesanan; sekarang batch paling cepat kedaluwarsa yang dipakai, batch terkunci
+  // tidak pernah disentuh, dan pesanan tidak dikirim setengah jadi. `dari` dipakai penjaga jalur FEFO
+  // dan layar demo agar umur stok dinilai pada tanggal acuan yang sama.
+  public catatPengirimanSalesOrder(id: string, dari: Date = new Date()) {
+    const pesananLama = this.getPenjualan().find((s) => s.id === id);
+    if (!pesananLama) return { boleh: false, keterangan: 'Pesanan tidak ditemukan', nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+    if (pesananLama.statusKirim === 'Terkirim' || pesananLama.statusKirim === 'Diterima Fasyankes')
+      return { boleh: false, keterangan: `Pesanan ${pesananLama.nomorPesanan} sudah ${pesananLama.statusKirim}`, nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+
+    const konfigurasi = this.getKonfigurasiGudang();
+    const alokasi = alokasiFEFOSadarKunci({
+      daftarStok: this.getStokGudang(),
+      jumlahDiminta: pesananLama.jumlah,
+      namaAlkes: pesananLama.namaAlkes,
+      kodeSKU: pesananLama.kodeSKU,
+      dari,
+      daftarIzinEdar: this.getIzinEdar(),
+      minimalUmurEdBulan: minimalUmurEdBulanEfektif(konfigurasi),
+      daftarBin: this.getLokasiBin(),
+      daftarGudang: this.getGudangFisik()
+    });
+    if (alokasi.sisaKekurangan > 0) {
+      const sebab = `Alokasi FEFO baru ${alokasi.totalDiambil} dari ${pesananLama.jumlah} unit; ${alokasi.dilewati
+        .map((d) => `${d.nomorBatch} dilewati (${d.sebab})`)
+        .join(', ') || 'tidak ada batch cocok pada kartu stok'}`;
+      this.updatePenjualan(id, { statusKirim: 'Menunggu Alokasi FEFO' }, 'Kepala Gudang');
+      this.auditGudang('Pengiriman Outbound', `Pengiriman ${pesananLama.nomorPesanan} ditahan di gerbang FEFO`, pesananLama.nomorPesanan, [
+        { kolom: 'alasan', nilaiLama: '-', nilaiBaru: sebab }
+      ]);
+      return { boleh: false, keterangan: sebab, nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+    }
+
+    const rute = susunRutePicking({
+      item: alokasi.usulan.map((u) => ({ binId: u.binId, nomorBatch: u.nomorBatch, qty: u.diambil })),
+      daftarBin: this.getLokasiBin()
+    });
+    const gerbang = gerbangSuratJalan({
+      rute: rute.langkah,
+      qtyDiminta: pesananLama.jumlah,
+      qtyTerkumpul: alokasi.totalDiambil,
+      prefixSuratJalan: konfigurasi.prefixSuratJalan,
+      nomorPesanan: pesananLama.nomorPesanan,
+      dari
+    });
+    if (rute.penolakan || !gerbang.bolehTerbit) {
+      const sebab = rute.penolakan ?? gerbang.sebab.join('; ');
+      this.auditGudang('Pengiriman Outbound', `Surat jalan ${pesananLama.nomorPesanan} gagal terbit`, pesananLama.nomorPesanan, [
+        { kolom: 'alasan', nilaiLama: '-', nilaiBaru: sebab }
+      ]);
+      return { boleh: false, keterangan: sebab, nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+    }
+
+    const sjSebelum = this.getSuratJalan().find((s) => s.penjualanId === pesananLama.id || s.nomorPesanan === pesananLama.nomorPesanan);
+    // Dokumen yang sudah terbit mempertahankan nomornya; gerbang hanya memberi nomor baru untuk
+    // surat jalan yang belum ada, supaya rujukan pada jejak pergerakan selalu menunjuk baris yang sama.
+    const nomorSuratJalan = sjSebelum?.nomorSuratJalan || gerbang.nomorSuratJalan;
+    const waktuKirim = dari;
+    const nomorFaktur = `FTR/${waktuKirim.getFullYear()}/${String(waktuKirim.getMonth() + 1).padStart(2, '0')}/${pesananLama.nomorPesanan.slice(-3)}`;
+    const daftarStok = this.getStokGudang().map((s) => ({ ...s }));
+    alokasi.usulan.forEach((u) => {
+      const baris = daftarStok.find((s) => s.id === u.stokId);
+      if (!baris) return;
+      baris.jumlahStok = Math.max(baris.jumlahStok - u.diambil, 0);
+      // Kunci pesanan dilepas secukupnya; sisa kuota terkunci tetap melindungi pesanan lain.
+      baris.qtyDipesan = Math.max((baris.qtyDipesan ?? 0) - u.diambil, 0);
+      baris.statusFEFO = nilaiUmurStok(baris, konfigurasi, waktuKirim).label;
+    });
+    this.saveStokGudang(daftarStok);
+
+    const labelWaktu = this.labelWaktu(waktuKirim);
+    alokasi.usulan.forEach((u) => {
+      const baris = daftarStok.find((s) => s.id === u.stokId);
+      this.catatPergerakan({
+        waktu: labelWaktu,
+        kodeSKU: u.kodeSKU,
+        namaAlkes: u.namaAlkes,
+        nomorBatch: u.nomorBatch,
+        dariBin: u.binId,
+        keBin: 'OUT-FASYANKES',
+        jumlah: u.diambil,
+        satuan: baris?.satuan ?? pesananLama.satuan,
+        tipe: 'Pengiriman',
+        pengguna: 'Kepala Gudang',
+        peran: 'Operations & Technical',
+        dokumenRujukan: nomorSuratJalan,
+        alasan: `FEFO sadar-kunci untuk ${pesananLama.nomorPesanan}: sisa ${u.sisaSetelahAmbil} ${baris?.satuan ?? 'Unit'} pada batch ${u.nomorBatch} (ED ${u.tanggalKedaluwarsa}).`
+      });
+    });
+
+    const suratJalan = this.buatAtauPerbaruiSuratJalan({
+      penjualanId: pesananLama.id,
+      nomorPesanan: pesananLama.nomorPesanan,
+      nomorSuratJalan,
+      fasyankesTujuan: pesananLama.fasyankes,
+      tanggalTerbit: labelWaktu.split(' ')[0],
+      rute: rute.langkah,
+      jarakTotalMeter: rute.jarakTotalMeter,
+      qtyTotal: alokasi.totalDiambil,
+      satuan: pesananLama.satuan,
+      nomorFaktur
+    });
+
+    this.addTransaksi({
+      id: 'INV-' + Date.now(),
+      nomorFaktur,
+      kategori: 'Pendapatan Alkes',
+      fasyankesAtauPemasok: pesananLama.fasyankes,
+      tanggal: labelWaktu.split(' ')[0],
+      jumlah: pesananLama.totalHarga,
+      statusPembayaran: 'Menunggu Jatuh Tempo',
+      ppnStatus: 'PPN 11% Terbit Faktur Pajak'
+    });
+
+    this.updatePenjualan(id, { statusKirim: 'Terkirim', nomorFaktur }, 'Kepala Gudang & Manajer Penjualan');
+    if (pesananLama.jalurPenjualan === 'e-Katalog LKPP' && alokasi.usulan.length > 0)
+      this.antrekanSinkronisasiLkpp({
+        kodeSKU: alokasi.usulan[0].kodeSKU,
+        namaProduk: pesananLama.namaAlkes,
+        nomorPaketLkpp: pesananLama.nomorPesanan,
+        qtyDilaporkan: alokasi.usulan.reduce((t, u) => t + u.sisaSetelahAmbil, 0),
+        satuan: pesananLama.satuan,
+        pemicu: 'Pengiriman',
+        nomorBatch: alokasi.usulan.map((u) => u.nomorBatch).join(', ')
+      });
+    this.sinkronkanIsiBin();
+
+    const ringkasanBatch = alokasi.usulan.map((u) => `${u.nomorBatch} (${u.diambil})`).join(', ');
+    this.logAudit(
+      'Sales & Marketing — Order',
+      'Pengiriman tereksekusi: stok FEFO berkurang & piutang terbit',
+      pesananLama.nomorPesanan,
+      'Manajer Penjualan',
+      'Sales & Marketing',
+      [
+        { kolom: 'statusKirim', nilaiLama: pesananLama.statusKirim, nilaiBaru: 'Terkirim' },
+        { kolom: 'nomorFaktur', nilaiLama: '-', nilaiBaru: nomorFaktur },
+        { kolom: 'batch terpakai', nilaiLama: pesananLama.nomorBatch, nilaiBaru: ringkasanBatch },
+        { kolom: 'surat jalan', nilaiLama: '-', nilaiBaru: suratJalan.nomorSuratJalan }
+      ]
+    );
+    // Pelepasan barang secara fisik adalah tindakan Gudang: area ini harus meninggalkan jejak
+    // sendiri, bukan hanya mengandalkan audit modul Sales.
+    this.auditGudang(
+      'Pengiriman Outbound',
+      `Pelepasan ${alokasi.totalDiambil} ${pesananLama.satuan} batch ${ringkasanBatch} ke ${pesananLama.fasyankes} lewat ${suratJalan.nomorSuratJalan}`,
+      suratJalan.nomorSuratJalan,
+      [
+        { kolom: 'status surat jalan', nilaiLama: sjSebelum?.status ?? 'Antre Picking', nilaiBaru: suratJalan.status },
+        { kolom: 'e-Faktur', nilaiLama: sjSebelum?.statusEFaktur ?? 'Belum Terbit', nilaiBaru: suratJalan.statusEFaktur },
+        { kolom: 'rute picking', nilaiLama: `${sjSebelum?.rute.length ?? 0} langkah`, nilaiBaru: `${rute.langkah.length} langkah / ${rute.jarakTotalMeter} m${rute.hematMeter ? ` (hemat ${rute.hematMeter} m)` : ''}` }
+      ]
+    );
+    return { boleh: true, keterangan: alokasi.keterangan, nomorFaktur, nomorSuratJalan: suratJalan.nomorSuratJalan, batch: alokasi.usulan };
+  }
+
+  // ============================ GUDANG & LOGISTIK ============================
+  // Dua belas koleksi domain gudang (cetak biru Warehouse & Logistik). Seluruh tulisan melewati blok
+  // ini supaya perubahan stok selalu bergerak bersama rantai hash pergerakan, riwayat panjang dipangkas
+  // pada 300 baris terakhir, dan setiap mutasi meninggalkan jejak audit lama/baru.
+
+  private readonly BATAS_RIWAYAT_GUDANG = 300;
+
+  private auditGudang(
+    area: string,
+    aktivitas: string,
+    rujukan: string,
+    perubahan?: LogAuditTrail['perubahan'],
+    pengguna = 'Kepala Gudang'
+  ) {
+    this.logAudit(`Gudang & Logistik — ${area}`, aktivitas, rujukan, pengguna, 'Operations & Technical', perubahan);
+  }
+
+  /** Label waktu untuk kolom `waktu` log: YYYY-MM-DD HH:MM, sama dengan format seed.
+   * Tanggal dan jam diambil dari basis yang sama (jam lokal) agar tidak tercampur UTC/Lokal. */
+  private labelWaktu(dari: Date = new Date()) {
+    const tanggal = `${dari.getFullYear()}-${String(dari.getMonth() + 1).padStart(2, '0')}-${String(dari.getDate()).padStart(2, '0')}`;
+    return `${tanggal} ${String(dari.getHours()).padStart(2, '0')}:${String(dari.getMinutes()).padStart(2, '0')}`;
+  }
+
+  /** Id sekuintial (MOV-, SJT-, ...) dihitung dari nomor terbesar yang masih tersimpan, karena
+   * pemangkasan retensi membuat panjang array tidak lagi mengikuti jumlah baris yang pernah ada. */
+  private idBerikut(daftar: { id: string }[], awalan: string) {
+    const nomor = daftar.reduce((maks, item) => Math.max(maks, Number(item.id.slice(awalan.length)) || 0), 0);
+    return `${awalan}${String(nomor + 1).padStart(3, '0')}`;
+  }
+
+  /** Rantai pergerakan disusun kronologis (tertua di indeks 0) — retensi membuang bagian awalnya. */
+  private pangkasRiwayatKronologis<T>(daftar: T[]): T[] {
+    return daftar.length > this.BATAS_RIWAYAT_GUDANG ? daftar.slice(daftar.length - this.BATAS_RIWAYAT_GUDANG) : daftar;
+  }
+
+  private titikDock(gudangId?: string) {
+    const daftar = this.getGudangFisik();
+    const indeks = Math.max(daftar.findIndex((g) => g.id === gudangId), 0);
+    return `DOCK-${String(Math.min(indeks + 1, 9)).padStart(2, '0')}`;
+  }
+
+  /** Registri izin edar menyimpan nama dagang tanpa tipe model, sedangkan kartu stok mencantumkan
+   * modelnya di akhir nama. Cocokkan dengan awalan (paling spesifik lebih dulu) agar batch baru dari
+   * penerimaan tidak tercatat bernomor izin edar '-'. */
+  private nomorIzinEdarUntuk(namaAlkes: string) {
+    const kandidat = this.getIzinEdar()
+      .filter((i) => namaAlkes === i.namaAlkes || namaAlkes.startsWith(`${i.namaAlkes} `))
+      .sort((a, b) => b.namaAlkes.length - a.namaAlkes.length)[0];
+    return kandidat?.nomorIzinEdar ?? '-';
+  }
+
+  // Tab 2 — struktur gudang fisik
+  public getGudangFisik(): GudangFisik[] {
+    return this.getCollection<GudangFisik>('gudang_unit', INITIAL_GUDANG_FISIK);
+  }
+  public saveGudangFisik(items: GudangFisik[]) {
+    this.setCollection('gudang_unit', items);
+  }
+  public addGudangFisik(item: GudangFisik) {
+    this.saveGudangFisik([item, ...this.getGudangFisik()]);
+    this.auditGudang('Struktur Gudang', `Pencatatan unit gudang baru ${item.nama} (${item.tipe})`, item.id);
+  }
+  public ubahGudangFisik(id: string, patch: Partial<GudangFisik>) {
+    const current = this.getGudangFisik();
+    const lama = current.find((g) => g.id === id);
+    if (!lama) return;
+    this.saveGudangFisik(current.map((g) => (g.id === id ? { ...g, ...patch } : g)));
+    this.auditGudang(
+      'Struktur Gudang',
+      'Perubahan konfigurasi unit gudang',
+      lama.nama,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  // Tab 2 — lokasi bin (Aisle-Row-Shelf-Bin)
+  public getLokasiBin(): LokasiBin[] {
+    return this.getCollection<LokasiBin>('gudang_bin', INITIAL_LOKASI_BIN);
+  }
+  public saveLokasiBin(items: LokasiBin[]) {
+    this.setCollection('gudang_bin', items);
+  }
+  public addLokasiBin(item: LokasiBin) {
+    this.saveLokasiBin([item, ...this.getLokasiBin()]);
+    this.auditGudang('Struktur Gudang', `Pembukaan bin ${kodeBinDariLokasi(item)} (${item.zonaSuhu})`, item.id);
+  }
+  public ubahLokasiBin(id: string, patch: Partial<LokasiBin>) {
+    const current = this.getLokasiBin();
+    const lama = current.find((b) => b.id === id);
+    if (!lama) return;
+    this.saveLokasiBin(current.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+    this.auditGudang(
+      'Struktur Gudang',
+      'Perubahan konfigurasi bin (zona, kapasitas, satuan)',
+      kodeBinDariLokasi(lama),
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  /** Isi bin selalu diturunkan dari kartu stok agar rak tidak bocor setelah mutasi gudang. */
+  private sinkronkanIsiBin() {
+    const isi = new Map<string, number>();
+    this.getStokGudang().forEach((s) => {
+      if (s.binId) isi.set(s.binId, (isi.get(s.binId) ?? 0) + s.jumlahStok);
+    });
+    const bins = this.getLokasiBin().map((b) => ({ ...b, terpakai: isi.get(b.id) ?? 0 }));
+    this.saveLokasiBin(bins);
+    return bins.filter((b) => b.terpakai > b.kapasitas).map((b) => `${b.id} terpakai ${b.terpakai}/${b.kapasitas}`);
+  }
+
+  // Tab 2 & 3 — aturan directed put-away
+  public getAturanSimpan(): AturanSimpan[] {
+    return this.getCollection<AturanSimpan>('gudang_aturan_simpan', INITIAL_ATURAN_SIMPAN);
+  }
+  public saveAturanSimpan(items: AturanSimpan[]) {
+    this.setCollection('gudang_aturan_simpan', items);
+  }
+  public addAturanSimpan(item: AturanSimpan) {
+    this.saveAturanSimpan([item, ...this.getAturanSimpan()]);
+    this.auditGudang('Struktur Gudang', `Pencatatan aturan simpan ${item.namaAturan} (prioritas ${item.prioritas})`, item.id, undefined, 'PJT / QA Staff');
+  }
+  public ubahAturanSimpan(id: string, patch: Partial<AturanSimpan>) {
+    const current = this.getAturanSimpan();
+    const lama = current.find((a) => a.id === id);
+    if (!lama) return;
+    this.saveAturanSimpan(current.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+    this.auditGudang(
+      'Struktur Gudang',
+      'Perubahan aturan directed put-away',
+      lama.namaAturan,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>),
+      'PJT / QA Staff'
+    );
+  }
+
+  // Tab 3 — kartu stok: mutasi status, kunci karantina, dan pemindahan fisik
+  public ubahStokGudang(id: string, patch: Partial<StokGudang>, aktivitas = 'Perubahan kartu stok', pengguna = 'Kepala Gudang') {
+    const current = this.getStokGudang();
+    const lama = current.find((s) => s.id === id);
+    if (!lama) return;
+    this.saveStokGudang(current.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    this.auditGudang(
+      'Stok & FEFO Dual-Track',
+      aktivitas,
+      `${lama.kodeSKU}/${lama.nomorBatch}`,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>),
+      pengguna
+    );
+  }
+
+  /** Kunci karantina (aturan 2): batch keluar dari pilihan FEFO tanpa berpindah rak.
+   * Status RECALL dipakai pembekuan satu klik pada alur penarikan produk (Tahap 4). */
+  public kunciStokKarantina(id: string, alasan: string, status: 'QUARANTINE' | 'RECALL' = 'QUARANTINE') {
+    const current = this.getStokGudang();
+    const lama = current.find((s) => s.id === id);
+    if (!lama) return null;
+    const patch = patchKunciStok(lama, alasan, new Date(), status);
+    this.saveStokGudang(current.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    this.auditGudang(
+      'Karantina & Recall',
+      status === 'RECALL' ? 'Pembekuan batch ke zona RECALL' : 'Penguncian batch pada kartu stok',
+      `${lama.kodeSKU}/${lama.nomorBatch}`,
+      [
+        { kolom: 'statusStok', nilaiLama: lama.statusStok ?? 'AVAILABLE', nilaiBaru: patch.statusStok },
+        { kolom: 'alasanKunci', nilaiLama: lama.alasanKunci ?? '-', nilaiBaru: patch.alasanKunci },
+        { kolom: 'tanggalDikunci', nilaiLama: lama.tanggalDikunci ?? '-', nilaiBaru: patch.tanggalDikunci }
+      ],
+      'PJT / QA Staff'
+    );
+    return patch;
+  }
+
+  /** Tahap 1 — keputusan PJT atas stok karantina: release memindahkan ke zona RELEASED,
+   * reject memindahkan ke bad stock. Hanya peran ber-hak approve yang boleh memanggil ini. */
+  public putusanPjtKarantina(
+    stokId: string,
+    putusan: 'RELEASE' | 'REJECT',
+    petugas = { pengguna: 'PJT / QA Staff', peran: 'Regulatory Affairs' },
+    dari: Date = new Date()
+  ) {
+    const current = this.getStokGudang().map((s) => ({ ...s }));
+    const stok = current.find((s) => s.id === stokId);
+    if (!stok) return { boleh: false, keterangan: 'Kartu stok tidak ditemukan' };
+    if (statusUnitStok(stok) !== 'QUARANTINE')
+      return { boleh: false, keterangan: `Hanya stok QUARANTINE yang menunggu putusan PJT (kini ${statusUnitStok(stok)})` };
+    const rilis = putusan === 'RELEASE';
+    stok.statusStok = rilis ? 'AVAILABLE' : 'DAMAGED';
+    stok.tanggalDikunci = undefined;
+    stok.alasanKunci = undefined;
+    this.saveStokGudang(current);
+    this.catatPergerakan({
+      waktu: this.labelWaktu(dari),
+      kodeSKU: stok.kodeSKU,
+      namaAlkes: stok.namaAlkes,
+      nomorBatch: stok.nomorBatch,
+      dariBin: stok.binId ?? this.titikDock(stok.gudangId),
+      keBin: stok.binId ?? this.titikDock(stok.gudangId),
+      jumlah: stok.jumlahStok,
+      satuan: stok.satuan,
+      tipe: rilis ? 'QC Release' : 'Karantina',
+      tipeTrx: rilis ? 'QC_RELEASE' : 'QC_REJECT',
+      disetujuiPjt: petugas.pengguna,
+      pengguna: petugas.pengguna,
+      peran: petugas.peran,
+      dokumenRujukan: `QC/${dari.getFullYear()}/${stok.nomorBatch}`,
+      alasan: rilis
+        ? `PJT meluluskan batch ${stok.nomorBatch}: dokumen CoA/NIE lengkap, stok pindah ke zona RELEASED dan terlihat Sales.`
+        : `PJT menolak batch ${stok.nomorBatch}: barang dipindah ke bad stock menunggu retur/pemusnahan.`
+    });
+    this.auditGudang(
+      'Karantina & Recall',
+      rilis ? `Approve & Release PJT atas batch ${stok.nomorBatch}` : `Reject PJT atas batch ${stok.nomorBatch}`,
+      `${stok.kodeSKU}/${stok.nomorBatch}`,
+      [{ kolom: 'statusStok', nilaiLama: 'QUARANTINE', nilaiBaru: stok.statusStok }],
+      petugas.pengguna
+    );
+    return { boleh: true, keterangan: rilis ? `${stok.nomorBatch} dirilis PJT ke zona RELEASED` : `${stok.nomorBatch} ditolak PJT ke bad stock` };
+  }
+
+  /** Tahap 4 — one-click traceability + pembekuan sisa stok batch recall ke zona RECALL. */
+  public bekukanRecallBatch(
+    nomorBatch: string,
+    alasan: string,
+    petugas = { pengguna: 'PJT / QA Staff', peran: 'Regulatory Affairs' },
+    dari: Date = new Date()
+  ) {
+    const hasil = lacakBatchSatuKlik({
+      nomorBatch,
+      daftarStok: this.getStokGudang(),
+      daftarPergerakan: this.getJejakPergerakan(),
+      daftarSuratJalan: this.getSuratJalan(),
+      daftarUnit: this.getUnitSerial(),
+      alasan,
+      dari
+    });
+    if (!hasil.patchBeku.length) return { ...hasil, boleh: false, keterangan: `Batch ${nomorBatch} tidak memiliki sisa stok di gudang` };
+    const current = this.getStokGudang().map((s) => ({ ...s }));
+    hasil.patchBeku.forEach((p) => {
+      const stok = current.find((s) => s.id === p.stokId);
+      if (!stok) return;
+      stok.statusStok = p.statusStok;
+      stok.tanggalDikunci = p.tanggalDikunci;
+      stok.alasanKunci = p.alasanKunci;
+      this.catatPergerakan({
+        waktu: this.labelWaktu(dari),
+        kodeSKU: stok.kodeSKU,
+        namaAlkes: stok.namaAlkes,
+        nomorBatch: stok.nomorBatch,
+        dariBin: stok.binId ?? this.titikDock(stok.gudangId),
+        keBin: stok.binId ?? this.titikDock(stok.gudangId),
+        jumlah: stok.jumlahStok,
+        satuan: stok.satuan,
+        tipe: 'Penarikan Recall',
+        disetujuiPjt: petugas.pengguna,
+        pengguna: petugas.pengguna,
+        peran: petugas.peran,
+        dokumenRujukan: `RECALL/${dari.getFullYear()}/${nomorBatch}`,
+        alasan
+      });
+    });
+    this.saveStokGudang(current);
+    this.auditGudang(
+      'Karantina & Recall',
+      `Traceability satu klik + pembekuan RECALL batch ${nomorBatch}`,
+      nomorBatch,
+      [{ kolom: 'jumlahBarisDibekukan', nilaiLama: '0', nilaiBaru: String(hasil.patchBeku.length) }],
+      petugas.pengguna
+    );
+    return { ...hasil, boleh: true };
+  }
+
+  /** Lepas kunci hanya boleh dilakukan rilis mutu; kartu kembali layak kirim dan FEFO memilihnya lagi. */
+  public lepasKunciStok(id: string, alasan: string) {
+    const current = this.getStokGudang();
+    const lama = current.find((s) => s.id === id);
+    if (!lama || !lama.statusStok || lama.statusStok === 'AVAILABLE') return null;
+    const patch: Partial<StokGudang> = { statusStok: 'AVAILABLE', tanggalDikunci: undefined, alasanKunci: undefined };
+    this.saveStokGudang(current.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    this.auditGudang(
+      'Karantina & Recall',
+      `Rilis mutu melepas kunci batch: ${alasan}`,
+      `${lama.kodeSKU}/${lama.nomorBatch}`,
+      [{ kolom: 'statusStok', nilaiLama: lama.statusStok, nilaiBaru: 'AVAILABLE' }],
+      'PJT / QA Staff'
+    );
+    return patch;
+  }
+
+  /** Pemindahan rak benar-benar memindahkan unit: kartu stok + mata rantai pergerakan + isi bin. */
+  public pindahkanStokAntarBin(
+    id: string,
+    binTujuanId: string,
+    jumlah: number,
+    petugas = { pengguna: 'Kepala Gudang', peran: 'Operator Gudang' },
+    dari: Date = new Date()
+  ) {
+    const current = this.getStokGudang().map((s) => ({ ...s }));
+    const sumber = current.find((s) => s.id === id);
+    const binTujuan = this.getLokasiBin().find((b) => b.id === binTujuanId);
+    if (!sumber || !binTujuan) return { boleh: false, keterangan: 'Kartu stok atau bin tujuan tidak dikenal' };
+    if (sumber.binId === binTujuanId) return { boleh: false, keterangan: 'Bin tujuan sama dengan bin asal' };
+    if (binTujuan.zonaSuhu !== sumber.zonaSuhu) {
+      return { boleh: false, keterangan: `Zona bin tujuan ${binTujuan.zonaSuhu} tidak sesuai kebutuhan stok ${sumber.zonaSuhu}` };
+    }
+    if (binTujuan.satuan !== sumber.satuan) {
+      return { boleh: false, keterangan: `Satuan bin tujuan ${binTujuan.satuan} tidak sesuai satuan stok ${sumber.satuan}` };
+    }
+    if (!Number.isFinite(jumlah) || jumlah <= 0) {
+      return { boleh: false, keterangan: 'Jumlah pemindahan harus lebih besar dari nol' };
+    }
+    const tersedia = stokBebas(sumber);
+    if (jumlah > tersedia) {
+      return { boleh: false, keterangan: `Jumlah pemindahan ${jumlah} melebihi stok bebas ${tersedia} ${sumber.satuan}` };
+    }
+    const terpakaiDiTujuan = current
+      .filter((s) => s.binId === binTujuanId)
+      .reduce((total, s) => total + s.jumlahStok, 0);
+    const sisaKapasitas = binTujuan.kapasitas - terpakaiDiTujuan;
+    if (jumlah > sisaKapasitas) {
+      return { boleh: false, keterangan: `Jumlah pemindahan ${jumlah} melebihi sisa kapasitas bin ${sisaKapasitas} ${binTujuan.satuan}` };
+    }
+    const unit = jumlah;
+
+    const sasaran = current.find((s) => s.kodeSKU === sumber.kodeSKU && s.nomorBatch === sumber.nomorBatch && s.binId === binTujuanId);
+    sumber.jumlahStok -= unit;
+    sumber.statusFEFO = nilaiUmurStok(sumber, this.getKonfigurasiGudang(), dari).label;
+    if (sasaran) sasaran.jumlahStok += unit;
+    else
+      current.push({
+        ...sumber,
+        id: this.idBerikut(current, 'STK-'),
+        gudangId: binTujuan.gudangId,
+        binId: binTujuan.id,
+        lokasiPenyimpanan: kodeBinDariLokasi(binTujuan),
+        zonaSuhu: binTujuan.zonaSuhu,
+        jumlahStok: unit,
+        satuan: binTujuan.satuan,
+        qtyDipesan: 0,
+        nomorSerial: undefined,
+        rfidTagId: binTujuan.rfidTagId
+      });
+    this.saveStokGudang(current);
+    this.catatPergerakan({
+      waktu: this.labelWaktu(dari),
+      kodeSKU: sumber.kodeSKU,
+      namaAlkes: sumber.namaAlkes,
+      nomorBatch: sumber.nomorBatch,
+      dariBin: sumber.binId ?? this.titikDock(sumber.gudangId),
+      keBin: binTujuanId,
+      jumlah: unit,
+      satuan: binTujuan.satuan,
+      tipe: 'Pemindahan Rak',
+      pengguna: petugas.pengguna,
+      peran: petugas.peran,
+      dokumenRujukan: `PINDAH/${dari.getFullYear()}/${sumber.nomorBatch}`,
+      alasan: `Pemindahan terarah dari ${sumber.binId ?? '-'} ke ${kodeBinDariLokasi(binTujuan)} (${binTujuan.zonaSuhu}).`
+    });
+    const meluap = this.sinkronkanIsiBin();
+    this.auditGudang('Stok & FEFO Dual-Track', `Pemindahan ${unit} ${binTujuan.satuan} batch ${sumber.nomorBatch}`, sumber.kodeSKU, [
+      { kolom: 'binId', nilaiLama: sumber.binId ?? '-', nilaiBaru: binTujuanId },
+      ...(meluap.length ? [{ kolom: 'kapasitas bin', nilaiLama: '-', nilaiBaru: meluap.join('; ') }] : [])
+    ]);
+    return { boleh: true, keterangan: `${unit} ${binTujuan.satuan} pindah ke ${kodeBinDariLokasi(binTujuan)}${meluap.length ? ` — peringatan kapasitas: ${meluap.join('; ')}` : ''}`, jumlah: unit };
+  }
+
+  // Tab 3 — rantai pergerakan (satu-satunya jalan menulis log; id & hash dihitung util)
+  public getJejakPergerakan(): JejakPergerakan[] {
+    return this.getCollection<JejakPergerakan>('gudang_pergerakan', INITIAL_JEJAK_PERGERAKAN);
+  }
+  public saveJejakPergerakan(items: JejakPergerakan[]) {
+    this.setCollection('gudang_pergerakan', this.pangkasRiwayatKronologis(items));
+  }
+  public catatPergerakan(entri: EntriPergerakanBaru): JejakPergerakan {
+    const daftar = this.getJejakPergerakan();
+    const terbaru = tambahJejakPergerakan(daftar, { ...entri, id: entri.id ?? this.idBerikut(daftar, 'MOV-') });
+    const baris = terbaru[terbaru.length - 1];
+    this.saveJejakPergerakan(terbaru);
+    return baris;
+  }
+
+  // Tab 4 & 5 — log suhu dan pengendalian hama dengan audit area
+  public catatLogSuhu(item: LogSuhu) {
+    const konfigurasi = this.getKonfigurasiGudang();
+    const tercatat: LogSuhu = {
+      ...item,
+      isDeviasi: item.isDeviasi ?? deviasiSuhu(item.suhu, item.zona, konfigurasi),
+      dicatatOleh: item.dicatatOleh ?? 'Operator Gudang'
+    };
+    this.saveLogSuhu([tercatat, ...this.getLogSuhu()].slice(0, 50));
+    this.auditGudang('Rantai Dingin', `Pembacaan sensor ${item.sensor}: ${item.suhu}°C / ${item.kelembaban}% (${item.status})${tercatat.isDeviasi ? ' — DEVIASI' : ''}`, item.id, undefined, 'Operator Gudang');
+  }
+  public catatInspeksiHama(item: LogPestControl) {
+    this.savePestControl([item, ...this.getPestControl()]);
+    this.auditGudang('Sanitasi & Pengendalian Hama', `Inspeksi ${item.metode} di ${item.area}: ${item.hasilTemuan}`, item.id, undefined, 'Petugas Sanitasi');
+  }
+
+  // Tab 6 — penerimaan (inbound)
+  public getTerimaBarang(): TerimaBarang[] {
+    return this.getCollection<TerimaBarang>('gudang_penerimaan', INITIAL_TERIMA_BARANG);
+  }
+  public saveTerimaBarang(items: TerimaBarang[]) {
+    this.setCollection('gudang_penerimaan', items);
+  }
+  public addTerimaBarang(item: TerimaBarang) {
+    this.saveTerimaBarang([item, ...this.getTerimaBarang()]);
+    this.auditGudang('Penerimaan Inbound', `Pencatatan dokumen penerimaan ${item.nomorTerima} dari ${item.namaPemasok}`, item.nomorTerima, undefined, 'Operator Gudang');
+  }
+  public ubahTerimaBarang(id: string, patch: Partial<TerimaBarang>, aktivitas = 'Perubahan dokumen penerimaan') {
+    const current = this.getTerimaBarang();
+    const lama = current.find((t) => t.id === id);
+    if (!lama) return;
+    this.saveTerimaBarang(current.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+    this.auditGudang(
+      'Penerimaan Inbound',
+      aktivitas,
+      lama.nomorTerima,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>),
+      'Operator Gudang'
+    );
+  }
+
+  /** Posting inbound: baris penerimaan menjadi kartu stok + mata rantai pergerakan, sekali saja. */
+  public releasePenerimaanKeStok(id: string, petugas = { pengguna: 'Kepala Gudang', peran: 'Operator Gudang' }, dari = new Date()) {
+    const dokumen = this.getTerimaBarang().find((t) => t.id === id);
+    if (!dokumen) return { boleh: false, keterangan: 'Dokumen penerimaan tidak ditemukan', barisDiposting: 0, binMeluap: [] as string[] };
+    // Posting hanya sekali: penanda pada dokumen dan jejak pergerakan yang sudah memakai nomor terima.
+    const sudahTercatat = this.getJejakPergerakan().some((m) => m.dokumenRujukan === dokumen.nomorTerima && ['Penerimaan', 'Karantina'].includes(m.tipe));
+    if (dokumen.sudahDipostingKeStok || sudahTercatat)
+      return { boleh: false, keterangan: `${dokumen.nomorTerima} sudah diposting ke kartu stok`, barisDiposting: 0, binMeluap: [] };
+    if (dokumen.hasilQCMasuk === 'Tolak (Rejected)')
+      return { boleh: false, keterangan: 'QC masuk menolak barang — kembalikan ke pemasok, jangan posting ke rak', barisDiposting: 0, binMeluap: [] };
+
+    const stokSaatIni = this.getStokGudang().map((s) => ({ ...s }));
+    const daftarStok = stokSaatIni.map((s) => ({ ...s }));
+    const daftarBin = this.getLokasiBin();
+    const konfigurasi = this.getKonfigurasiGudang();
+
+    // Prakalkulasi kapasitas: seluruh baris harus muat sebelum satu unit pun ditulis, supaya
+    // dokumen tidak setengah terposting dengan mata rantai pergerakan di belakangnya.
+    const penghunian = new Map<string, number>();
+    daftarStok.forEach((s) => {
+      if (s.binId) penghunian.set(s.binId, (penghunian.get(s.binId) ?? 0) + s.jumlahStok);
+    });
+    const hambatan: string[] = [];
+    dokumen.baris.forEach((r) => {
+      if (r.qtyDiterima <= 0) return;
+      const bin = daftarBin.find((b) => b.id === r.binTujuanId);
+      if (!bin) {
+        hambatan.push(`${r.nomorBatch}: bin tujuan ${r.binTujuanId} tidak dikenal`);
+        return;
+      }
+      const sisa = bin.kapasitas - (penghunian.get(bin.id) ?? 0);
+      if (r.qtyDiterima > sisa)
+        hambatan.push(`${r.nomorBatch}: ${r.qtyDiterima} ${r.satuan} melebihi sisa kapasitas ${kodeBinDariLokasi(bin)} (${sisa} ${bin.satuan}) — susun ulang directed put-away`);
+      penghunian.set(bin.id, (penghunian.get(bin.id) ?? 0) + r.qtyDiterima);
+    });
+    if (hambatan.length) return { boleh: false, keterangan: hambatan.join('; '), barisDiposting: 0, binMeluap: [] };
+
+    const waktu = dari;
+    let barisDiposting = 0;
+
+    dokumen.baris.forEach((r) => {
+      if (r.qtyDiterima <= 0) return;
+      const bin = daftarBin.find((b) => b.id === r.binTujuanId);
+      if (!bin) return;
+      const perluKarantina =
+        dokumen.hasilQCMasuk === 'Karantina (Hold)' ||
+        (dokumen.butuhUjiFungsi && dokumen.hasilUjiFungsi !== 'Lolos Parameter Klinis') ||
+        dokumen.hasilUjiFungsi === 'Tidak Layak Pakai';
+      const alasanKunci = `QC ${dokumen.hasilQCMasuk} / uji fungsi ${dokumen.hasilUjiFungsi} pada ${dokumen.nomorTerima}`;
+      const existing = daftarStok.find((s) => s.kodeSKU === r.kodeSKU && s.nomorBatch === r.nomorBatch && s.binId === bin.id);
+      const statusFEFO = nilaiUmurStok({ tanggalKedaluwarsa: r.tanggalKedaluwarsa }, konfigurasi, waktu).label;
+      if (existing) {
+        existing.jumlahStok += r.qtyDiterima;
+        existing.statusFEFO = statusFEFO;
+        if (perluKarantina) Object.assign(existing, patchKunciStok(existing, alasanKunci, waktu));
+      } else {
+        daftarStok.push({
+          id: this.idBerikut(daftarStok, 'STK-'),
+          kodeSKU: r.kodeSKU,
+          namaAlkes: r.namaAlkes,
+          nomorIzinEdar: this.nomorIzinEdarUntuk(r.namaAlkes),
+          nomorBatch: r.nomorBatch,
+          lokasiPenyimpanan: kodeBinDariLokasi(bin),
+          zonaSuhu: bin.zonaSuhu,
+          jumlahStok: r.qtyDiterima,
+          satuan: r.satuan,
+          tanggalMasuk: dokumen.tanggalTerima,
+          tanggalKedaluwarsa: r.tanggalKedaluwarsa,
+          statusFEFO,
+          gudangId: bin.gudangId,
+          binId: bin.id,
+          statusStok: perluKarantina ? 'QUARANTINE' : 'AVAILABLE',
+          qtyDipesan: 0,
+          jalur: 'A',
+          tanggalProduksi: r.tanggalProduksi,
+          coaUrl: r.coaUrl,
+          ...(perluKarantina ? { tanggalDikunci: waktu.toISOString().split('T')[0], alasanKunci } : {})
+        });
+      }
+      if (r.daftarSerial?.length) {
+        const units = this.getUnitSerial().map((u) => ({ ...u }));
+        r.daftarSerial.forEach((serial) => {
+          if (units.some((u) => u.nomorSerial === serial)) return;
+          units.unshift({
+            id: this.idBerikut(units, 'USR-'),
+            nomorSerial: serial,
+            nomorBatch: r.nomorBatch,
+            namaAlkes: r.namaAlkes,
+            pelangganId: '',
+            nomorSalesOrder: '',
+            nomorInvoice: '',
+            tanggalKirim: '',
+            statusUnit: 'Di Gudang',
+            tahapSiklusHidup: 'Di Gudang',
+            statusErp: 'IN_STOCK'
+          });
+        });
+        this.saveUnitSerial(units);
+      }
+      this.catatPergerakan({
+        waktu: this.labelWaktu(waktu),
+        kodeSKU: r.kodeSKU,
+        namaAlkes: r.namaAlkes,
+        nomorBatch: r.nomorBatch,
+        dariBin: this.titikDock(bin.gudangId),
+        keBin: bin.id,
+        jumlah: r.qtyDiterima,
+        satuan: r.satuan,
+        tipe: perluKarantina ? 'Karantina' : 'Penerimaan',
+        tipeTrx: perluKarantina ? 'QC_REJECT' : 'INBOUND',
+        pengguna: petugas.pengguna,
+        peran: petugas.peran,
+        dokumenRujukan: dokumen.nomorTerima,
+        alasan: perluKarantina
+          ? `Barang masuk bin tetapi status terkunci: ${alasanKunci}. Rilis menunggu PJT.`
+          : `Penerimaan ${dokumen.nomorPurchaseOrder} lolos QC ${dokumen.nomorLaporanQC || 'tanpa nomor laporan'}; batch dirilis ke ${kodeBinDariLokasi(bin)}.`
+      });
+      barisDiposting += 1;
+    });
+
+    if (barisDiposting === 0) return { boleh: false, keterangan: 'Tidak ada baris dengan qtyDiterima > 0 dan bin tujuan dikenal', barisDiposting, binMeluap: [] };
+    const valuasiAwal = this.getValuasiBatch();
+    const valuasiBaru = [...valuasiAwal];
+    const barisPerSku = new Map<string, typeof dokumen.baris>();
+    for (const baris of dokumen.baris) {
+      if (baris.qtyDiterima <= 0) continue;
+      const grup = barisPerSku.get(baris.kodeSKU) ?? [];
+      grup.push(baris);
+      barisPerSku.set(baris.kodeSKU, grup);
+    }
+
+    const skuTanpaDasarBiaya: string[] = [];
+    for (const [kodeSKU, barisMasuk] of barisPerSku) {
+      const rataRata = hitungRataRataTertimbangSku({
+        kodeSKU,
+        stokSaatIni,
+        daftarValuasi: valuasiAwal,
+        barangMasuk: barisMasuk.map((baris) => ({
+          qty: baris.qtyDiterima,
+          hargaBeliUnitIDR: baris.hargaBeliUnitIDR ?? 0
+        }))
+      });
+      if (rataRata.nilaiPerUnit === null) {
+        skuTanpaDasarBiaya.push(`${kodeSKU} (${rataRata.qtyTanpaDasar} unit tanpa dasar biaya aktual)`);
+        const batchMasuk = new Map<string, typeof barisMasuk>();
+        for (const baris of barisMasuk) {
+          const grup = batchMasuk.get(baris.nomorBatch) ?? [];
+          grup.push(baris);
+          batchMasuk.set(baris.nomorBatch, grup);
+        }
+        for (const [nomorBatch, barisBatch] of batchMasuk) {
+          if (barisBatch.some((baris) => !(baris.hargaBeliUnitIDR && baris.hargaBeliUnitIDR > 0))) continue;
+          if (stokSaatIni.some((stok) => stok.kodeSKU === kodeSKU && stok.nomorBatch === nomorBatch)) continue;
+          const qtyBatch = barisBatch.reduce((total, baris) => total + baris.qtyDiterima, 0);
+          if (qtyBatch <= 0) continue;
+          const nilaiBatch = barisBatch.reduce(
+            (total, baris) => total + baris.qtyDiterima * (baris.hargaBeliUnitIDR ?? 0),
+            0
+          );
+          const stokBatch = daftarStok.find((stok) => stok.kodeSKU === kodeSKU && stok.nomorBatch === nomorBatch);
+          if (!stokBatch) continue;
+          const index = valuasiBaru.findIndex(
+            (item) => item.kodeSKU === kodeSKU && item.nomorBatch === nomorBatch
+          );
+          const valuasiLama = index >= 0 ? valuasiBaru[index] : undefined;
+          const dasarAktual: ValuasiBatch = {
+            nomorBatch,
+            kodeSKU,
+            namaAlkes: stokBatch.namaAlkes,
+            tanggalProduksi: stokBatch.tanggalProduksi ?? stokBatch.tanggalMasuk,
+            tanggalKedaluwarsa: stokBatch.tanggalKedaluwarsa,
+            qtyTercatat: qtyBatch,
+            satuan: stokBatch.satuan,
+            nilaiPerUnit: Math.round(nilaiBatch / qtyBatch),
+            metode: 'Harga Beli Aktual',
+            sumberBiaya: 'Purchase Order',
+            rujukanSumber: `${dokumen.nomorPurchaseOrder} / ${dokumen.nomorTerima}`,
+            asal: 'ASLI',
+            tercatatPada: waktu.toISOString().split('T')[0]
+          };
+          if (valuasiLama?.asal === 'ASLI') continue;
+          if (index >= 0) valuasiBaru[index] = dasarAktual;
+          else valuasiBaru.push(dasarAktual);
+        }
+        continue;
+      }
+
+      const batchSku = new Map<string, StokGudang>();
+      daftarStok
+        .filter((stok) => stok.kodeSKU === kodeSKU && stok.jumlahStok > 0)
+        .forEach((stok) => batchSku.set(stok.nomorBatch, stok));
+      for (const stok of batchSku.values()) {
+        const index = valuasiBaru.findIndex(
+          (item) => item.kodeSKU === kodeSKU && item.nomorBatch === stok.nomorBatch
+        );
+        const valuasiLama = index >= 0 ? valuasiBaru[index] : undefined;
+        const baru: ValuasiBatch = {
+          nomorBatch: stok.nomorBatch,
+          kodeSKU,
+          namaAlkes: stok.namaAlkes,
+          tanggalProduksi: stok.tanggalProduksi ?? stok.tanggalMasuk,
+          tanggalKedaluwarsa: stok.tanggalKedaluwarsa,
+          qtyTercatat: valuasiLama?.qtyTercatat ?? stok.jumlahStok,
+          satuan: stok.satuan,
+          nilaiPerUnit: rataRata.nilaiPerUnit,
+          metode: 'Rata-rata Tertimbang',
+          sumberBiaya: valuasiLama?.sumberBiaya ?? 'Purchase Order',
+          rujukanSumber: valuasiLama?.rujukanSumber ?? `${dokumen.nomorPurchaseOrder} / ${dokumen.nomorTerima}`,
+          asal: 'ASLI',
+          tercatatPada: waktu.toISOString().split('T')[0]
+        };
+        if (index >= 0) valuasiBaru[index] = baru;
+        else valuasiBaru.push(baru);
+      }
+    }
+
+    this.saveStokGudang(daftarStok);
+    if (valuasiBaru.length !== valuasiAwal.length || valuasiBaru.some((item, index) => item !== valuasiAwal[index])) {
+      this.saveValuasiBatch(valuasiBaru);
+    }
+    const binMeluap = this.sinkronkanIsiBin();
+    this.ubahTerimaBarang(id, { sudahDipostingKeStok: true }, `Posting ${barisDiposting} baris penerimaan ke kartu stok`);
+    const peringatanBiaya = skuTanpaDasarBiaya.length
+      ? ` Rata-rata tertimbang belum diperbarui untuk ${skuTanpaDasarBiaya.join(', ')} karena stok atau baris penerimaan belum seluruhnya memiliki dasar biaya ASLI.`
+      : ' Rata-rata tertimbang IDR diperbarui tanpa memasukkan ongkos pengiriman.';
+    return {
+      boleh: true,
+      keterangan: `${barisDiposting} baris masuk rak${binMeluap.length ? ` — peringatan kapasitas: ${binMeluap.join('; ')}` : ''}.${peringatanBiaya}`,
+      barisDiposting,
+      binMeluap,
+      skuTanpaDasarBiaya
+    };
+  }
+
+  // Tab 7 — surat jalan (outbound)
+  public getSuratJalan(): SuratJalan[] {
+    return this.getCollection<SuratJalan>('gudang_surat_jalan', INITIAL_SURAT_JALAN);
+  }
+  public saveSuratJalan(items: SuratJalan[]) {
+    this.setCollection('gudang_surat_jalan', items);
+  }
+  public addSuratJalan(item: SuratJalan) {
+    this.saveSuratJalan([item, ...this.getSuratJalan()]);
+    this.auditGudang('Pengiriman Outbound', `Penerbitan surat jalan ${item.nomorSuratJalan}`, item.nomorSuratJalan);
+  }
+  public ubahSuratJalan(id: string, patch: Partial<SuratJalan>, aktivitas = 'Perubahan surat jalan') {
+    const current = this.getSuratJalan();
+    const lama = current.find((s) => s.id === id);
+    if (!lama) return;
+    this.saveSuratJalan(current.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    this.auditGudang(
+      'Pengiriman Outbound',
+      aktivitas,
+      lama.nomorSuratJalan,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+  private buatAtauPerbaruiSuratJalan(params: {
+    penjualanId: string;
+    nomorPesanan: string;
+    nomorSuratJalan: string;
+    fasyankesTujuan: string;
+    tanggalTerbit: string;
+    rute: LangkahPicking[];
+    jarakTotalMeter: number;
+    qtyTotal: number;
+    satuan: string;
+    nomorFaktur: string;
+  }): SuratJalan {
+    const current = this.getSuratJalan().map((s) => ({ ...s }));
+    const patch: Partial<SuratJalan> = {
+      status: 'Terkirim',
+      rute: params.rute,
+      jarakTotalMeter: params.jarakTotalMeter,
+      qtyTotal: params.qtyTotal,
+      nomorFaktur: params.nomorFaktur,
+      statusEFaktur: 'Terbit'
+    };
+    const lama = current.find((s) => s.penjualanId === params.penjualanId || s.nomorPesanan === params.nomorPesanan);
+    if (lama) {
+      Object.assign(lama, patch);
+      this.saveSuratJalan(current);
+      return lama;
+    }
+    const baru: SuratJalan = {
+      id: this.idBerikut(current, 'SJT-'),
+      nomorSuratJalan: params.nomorSuratJalan,
+      nomorPesanan: params.nomorPesanan,
+      penjualanId: params.penjualanId,
+      fasyankesTujuan: params.fasyankesTujuan,
+      tanggalTerbit: params.tanggalTerbit,
+      status: 'Terkirim',
+      rute: params.rute,
+      jarakTotalMeter: params.jarakTotalMeter,
+      qtyTotal: params.qtyTotal,
+      satuan: params.satuan,
+      pengangkut: 'Armada Internal',
+      namaKurir: '',
+      nomorLacak: '',
+      statusEFaktur: 'Terbit',
+      nomorFaktur: params.nomorFaktur,
+      nomorPaketLkpp: '',
+      statusSyncLkpp: 'Tidak Berlaku',
+      penanggungJawab: 'Kepala Gudang',
+      catatan: 'Terbit otomatis dari eksekusi FEFO modul Gudang.'
+    };
+    this.saveSuratJalan([baru, ...current]);
+    return baru;
+  }
+
+  /** Tahap 3 — unggah bukti serah terima (POD): status DELIVERED + antrean e-Report Kemenkes. */
+  public unggahPodSuratJalan(
+    id: string,
+    pod: { buktiTerimaUrl: string; namaPenerimaPod: string; tanggalPod?: string },
+    petugas = { pengguna: 'Admin Logistik', peran: 'Operations & Technical' },
+    dari: Date = new Date()
+  ) {
+    const sj = this.getSuratJalan().find((s) => s.id === id);
+    if (!sj) return { boleh: false, keterangan: 'Surat jalan tidak ditemukan', antreEReport: false };
+    if (!['Dimuat', 'Terkirim'].includes(sj.status))
+      return { boleh: false, keterangan: `POD hanya untuk pengiriman yang sudah berangkat (kini ${sj.status})`, antreEReport: false };
+    if (!pod.buktiTerimaUrl.trim() || !pod.namaPenerimaPod.trim())
+      return { boleh: false, keterangan: 'Bukti tanda terima dan nama penerima wajib diisi', antreEReport: false };
+    const tanggalPod = pod.tanggalPod ?? this.labelWaktu(dari).slice(0, 10);
+    this.ubahSuratJalan(
+      id,
+      {
+        status: 'Diterima Penerima',
+        buktiTerimaUrl: pod.buktiTerimaUrl,
+        namaPenerimaPod: pod.namaPenerimaPod,
+        tanggalPod,
+        sudahEksporEReport: false
+      },
+      `POD diunggah (${pod.namaPenerimaPod}) — DELIVERED, masuk antrean e-Report Kemenkes`
+    );
+    this.auditGudang('Pengiriman Outbound', `Konfirmasi serah terima ${sj.nomorSuratJalan}`, sj.nomorSuratJalan, [
+      { kolom: 'status', nilaiLama: sj.status, nilaiBaru: 'Diterima Penerima' },
+      { kolom: 'tanggalPod', nilaiLama: sj.tanggalPod ?? '-', nilaiBaru: tanggalPod }
+    ], petugas.pengguna);
+    return { boleh: true, keterangan: `${sj.nomorSuratJalan} DELIVERED; transaksi masuk antrean data e-Report Kemenkes`, antreEReport: true };
+  }
+
+  /** Susun rute picking atas surat jalan yang masih antre, memakai alokasi FEFO sadar-kunci. */
+  public susunRuteSuratJalan(id: string, dari: Date = new Date()) {
+    const suratJalan = this.getSuratJalan().find((s) => s.id === id);
+    if (!suratJalan) return { boleh: false, keterangan: 'Surat jalan tidak ditemukan' };
+    const pesanan = this.getPenjualan().find((s) => s.id === suratJalan.penjualanId || s.nomorPesanan === suratJalan.nomorPesanan);
+    if (!pesanan) return { boleh: false, keterangan: `Pesanan ${suratJalan.nomorPesanan} tidak ditemukan pada modul Sales` };
+    const konfigurasi = this.getKonfigurasiGudang();
+    const alokasi = alokasiFEFOSadarKunci({
+      daftarStok: this.getStokGudang(),
+      jumlahDiminta: pesanan.jumlah,
+      namaAlkes: pesanan.namaAlkes,
+      kodeSKU: pesanan.kodeSKU,
+      dari,
+      daftarIzinEdar: this.getIzinEdar(),
+      minimalUmurEdBulan: minimalUmurEdBulanEfektif(konfigurasi),
+      daftarBin: this.getLokasiBin(),
+      daftarGudang: this.getGudangFisik()
+    });
+    const rute = susunRutePicking({
+      item: alokasi.usulan.map((u) => ({ binId: u.binId, nomorBatch: u.nomorBatch, qty: u.diambil })),
+      daftarBin: this.getLokasiBin()
+    });
+    const gerbang = gerbangSuratJalan({
+      rute: rute.langkah,
+      qtyDiminta: pesanan.jumlah,
+      qtyTerkumpul: alokasi.totalDiambil,
+      prefixSuratJalan: konfigurasi.prefixSuratJalan,
+      nomorPesanan: pesanan.nomorPesanan,
+      dari
+    });
+    if (rute.penolakan || !gerbang.bolehTerbit)
+      return { boleh: false, keterangan: rute.penolakan ?? gerbang.sebab.join('; ') };
+    this.ubahSuratJalan(
+      id,
+      { rute: rute.langkah, jarakTotalMeter: rute.jarakTotalMeter, qtyTotal: alokasi.totalDiambil, status: 'Rute Tersusun', nomorSuratJalan: gerbang.nomorSuratJalan },
+      `Rute picking ${rute.langkah.length} langkah tersusun untuk ${pesanan.nomorPesanan}`
+    );
+    return {
+      boleh: true,
+      keterangan: `${gerbang.nomorSuratJalan} — ${rute.langkah.length} langkah, ${rute.jarakTotalMeter} m (hemat ${rute.hematMeter} m lewat lorong ${rute.lorongTerlibat.join(', ')})`
+    };
+  }
+
+  // Tab 8 — opname & cycle count
+  public getOpnameStok(): OpnameStok[] {
+    return this.getCollection<OpnameStok>('gudang_opname', INITIAL_OPNAME_STOK);
+  }
+  public saveOpnameStok(items: OpnameStok[]) {
+    this.setCollection('gudang_opname', items);
+  }
+  public addOpnameStok(item: OpnameStok) {
+    this.saveOpnameStok([item, ...this.getOpnameStok()]);
+    this.auditGudang('Opname & Cycle Count', `Pembukaan opname ${item.metode} ${item.nomorOpname} di ${item.cakupanZona}`, item.nomorOpname, undefined, 'Operator Gudang');
+  }
+  public ubahOpnameStok(id: string, patch: Partial<OpnameStok>, aktivitas = 'Perubahan lembar opname') {
+    const current = this.getOpnameStok();
+    const lama = current.find((o) => o.id === id);
+    if (!lama) return;
+    this.saveOpnameStok(current.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+    this.auditGudang(
+      'Opname & Cycle Count',
+      aktivitas,
+      lama.nomorOpname,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as unknown as Record<string, unknown>),
+      'Operator Gudang'
+    );
+  }
+
+  /** Hitung buta: selisih dihitung util dan status dokumen mengikuti keputusan ambang di util. */
+  public ajukanSelisihOpname(id: string) {
+    const lama = this.getOpnameStok().find((o) => o.id === id);
+    if (!lama) return null;
+    const hasil = hitungSelisihOpname(lama, this.getKonfigurasiGudang());
+    this.ubahOpnameStok(id, { status: hasil.statusSetelahHitung, selisihUnit: hasil.selisihUnit }, `Perhitungan selisih opname ${lama.nomorOpname}`);
+    return { hasil, status: hasil.statusSetelahHitung };
+  }
+
+  /** Verifikasi PJT: penyesuaian menjadi mata rantai pergerakan dan kartu stok disamakan dengan fisik. */
+  public verifikasiSelisihOpname(
+    id: string,
+    petugas = { pengguna: 'PJT / QA Staff', peran: 'Penanggung Jawab' },
+    alasan = '',
+    dari: Date = new Date()
+  ) {
+    const lama = this.getOpnameStok().find((o) => o.id === id);
+    if (!lama) return { boleh: false, keterangan: 'Dokumen opname tidak ditemukan' };
+    const hasil = hitungSelisihOpname(lama, this.getKonfigurasiGudang());
+    if (hasil.barisBelumDihitung > 0) return { boleh: false, keterangan: `${hasil.barisBelumDihitung} baris belum dihitung fisik — opname belum boleh diverifikasi` };
+
+    // Rantai ditulis pada jam posting (bukan tanggal dokumen) agar urutan waktu log tetap naik;
+    // tanggal opname tetap terbaca dari nomor rujukan dan lembar dokumennya.
+    const entri = usulkanPenyesuaianOpname(lama, hasil, petugas, this.getStokGudang());
+    entri.forEach((e) => this.catatPergerakan({ ...e, waktu: this.labelWaktu(dari) }));
+
+    const daftarStok = this.getStokGudang().map((s) => ({ ...s }));
+    lama.baris.forEach((b) => {
+      if (b.qtyFisik === null) return;
+      const baris = daftarStok.find((s) => s.binId === b.binId && s.nomorBatch === b.nomorBatch);
+      if (baris) baris.jumlahStok = b.qtyFisik;
+    });
+    this.saveStokGudang(daftarStok);
+    const binMeluap = this.sinkronkanIsiBin();
+    this.ubahOpnameStok(
+      id,
+      { status: 'Selesai', verifikasiPJT: true, alasanSelisih: alasan || lama.alasanSelisih },
+      `Verifikasi PJT atas ${entri.length} penyesuaian opname`
+    );
+    return { boleh: true, keterangan: `${entri.length} penyesuaian dibukukan${binMeluap.length ? ` — peringatan kapasitas: ${binMeluap.join('; ')}` : ''}`, penyesuaian: entri.length };
+  }
+
+  // Tab 9 — ambang min/max & reorder point
+  public getAmbangStok(): AmbangStok[] {
+    return this.getCollection<AmbangStok>('gudang_ambang', INITIAL_AMBANG_STOK);
+  }
+  public saveAmbangStok(items: AmbangStok[]) {
+    this.setCollection('gudang_ambang', items);
+  }
+  public addAmbangStok(item: AmbangStok) {
+    this.saveAmbangStok([item, ...this.getAmbangStok()]);
+    this.auditGudang('Optimasi Stok', `Pencatatan ambang min/max ${item.kodeSKU} (titik pesan ${item.minStok})`, item.kodeSKU, undefined, 'Perencana Stok');
+  }
+  public ubahAmbangStok(id: string, patch: Partial<AmbangStok>) {
+    const current = this.getAmbangStok();
+    const lama = current.find((a) => a.id === id);
+    if (!lama) return;
+    this.saveAmbangStok(current.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+    this.auditGudang(
+      'Optimasi Stok',
+      'Perubahan ambang min/max & lead time',
+      lama.kodeSKU,
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>),
+      'Perencana Stok'
+    );
+  }
+
+  // Tab 10 — handheld & RFID
+  public getKejadianScanner(): KejadianScanner[] {
+    return this.getCollection<KejadianScanner>('gudang_scanner', INITIAL_KEJADIAN_SCANNER);
+  }
+  public saveKejadianScanner(items: KejadianScanner[]) {
+    // Perangkat handheld menulis terbaru di depan; retensi 300 kejadian terakhir mengikuti pola log suhu.
+    this.setCollection('gudang_scanner', items.slice(0, this.BATAS_RIWAYAT_GUDANG));
+  }
+  public catatPemindaian(params: {
+    perangkat: string;
+    tipePerangkat: KejadianScanner['tipePerangkat'];
+    protokol: KejadianScanner['protokol'];
+    mode: KejadianScanner['mode'];
+    binDipindai: string;
+    produkDipindai: string;
+    nomorBatch: string;
+    jumlah: number;
+    rujukanDokumen: string;
+    zonaSuhuDibutuhkan?: StokGudang['zonaSuhu'];
+    qtyManifes?: number;
+    sudahTervalidasi?: number;
+  }) {
+    const hasil = validasiPemindaian({
+      daftarBin: this.getLokasiBin(),
+      daftarStok: this.getStokGudang(),
+      mode: params.mode,
+      binDipindai: params.binDipindai,
+      nomorBatch: params.nomorBatch,
+      jumlah: params.jumlah,
+      zonaSuhuDibutuhkan: params.zonaSuhuDibutuhkan,
+      qtyManifes: params.qtyManifes,
+      sudahTervalidasi: params.sudahTervalidasi
+    });
+    const kejadian: KejadianScanner = {
+      id: this.idBerikut(this.getKejadianScanner(), 'SCN-'),
+      waktu: this.labelWaktu(),
+      perangkat: params.perangkat,
+      tipePerangkat: params.tipePerangkat,
+      protokol: params.protokol,
+      mode: params.mode,
+      binDipindai: params.binDipindai,
+      produkDipindai: params.produkDipindai,
+      nomorBatch: params.nomorBatch,
+      jumlah: params.jumlah,
+      rujukanDokumen: params.rujukanDokumen,
+      hasilValidasi: hasil.hasil,
+      catatan: hasil.sebab
+    };
+    this.saveKejadianScanner([kejadian, ...this.getKejadianScanner()]);
+    this.auditGudang(
+      'Scanner & RFID',
+      `${hasil.bolehDiproses ? 'Pemindaian diterima' : 'Pemindaian ditolak'}: ${hasil.hasil}`,
+      `${params.perangkat} @ ${params.binDipindai || params.rujukanDokumen}`,
+      [{ kolom: 'validasi', nilaiLama: '-', nilaiBaru: hasil.sebab }],
+      'Operator Gudang'
+    );
+    return { kejadian, hasil };
+  }
+
+  // Tab 12 — antrean e-Katalog LKPP
+  public getSinkronisasiLkpp(): SinkronisasiLkpp[] {
+    return this.getCollection<SinkronisasiLkpp>('gudang_lkpp_sync', INITIAL_SINKRONISASI_LKPP);
+  }
+  public saveSinkronisasiLkpp(items: SinkronisasiLkpp[]) {
+    this.setCollection('gudang_lkpp_sync', items.slice(0, this.BATAS_RIWAYAT_GUDANG));
+  }
+  public antrekanSinkronisasiLkpp(params: {
+    kodeSKU: string;
+    namaProduk: string;
+    nomorPaketLkpp: string;
+    qtyDilaporkan: number;
+    satuan: string;
+    pemicu: SinkronisasiLkpp['pemicu'];
+    nomorBatch?: string;
+  }) {
+    const payload = bangunPayloadLkpp({ konfigurasi: this.getKonfigurasiGudang(), ...params });
+    const antrean: SinkronisasiLkpp = { id: this.idBerikut(this.getSinkronisasiLkpp(), 'LKP-'), ...entriAntreanLkpp(payload) };
+    this.saveSinkronisasiLkpp([antrean, ...this.getSinkronisasiLkpp()]);
+    this.auditGudang('Kemenkes RI', `Antrean webhook LKPP ${params.pemicu} untuk ${params.kodeSKU}`, antrean.id, [{ kolom: 'payload', nilaiLama: '-', nilaiBaru: payload.keterangan }]);
+    return { antrean, payload };
+  }
+  public ubahStatusSinkronisasiLkpp(id: string, status: SinkronisasiLkpp['status'], pesanRespons: string) {
+    const current = this.getSinkronisasiLkpp();
+    const lama = current.find((l) => l.id === id);
+    if (!lama) return;
+    const baru: SinkronisasiLkpp =
+      status === 'Gagal' || status === 'Ditolak' ? tandaiGagalLkpp(lama, pesanRespons) : { ...lama, status, pesanRespons, waktu: this.labelWaktu() };
+    this.saveSinkronisasiLkpp(current.map((l) => (l.id === id ? baru : l)));
+    this.auditGudang('Kemenkes RI', `Status sinkronisasi LKPP menjadi ${status} (percobaan ${baru.percobaan})`, id, [
+      { kolom: 'status', nilaiLama: lama.status, nilaiBaru: status },
+      { kolom: 'pesanRespons', nilaiLama: lama.pesanRespons, nilaiBaru: pesanRespons }
+    ]);
+  }
+
+  // Tab 12 — kiriman SATUSEHAT (HL7 FHIR)
+  public getKirimanSatuSehat(): KirimanSatuSehat[] {
+    return this.getCollection<KirimanSatuSehat>('gudang_satusehat', INITIAL_KIRIMAN_SATU_SEHAT);
+  }
+  public saveKirimanSatuSehat(items: KirimanSatuSehat[]) {
+    this.setCollection('gudang_satusehat', items.slice(0, this.BATAS_RIWAYAT_GUDANG));
+  }
+  public catatKirimanSatuSehat(params: Omit<Parameters<typeof bangunBundleFhir>[0], 'konfigurasi'>) {
+    const daftar = this.getKirimanSatuSehat();
+    const bangun = bangunBundleFhir({ konfigurasi: this.getKonfigurasiGudang(), ...params });
+    const draf: KirimanSatuSehat = {
+      id: this.idBerikut(daftar, 'FHR-'),
+      waktu: this.labelWaktu(),
+      tipeSumberDaya: params.tipeSumberDaya,
+      nomorRujukan: params.nomorRujukan,
+      kodeFasyankes: params.kodeFasyankes ?? '',
+      namaFasyankes: params.namaFasyankes ?? '',
+      nomorBatch: params.nomorBatch ?? '',
+      nomorSerial: params.nomorSerial ?? '',
+      suhuRantaiDingin: params.suhuRantaiDingin ?? '-',
+      status: bangun.statusSumberDaya,
+      payloadJson: bangun.payloadJson,
+      catatan: bangun.ringkas.join(' / ')
+    };
+    const validasi = validasiKirimanSatuSehat({ kiriman: draf, daftarKiriman: daftar, konfigurasi: this.getKonfigurasiGudang() });
+    const kiriman: KirimanSatuSehat = { ...draf, status: validasi.statusUsulan };
+    this.saveKirimanSatuSehat([kiriman, ...daftar]);
+    this.auditGudang(
+      'Kemenkes RI',
+      validasi.layakKirim
+        ? `Payload ${kiriman.tipeSumberDaya} ${kiriman.nomorRujukan} masuk antrean SATUSEHAT`
+        : `Payload ${kiriman.tipeSumberDaya} ${kiriman.nomorRujukan} ditahan: ${validasi.sebab.join('; ')}`,
+      kiriman.id,
+      [{ kolom: 'status', nilaiLama: '-', nilaiBaru: kiriman.status }]
+    );
+    return { kiriman, validasi, endpoint: bangun.endpoint };
+  }
+  public ubahStatusKirimanSatuSehat(id: string, status: KirimanSatuSehat['status'], catatan: string) {
+    const current = this.getKirimanSatuSehat();
+    const lama = current.find((k) => k.id === id);
+    if (!lama) return;
+    this.saveKirimanSatuSehat(current.map((k) => (k.id === id ? { ...k, status, catatan: catatan || k.catatan } : k)));
+    this.auditGudang('Kemenkes RI', `Tanggapan SATUSEHAT atas ${lama.tipeSumberDaya} ${lama.nomorRujukan}: ${status}`, id, [
+      { kolom: 'status', nilaiLama: lama.status, nilaiBaru: status },
+      { kolom: 'catatan', nilaiLama: lama.catatan, nilaiBaru: catatan || lama.catatan }
+    ]);
+  }
+
+  // Konfigurasi modul — ambang, prefix dokumen, endpoint (tanpa token)
+  public getKonfigurasiGudang(): KonfigurasiGudang {
+    return this.getJson<KonfigurasiGudang>('gudang_pengaturan') ?? KONFIGURASI_GUDANG_AWAL;
+  }
+  public saveKonfigurasiGudang(patch: Partial<KonfigurasiGudang>) {
+    const lama = this.getKonfigurasiGudang();
+    this.setJson('gudang_pengaturan', { ...lama, ...patch });
+    this.auditGudang(
+      'Konfigurasi Gudang',
+      'Perubahan ambang, prefix dokumen, dan endpoint Kemenkes RI / LKPP',
+      'Konfigurasi Gudang',
+      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+    );
+  }
+
+  // Tab 12 — e-Report distribusi semesteran Alat Kesehatan Kemenkes RI
+  public getRiwayatEksporEReport(): RiwayatEksporEReport[] {
+    return this.getCollection<RiwayatEksporEReport>('gudang_ereport', INITIAL_RIWAYAT_EKSPOR_EREPOR);
+  }
+  public saveRiwayatEksporEReport(items: RiwayatEksporEReport[]) {
+    this.setCollection('gudang_ereport', items);
+  }
+  public catatEksporEReport(
+    params: { periode: PeriodeEReport; jumlahBaris: number; format: 'CSV' | 'XLS'; pengguna?: string },
+    dari: Date = new Date()
+  ) {
+    const daftar = this.getRiwayatEksporEReport();
+    const entri: RiwayatEksporEReport = {
+      id: this.idBerikut(daftar, 'ERP-'),
+      periode: params.periode.kode,
+      waktu: this.labelWaktu(dari),
+      pengguna: params.pengguna ?? 'Kepala Gudang',
+      jumlahBaris: params.jumlahBaris,
+      namaBerkas: namaBerkasEReport(params.periode.kode, params.format),
+      format: params.format
+    };
+    this.saveRiwayatEksporEReport([entri, ...daftar]);
+    const suratJalan = this.getSuratJalan().map((s) => ({ ...s }));
+    let ditandai = 0;
+    suratJalan.forEach((s) => {
+      const tanggal = (s.tanggalPod ?? s.tanggalTerbit).slice(0, 10);
+      if (s.status === 'Diterima Penerima' && tanggal >= params.periode.mulai && tanggal <= params.periode.akhir && !s.sudahEksporEReport) {
+        s.sudahEksporEReport = true;
+        ditandai += 1;
+      }
+    });
+    this.saveSuratJalan(suratJalan);
+    this.auditGudang(
+      'Kemenkes RI',
+      `Ekspor e-Report ${params.periode.kode} (${params.format}, ${params.jumlahBaris} baris)`,
+      entri.namaBerkas,
+      [{ kolom: 'suratJalanDitandaiTerekspor', nilaiLama: '0', nilaiBaru: String(ditandai) }],
+      entri.pengguna
+    );
+    return entri;
+  }
+
+  // Finance
+  public getTransaksi(): TransaksiKeuangan[] {
+    return this.getCollection<TransaksiKeuangan>('transaksi', INITIAL_TRANSAKSI);
+  }
+  public saveTransaksi(items: TransaksiKeuangan[]) {
+    this.setCollection('transaksi', items);
+  }
+  public addTransaksi(item: TransaksiKeuangan) {
+    const current = this.getTransaksi();
+    this.saveTransaksi([item, ...current]);
+    this.logAudit('Finance & Accounting', `Pencatatan faktur ${item.nomorFaktur}`, item.nomorFaktur, 'Budi Utomo, S.T', 'QA Manager', [
+      { kolom: 'kategori', nilaiLama: '-', nilaiBaru: item.kategori },
+      { kolom: 'jumlah', nilaiLama: '-', nilaiBaru: String(item.jumlah) },
+      { kolom: 'ppnStatus', nilaiLama: '-', nilaiBaru: item.ppnStatus }
+    ]);
+  }
+
+  // --- Pembukuan dua-entry (Chart of Accounts, Jurnal, Valuasi, Periode, Pajak) ---
+  // Rantai hash menuntut urutan append-only: jurnal baru SELALU di akhir daftar, tidak pernah
+  // disisipkan di depan seperti koleksi lain. Tampilan yang mengurutkan sendiri.
+
+  public getCoA(): AkunCoA[] {
+    return this.getCollection<AkunCoA>('keuangan_coa', INITIAL_COA);
+  }
+  public saveCoA(items: AkunCoA[]) {
+    this.setCollection('keuangan_coa', items);
+    this.logAudit('Finance & Accounting', 'Pembaruan bagan akun (CoA)', items[0]?.kode || '-', 'Budi Utomo, S.T', 'QA Manager');
+  }
+  public tambahAkunCoA(akun: AkunCoA) {
+    const current = this.getCoA();
+    if (current.some((a) => a.kode === akun.kode)) return { berhasil: false as const, alasan: `Kode akun ${akun.kode} sudah dipakai` };
+    this.saveCoA([...current, akun]);
+    return { berhasil: true as const, akun };
+  }
+
+  public getValuasiBatch(): ValuasiBatch[] {
+    return this.getCollection<ValuasiBatch>('keuangan_valuasi_batch', INITIAL_VALUASI_BATCH);
+  }
+  public saveValuasiBatch(items: ValuasiBatch[]) {
+    this.setCollection('keuangan_valuasi_batch', items);
+    this.logAudit('Finance & Accounting', 'Pembaruan dasar biaya persediaan per batch', items[items.length - 1]?.nomorBatch || '-');
+  }
+  /** Satu batch hanya punya satu dasar biaya; pembaruan tercatat sebagai perubahan kolom. */
+  public simpanValuasiBatch(valuasi: ValuasiBatch) {
+    const current = this.getValuasiBatch();
+    const lama = current.find((v) => v.nomorBatch === valuasi.nomorBatch && v.kodeSKU === valuasi.kodeSKU);
+    const diganti = lama
+      ? current.map((v) => (v.nomorBatch === valuasi.nomorBatch && v.kodeSKU === valuasi.kodeSKU ? valuasi : v))
+      : [...current, valuasi];
+    this.setCollection('keuangan_valuasi_batch', diganti);
+    this.logAudit(
+      'Finance & Accounting',
+      lama ? 'Revisi dasar biaya batch' : 'Pencatatan dasar biaya batch baru',
+      valuasi.nomorBatch,
+      'Budi Utomo, S.T',
+      'QA Manager',
+      [
+        { kolom: 'nilaiPerUnit', nilaiLama: lama ? String(lama.nilaiPerUnit) : '-', nilaiBaru: String(valuasi.nilaiPerUnit) },
+        { kolom: 'sumberBiaya', nilaiLama: lama?.sumberBiaya ?? '-', nilaiBaru: valuasi.sumberBiaya },
+        { kolom: 'asal', nilaiLama: lama?.asal ?? '-', nilaiBaru: valuasi.asal }
+      ]
+    );
+    return valuasi;
+  }
+
+  public getPeriodeBuku(): PeriodeBuku[] {
+    return this.getCollection<PeriodeBuku>('keuangan_periode', INITIAL_PERIODE_BUKU);
+  }
+  public savePeriodeBuku(items: PeriodeBuku[]) {
+    this.setCollection('keuangan_periode', items);
+    this.logAudit('Finance & Accounting', 'Pembaruan status periode buku', items[0]?.id || '-');
+  }
+  public ubahStatusPeriode(id: string, status: PeriodeBuku['status'], petugas: string, alasan: string) {
+    const current = this.getPeriodeBuku();
+    const lama = current.find((p) => p.id === id);
+    if (!lama) return { berhasil: false as const, alasan: `Periode ${id} tidak terdaftar` };
+    const baru: PeriodeBuku = {
+      ...lama,
+      status,
+      ditutupPada: status === 'Terbuka' ? null : new Date().toISOString().slice(0, 10),
+      ditutupOleh: status === 'Terbuka' ? '' : petugas,
+      alasan: alasan || lama.alasan
+    };
+    this.setCollection(
+      'keuangan_periode',
+      current.map((p) => (p.id === id ? baru : p))
+    );
+    this.logAudit('Finance & Accounting', `Periode ${id} → ${status}`, id, petugas, 'QA Manager', [
+      { kolom: 'status', nilaiLama: lama.status, nilaiBaru: status },
+      { kolom: 'alasan', nilaiLama: lama.alasan || '-', nilaiBaru: alasan || '-' }
+    ]);
+    return { berhasil: true as const, periode: baru };
+  }
+
+  public getTetapanPajak(): TetapanPajak[] {
+    return this.getCollection<TetapanPajak>('keuangan_tetapan_pajak', INITIAL_TETAPAN_PAJAK);
+  }
+  public saveTetapanPajak(items: TetapanPajak[]) {
+    this.setCollection('keuangan_tetapan_pajak', items);
+    this.logAudit('Finance & Accounting', 'Pembaruan tetapan pajak', items[0]?.id || '-');
+  }
+
+  public getJurnalKeuangan(): JurnalKeuangan[] {
+    return this.getCollection<JurnalKeuangan>('keuangan_jurnal', INITIAL_JURNAL_KEUANGAN);
+  }
+
+  /** Menyambung rancangan ke ujung rantai lalu menyimpannya. Penolakan dikembalikan apa adanya,
+   *  tidak pernah disimpan setengah jadi. */
+  public tambahJurnalKeuangan(
+    rancangan: RancanganJurnal,
+    opsi?: { langsungPosting?: boolean; tanggalPosting?: string; petugas?: string; peran?: string }
+  ): { jurnal: JurnalKeuangan | null; penyimpangan: PenyimpanganJurnal[] } {
+    const daftar = this.getJurnalKeuangan();
+    const hasil = susunJurnalBerantai(daftar, rancangan, {
+      daftarAkun: this.getCoA(),
+      daftarPeriode: this.getPeriodeBuku(),
+      tolakPeriodeTertutup: true
+    });
+    if (!hasil.jurnal) return { jurnal: null, penyimpangan: hasil.penyimpangan };
+
+    const tersimpan = opsi?.langsungPosting
+      ? { ...hasil.jurnal, status: 'Posted' as const, tanggalPosting: opsi.tanggalPosting ?? hasil.jurnal.tanggalTransaksi }
+      : hasil.jurnal;
+    // Append, bukan prepend: hashSebelum mata berikutnya menunjuk hash mata ini.
+    this.setCollection('keuangan_jurnal', [...daftar, tersimpan]);
+    this.logAudit(
+      'Finance & Accounting',
+      `${tersimpan.status === 'Posted' ? 'Posting' : 'Draf'} jurnal ${tersimpan.nomorJournal}`,
+      tersimpan.nomorJournal,
+      opsi?.petugas ?? tersimpan.dibuatOleh,
+      opsi?.peran ?? tersimpan.peranPembuat,
+      [
+        { kolom: 'sumberRujukan', nilaiLama: '-', nilaiBaru: tersimpan.sumberRujukan },
+        { kolom: 'totalDebet', nilaiLama: '-', nilaiBaru: String(tersimpan.baris.reduce((a, b) => a + b.debit, 0)) },
+        { kolom: 'baris', nilaiLama: '-', nilaiBaru: String(tersimpan.baris.length) },
+        { kolom: 'hash', nilaiLama: '-', nilaiBaru: `${tersimpan.hash.slice(0, 16)}…` }
+      ]
+    );
+    return { jurnal: tersimpan, penyimpangan: [] };
+  }
+
+  /** Transisi status tanpa menyentuh isi yang di-hash (Draft → Posted → Void). */
+  public ubahStatusJurnalKeuangan(
+    id: string,
+    statusBaru: StatusJurnal,
+    opsi: { tanggal: string; petugas: string; peran: string }
+  ): { jurnal: JurnalKeuangan | null; penyimpangan: PenyimpanganJurnal[] } {
+    const daftar = this.getJurnalKeuangan();
+    const target = daftar.find((j) => j.id === id);
+    if (!target) return { jurnal: null, penyimpangan: [{ kode: id, jenis: 'Akun', keterangan: 'Jurnal tidak ditemukan di buku besar' }] };
+
+    const hasil = ubahStatusJurnal(daftar, target, statusBaru, { tanggal: opsi.tanggal, daftarPeriode: this.getPeriodeBuku() });
+    if (!hasil.jurnal) return { jurnal: null, penyimpangan: hasil.penyimpangan };
+
+    const disimpan = hasil.jurnal;
+    this.setCollection(
+      'keuangan_jurnal',
+      daftar.map((j) => (j.id === id ? disimpan : j))
+    );
+    this.logAudit('Finance & Accounting', `Jurnal ${disimpan.nomorJournal} → ${statusBaru}`, disimpan.nomorJournal, opsi.petugas, opsi.peran, [
+      { kolom: 'status', nilaiLama: target.status, nilaiBaru: statusBaru },
+      ...(statusBaru === 'Posted' ? [{ kolom: 'tanggalPosting', nilaiLama: target.tanggalPosting ?? '-', nilaiBaru: disimpan.tanggalPosting ?? '-' }] : [])
+    ]);
+    return { jurnal: disimpan, penyimpangan: [] };
+  }
+
+  /** Rantai diverifikasi ulang sebelum dan sesudah penulis; hasil disimpan jejak auditnya. */
+  public periksaRantaiJurnal() {
+    return verifikasiRantaiJurnal(this.getJurnalKeuangan());
+  }
+  // Audit Trail (Data Integrity ISO 13485 & CDAKB)
+  public getAuditTrail(): LogAuditTrail[] {
+    return this.getCollection<LogAuditTrail>('audit_trail', INITIAL_AUDIT_TRAIL);
+  }
+  public logAudit(
+    modul: string,
+    aktivitas: string,
+    nomorReferensi: string,
+    pengguna = 'PJT / QA Staff',
+    peran = 'Penanggung Jawab',
+    perubahan?: LogAuditTrail['perubahan']
+  ) {
+    const now = new Date();
+    const waktuWIB = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString('id-ID')} WIB`;
+    const current = this.getAuditTrail();
+    // beberapa perubahan tercatat pada milidetik yang sama; id harus tetap unik agar daftar audit tidak dobel
+    let id = 'LOG-' + now.getTime();
+    for (let seq = 1; current.some((e) => e.id === id); seq += 1) id = `LOG-${now.getTime()}-${seq}`;
+    const newEntry: LogAuditTrail = {
+      id,
+      waktu: waktuWIB,
+      pengguna,
+      peran,
+      modul,
+      aktivitas,
+      nomorReferensi,
+      statusIntegritas: 'Tervalidasi Digital',
+      ...(perubahan && perubahan.length > 0 ? { perubahan } : {})
+    };
+    const updated = [newEntry, ...current.slice(0, 99)];
+    this.setCollection('audit_trail', updated);
+  }
+
+  // --- Website (CMS Konten Situs Publik) ---
+  // Draf dan versi terbit disimpan terpisah (pola dashboard website bejo-pos):
+  // suntingan harian masuk draf, publik hanya membaca snapshot terbit.
+
+  private getJson<T>(key: string): T | null {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const tersimpan = localStorage.getItem(STORAGE_PREFIX + key);
+      if (!tersimpan) return null;
+      return JSON.parse(tersimpan) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  private setJson<T>(key: string, data: T): void {
+    try {
+      if (typeof localStorage === 'undefined') {
+        this.notify(key);
+        return;
+      }
+      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(data));
+      if (!this.migrasiDraftAktif) {
+        this.notify(key);
+      }
+      if (!this.isApplyingRemote && !this.migrasiDraftAktif) {
+        this.enqueueKeySync(key, { type: 'put', value: data });
+      }
+    } catch (e) {
+      console.error(`Gagal menyimpan konfigurasi ${key}:`, e);
+    }
+  }
+
+  public getSettingJson<T>(key: string): T | null {
+    return this.getJson<T>(key);
+  }
+
+  public setSettingJson<T>(key: string, data: T): void {
+    this.setJson<T>(key, data);
+  }
+
+  public removeSettingJson(key: string): void {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(STORAGE_PREFIX + key);
+      }
+      this.notify(key);
+      if (!this.isApplyingRemote && !this.migrasiDraftAktif) {
+        this.enqueueKeySync(key, { type: 'delete' });
+      }
+    } catch (e) {
+      console.error(`Gagal menghapus konfigurasi ${key}:`, e);
+    }
+  }
+
+  public getCatalogSettings<T>(fallback: T): T {
+    return this.getJson<T>('catalog_settings_v1') ?? fallback;
+  }
+
+  public saveCatalogSettings<T>(settings: T): void {
+    this.setJson('catalog_settings_v1', settings);
+  }
+
+  /** Kumpulan data aplikasi yang menjadi sumber konten situs. */
+  public getSumberKontenWebsite(): SumberKontenWebsite {
+    return {
+      izinEdar: this.getIzinEdar(),
+      sertifikat: this.getSertifikat(),
+      pemasok: this.getPemasok(),
+      pelanggan: this.getPelangganB2B(),
+      kampanye: this.getKampanye(),
+      teritorial: this.getTeritorial(),
+      stok: this.getStokGudang(),
+      pengetahuanProduk: this.getPengetahuanProduk(),
+      skemaHarga: this.getSkemaHarga(),
+      rebate: this.getProgramRebate(),
+      garansi: this.getGaransiInstalasi(),
+      produkKatalog: this.getJson<ProdukKatalog[]>('product_catalog')?.map(normalisasiProdukKatalog) ?? undefined
+    };
+  }
+
+  /** Kumpulan data operasional terkini untuk penyelarasan real-time status stok & harga di situs publik. */
+  public getSumberOperasionalWebsite(): SumberOperasionalWebsite {
+    return {
+      izinEdar: this.getIzinEdar(),
+      stok: this.getStokGudang(),
+      unitSerial: this.getUnitSerial(),
+      penarikan: this.getPenarikanProduk(),
+      skemaHarga: this.getSkemaHarga(),
+      kontrakHarga: this.getKontrakHarga(),
+      pengetahuanProduk: this.getPengetahuanProduk(),
+      rebate: this.getProgramRebate()
+    };
+  }
+
+  public getProdukKatalog(): ProdukKatalog[] {
+    const tersimpan = this.getJson<ProdukKatalog[]>('product_catalog') ?? undefined;
+    return siapkanKatalogProduk(tersimpan);
+  }
+
+  public hasProdukKatalogTersimpan(): boolean {
+    return Array.isArray(this.getJson<ProdukKatalog[]>('product_catalog'));
+  }
+
+  public inisialisasiProdukKatalog(): ProdukKatalog[] {
+    if (this.hasProdukKatalogTersimpan()) {
+      const tersimpan = this.getJson<ProdukKatalog[]>('product_catalog') ?? [];
+      const daftar = this.getProdukKatalog();
+      const perluGantiDummy = perluMigrasiProdukBawaanCms(tersimpan);
+      if (perluGantiDummy) {
+        this.setCollection('product_catalog', daftar);
+        this.logAudit('Commercial — Product Catalog', 'Mengganti data bawaan CMS dengan 114 produk rujukan daftar harga AMS V6', 'PRODUCT-CATALOG');
+      }
+      return daftar;
+    }
+    const daftar = this.getProdukKatalog();
+    this.setCollection('product_catalog', daftar);
+    this.logAudit('Commercial — Product Catalog', 'Inisialisasi 114 produk rujukan daftar harga AMS V6', 'PRODUCT-CATALOG');
+    return daftar;
+  }
+
+  public simpanProdukKatalog(daftar: ProdukKatalog[]): void {
+    this.setCollection('product_catalog', daftar);
+    this.logAudit('Commercial — Product Catalog', 'Pembaruan master produk dan SKU', daftar[0]?.id ?? 'PRODUCT-CATALOG');
+  }
+
+  public getWebsiteDraft(): KonfigurasiSitus {
+    const tersimpan = this.getJson<KonfigurasiSitus>('website_draft');
+    const versiTersimpan = this.getJson<number>('website_content_v');
+    if (tersimpan && versiTersimpan === VERSI_KONTEN_WEBSITE) return tersimpan;
+    const awal = bangunKontenDefault(this.getSumberKontenWebsite());
+    const hasil = tersimpan ? padukanKonten(tersimpan, awal) : awal;
+    if (this.migrasiDraftAktif) return hasil;
+    this.migrasiDraftAktif = true;
+    try {
+      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
+      this.setJson('website_draft', hasil);
+    } finally {
+      this.migrasiDraftAktif = false;
+    }
+    return hasil;
+  }
+
+  /** Snapshot yang sedang tayang; null bila belum pernah diterbitkan. */
+  public getWebsiteTerbit(): KonfigurasiSitus | null {
+    return this.getJson<KonfigurasiSitus>('website_published');
+  }
+
+  public simpanWebsiteDraft(draf: KonfigurasiSitus, pengguna: string, peran: string) {
+    const lama = this.getWebsiteDraft();
+    const baru: KonfigurasiSitus = {
+      ...draf,
+      lastModifiedAt: Date.now(),
+      lastModifiedBy: pengguna
+    };
+    this.setJson('website_draft', baru);
+    this.logAudit(
+      'Website — Konten Situs Publik',
+      'Penyimpanan draf konten website',
+      'DRAF-WEBSITE',
+      pengguna,
+      peran,
+      diffKonfigurasi(lama, baru)
+    );
+    return baru;
+  }
+
+  public sinkronkanWebsiteDraft(pengguna: string, peran: string) {
+    const lama = this.getWebsiteDraft();
+    const baru = sinkronkanKonten(lama, this.getSumberKontenWebsite());
+    baru.lastModifiedAt = Date.now();
+    baru.lastModifiedBy = pengguna;
+    this.setJson('website_draft', baru);
+    this.logAudit(
+      'Website — Konten Situs Publik',
+      'Sinkronisasi konten situs dengan data aplikasi (izin edar, sertifikat, pelanggan, kampanye)',
+      'DRAF-WEBSITE',
+      pengguna,
+      peran,
+      diffKonfigurasi(lama, baru)
+    );
+    return { lama, baru };
+  }
+
+  /** Terbitkan: salinan draf menjadi snapshot tayang dan tercatat pada audit trail. */
+  public terbitkanWebsite(pengguna: string, peran: string) {
+    const draf = this.getWebsiteDraft();
+    const lama = this.getWebsiteTerbit();
+    const snapshot: KonfigurasiSitus = {
+      ...draf,
+      isPublished: true,
+      lastPublishedAt: Date.now()
+    };
+    this.setJson('website_published', snapshot);
+    this.setJson('website_draft', { ...draf, isPublished: true, lastPublishedAt: snapshot.lastPublishedAt });
+    this.logAudit(
+      'Website — Konten Situs Publik',
+      'Penerbitan konten situs publik (snapshot tayang diperbarui)',
+      `TERBIT-${new Date().toISOString().split('T')[0]}`,
+      pengguna,
+      peran,
+      [
+        { kolom: 'isPublished', nilaiLama: lama ? String(lama.isPublished) : 'belum pernah terbit', nilaiBaru: 'true' },
+        { kolom: 'lastPublishedAt', nilaiLama: lama?.lastPublishedAt ? new Date(lama.lastPublishedAt).toLocaleString('id-ID') : '-', nilaiBaru: new Date(snapshot.lastPublishedAt!).toLocaleString('id-ID') },
+        ...diffKonfigurasi(lama ?? snapshot, snapshot)
+      ]
+    );
+    return snapshot;
+  }
+
+  public tahanWebsite(pengguna: string, peran: string) {
+    const lama = this.getWebsiteTerbit();
+    if (!lama) return null;
+    const baru: KonfigurasiSitus = { ...lama, isPublished: false, lastPublishedAt: undefined };
+    this.setJson('website_published', baru);
+    this.setJson('website_draft', { ...this.getWebsiteDraft(), isPublished: false });
+    this.logAudit(
+      'Website — Konten Situs Publik',
+      'Penahanan konten situs publik (halaman tidak lagi tayang)',
+      'TAHAN-WEBSITE',
+      pengguna,
+      peran,
+      [
+        { kolom: 'isPublished', nilaiLama: String(lama.isPublished), nilaiBaru: 'false' },
+        { kolom: 'lastPublishedAt', nilaiLama: lama.lastPublishedAt ? new Date(lama.lastPublishedAt).toLocaleString('id-ID') : '-', nilaiBaru: '-' }
+      ]
+    );
+    return baru;
+  }
+
+  /** True bila draf berbeda dari snapshot terbit (untuk penanda "belum diterbitkan"). */
+  public websitePunyaPerubahanBelumTerbit() {
+    const draf = this.getWebsiteDraft();
+    const terbit = this.getWebsiteTerbit();
+    if (!terbit) return true;
+    const { lastModifiedAt: _d, lastPublishedAt: _p, isPublished: _i, ...isiDraf } = draf;
+    const { lastModifiedAt: _td, lastPublishedAt: _tp, isPublished: _ti, ...isiTerbit } = terbit;
+    return JSON.stringify(isiDraf) !== JSON.stringify(isiTerbit);
+  }
+
+  // Ketelusuran Cepat (Traceability Engine by Batch / Lot Number)
+  public cariKetelusuran(nomorBatch?: string): TraceabilityResult | null {
+    if (!nomorBatch || typeof nomorBatch !== 'string') return null;
+    const cleanBets = nomorBatch.trim().toUpperCase();
+    if (!cleanBets) return null;
+
+    // Search across stocks, QC, manufacturing, recall, and sales
+    const stok = this.getStokGudang().find(s => (s?.nomorBatch || '').toUpperCase().includes(cleanBets));
+    const qc = this.getInspeksiQC().find(q => (q?.nomorBatch || '').toUpperCase().includes(cleanBets));
+    const bmr = this.getBetsProduksi().find(b => (b?.nomorBatch || '').toUpperCase().includes(cleanBets));
+    const recall = this.getPenarikanProduk().find(r => (r?.nomorBatchTerdampak || '').toUpperCase().includes(cleanBets));
+    const sales = this.getPenjualan().filter(p => (p?.nomorBatch || '').toUpperCase().includes(cleanBets));
+
+    if (!stok && !qc && !bmr && !recall && sales.length === 0) {
+      return null;
+    }
+
+    const namaAlkes = stok?.namaAlkes || qc?.namaBarang || bmr?.namaProduk || sales[0]?.namaAlkes || 'Alat Kesehatan Terdaftar';
+    const nomorIzinEdar = stok?.nomorIzinEdar || 'Terdaftar pada Modul RA/PJT';
+    const produsen = bmr ? 'PT Anugrahmitra Selaras (CPAKB)' : 'Prinsipal / Pemasok Terkualifikasi';
+
+    const fasyankesPenerima = sales.map(s => ({
+      nama: s.fasyankes,
+      nomorSuratJalan: `SJ/CDAKB/${s.nomorPesanan}`,
+      tanggalKirim: s.tanggalPesanan,
+      jumlah: s.jumlah
+    }));
+
+    return {
+      nomorBatch: cleanBets,
+      namaAlkes,
+      nomorIzinEdar,
+      produsen,
+      tanggalPenerimaan: qc?.tanggalInspeksi || stok?.tanggalMasuk || sales[0]?.tanggalPesanan || '-',
+      hasilInspeksiQC: qc ? `${qc.hasilPemeriksaan} (${qc.inspektur})` : 'Belum Ada Catatan Inspeksi QC',
+      lokasiGudang: stok?.lokasiPenyimpanan || '-',
+      logSuhuStatus: stok?.zonaSuhu || '-',
+      fasyankesPenerima,
+      statusRecall: recall ? 'Dalam Pengawasan Recall' : 'Aman (Tidak Ada Recall)'
+    };
+  }
+
+  private bacaKoleksiMentahUntukProvenance(key: string): unknown[] {
+    switch (key) {
+      case 'izin_edar': return this.getIzinEdar();
+      case 'sertifikat': return this.getSertifikat();
+      case 'dokumen_mutu': return this.getDokumenMutu();
+      case 'capa': return this.getCAPA();
+      case 'produk_kembalian': return this.getProdukKembalian();
+      case 'inspeksi_qc': return this.getInspeksiQC();
+      case 'audit_internal_iso': return this.getAuditInternal();
+      case 'stok_gudang': return this.getStokGudang();
+      case 'log_suhu': return this.getLogSuhu();
+      case 'pest_control': return this.getPestControl();
+      case 'gudang_unit': return this.getGudangFisik();
+      case 'gudang_bin': return this.getLokasiBin();
+      case 'gudang_aturan_simpan': return this.getAturanSimpan();
+      case 'gudang_pergerakan': return this.getJejakPergerakan();
+      case 'gudang_penerimaan': return this.getTerimaBarang();
+      case 'gudang_surat_jalan': return this.getSuratJalan();
+      case 'gudang_opname': return this.getOpnameStok();
+      case 'gudang_ambang': return this.getAmbangStok();
+      case 'gudang_scanner': return this.getKejadianScanner();
+      case 'gudang_lkpp_sync': return this.getSinkronisasiLkpp();
+      case 'gudang_satusehat': return this.getKirimanSatuSehat();
+      case 'layanan_teknis': return this.getLayananTeknis();
+      case 'bets_produksi': return this.getBetsProduksi();
+      case 'pemasok': return this.getPemasok();
+      case 'purchase_order': return this.getPurchaseOrder();
+      case 'penjualan': return this.getPenjualan();
+      case 'sales_pelanggan': return this.getPelangganB2B();
+      case 'sales_prospek': return this.getProspek();
+      case 'sales_teritorial': return this.getTeritorial();
+      case 'sales_tender': return this.getTender();
+      case 'sales_kontrak': return this.getKontrakHarga();
+      case 'sales_kunjungan': return this.getKunjunganMedRep();
+      case 'sales_pengetahuan_produk': return this.getPengetahuanProduk();
+      case 'sales_pra_order': return this.getPraOrder();
+      case 'sales_skema_harga': return this.getSkemaHarga();
+      case 'sales_unit_serial': return this.getUnitSerial();
+      case 'sales_garansi': return this.getGaransiInstalasi();
+      case 'sales_kampanye': return this.getKampanye();
+      case 'sales_unit_demo': return this.getUnitDemo();
+      case 'sales_rebate': return this.getProgramRebate();
+      case 'sales_riwayat_bulanan': return this.getRiwayatPenjualanBulanan();
+      case 'surat_daftar': return this.getDaftarSurat();
+      case 'surat_subscriber': return this.getPelangganSurat();
+      case 'surat_kampanye': return this.getKampanyeSurat();
+      case 'surat_templat': return this.getTemplatSurat();
+      case 'surat_media': return this.getMediaSurat();
+      case 'surat_tx': return this.getPesanTransaksional();
+      case 'laporan_ktd': return this.getLaporanKTD();
+      case 'penarikan_produk': return this.getPenarikanProduk();
+      case 'pelatihan': return this.getPelatihan();
+      case 'sertifikasi_pegawai': return this.getSertifikasiPegawai();
+      case 'hris_karyawan': return this.getKaryawanHRIS();
+      case 'hris_grading': return this.getGradingJabatan();
+      case 'hris_mutasi': return this.getRiwayatMutasi();
+      case 'hris_shift': return this.getJadwalShift();
+      case 'hris_absensi': return this.getAbsensi();
+      case 'hris_cuti': return this.getCuti();
+      case 'hris_lembur': return this.getLembur();
+      case 'hris_slip_gaji': return this.getSlipGaji();
+      case 'hris_ats': return this.getKandidatATS();
+      case 'hris_skill_matrix': return this.getSkillMatrix();
+      case 'hris_kpi': return this.getKpiKaryawan();
+      case 'hris_umpan_balik_360': return this.getUmpanBalik360();
+      case 'hris_insiden_k3': return this.getInsidenK3();
+      case 'hris_mcu': return this.getRekamMcu();
+      case 'hris_apd': return this.getDistribusiApd();
+      case 'transaksi': return this.getTransaksi();
+      case 'keuangan_valuasi_batch': return this.getValuasiBatch();
+      case 'keuangan_jurnal': return this.getJurnalKeuangan();
+      case 'audit_trail': return this.getAuditTrail();
+      case 'keuangan_coa': return this.getCoA();
+      case 'keuangan_periode': return this.getPeriodeBuku();
+      case 'keuangan_tetapan_pajak': return this.getTetapanPajak();
+      case 'gudang_pengaturan': return [this.getKonfigurasiGudang()];
+      case 'surat_pengaturan': return [this.getKonfigurasiSurat()];
+      default: {
+        const val = this.getJson<unknown>(key);
+        if (Array.isArray(val)) return val;
+        return val ? [val] : [];
+      }
+    }
+  }
+
+  public getAllSearchableCollections(): Record<string, unknown[]> {
+    const hasil: Record<string, unknown[]> = {};
+    const skipKeys = new Set([
+      'website_media_v1',
+      'website_published',
+      'gudang_pengaturan',
+      'surat_pengaturan',
+      'quotation_identitas_v1',
+      'catalog_settings_v1'
+    ]);
+
+    for (const def of KATALOG_KOLEKSI_DATA) {
+      if (skipKeys.has(def.key)) continue;
+      if (def.key === 'product_catalog') {
+        hasil[def.key] = this.getProdukKatalog();
+        continue;
+      }
+      if (def.key === 'website_draft') {
+        const draf = this.getWebsiteDraft();
+        const itemSitus: unknown[] = [];
+        if (draf.identitas) itemSitus.push({ id: 'website-identitas', ...draf.identitas });
+        if (draf.hero) itemSitus.push({ id: 'website-hero', ...draf.hero });
+        if (Array.isArray(draf.solusi?.item)) itemSitus.push(...draf.solusi.item);
+        if (Array.isArray(draf.artikel?.item)) itemSitus.push(...draf.artikel.item);
+        if (Array.isArray(draf.produk?.item)) itemSitus.push(...draf.produk.item);
+        if (Array.isArray(draf.faq?.item)) itemSitus.push(...draf.faq.item);
+        if (Array.isArray(draf.kegiatan?.item)) itemSitus.push(...draf.kegiatan.item);
+        hasil[def.key] = itemSitus;
+        continue;
+      }
+      hasil[def.key] = this.bacaKoleksiMentahUntukProvenance(def.key);
+    }
+
+    return hasil;
+  }
+
+  public getRingkasanAsalData(): {
+    manifest: ManifestAsalData;
+    koleksi: RingkasanAsalKoleksi[];
+    totalDummy: number;
+    totalUserBaru: number;
+    totalUserDiedit: number;
+    totalMasterSistem: number;
+    totalKonfigurasiUser: number;
+  } {
+    const manifest = this.getManifestData();
+    const koleksi: RingkasanAsalKoleksi[] = [];
+    let totalDummy = 0;
+    let totalUserBaru = 0;
+    let totalUserDiedit = 0;
+    let totalMasterSistem = 0;
+    let totalKonfigurasiUser = 0;
+
+    for (const def of KATALOG_KOLEKSI_DATA) {
+      if (def.kategori === 'operasional') {
+        const items = this.bacaKoleksiMentahUntukProvenance(def.key);
+        const manifestEfektif = def.key === 'audit_internal_iso' ? this.getManifestData() : manifest;
+        const r = hitungRingkasanAsalKoleksi(def.key, items, manifestEfektif);
+        koleksi.push(r);
+        totalDummy += r.dummy;
+        totalUserBaru += r.userBaru;
+        totalUserDiedit += r.userDiedit;
+      } else if (def.kategori === 'master_sistem') {
+        const items = this.bacaKoleksiMentahUntukProvenance(def.key);
+        totalMasterSistem += items.length;
+        koleksi.push({
+          key: def.key,
+          label: def.label,
+          modul: def.modul,
+          kategori: def.kategori,
+          total: items.length,
+          dummy: 0,
+          userBaru: items.length,
+          userDiedit: 0,
+          strukturGudang: false
+        });
+      } else {
+        const val = this.getJson<unknown>(def.key);
+        const ada = Array.isArray(val) ? val.length : val ? 1 : 0;
+        totalKonfigurasiUser += ada;
+        koleksi.push({
+          key: def.key,
+          label: def.label,
+          modul: def.modul,
+          kategori: def.kategori,
+          total: ada,
+          dummy: 0,
+          userBaru: ada,
+          userDiedit: 0,
+          strukturGudang: false
+        });
+      }
+    }
+
+    return {
+      manifest,
+      koleksi,
+      totalDummy,
+      totalUserBaru,
+      totalUserDiedit,
+      totalMasterSistem,
+      totalKonfigurasiUser
+    };
+  }
+
+  public async purgeDummyData(
+    opsi: {
+      pertahankanEditUser?: boolean;
+      pertahankanStrukturGudang?: boolean;
+      pelaku?: string;
+      peran?: string;
+    } = {}
+  ): Promise<{
+    ok: boolean;
+    terhapusDummy: number;
+    dipertahankanUser: number;
+    revision: number;
+    pesan: string;
+  }> {
+    const pertahankanEditUser = opsi.pertahankanEditUser ?? true;
+    const pertahankanStrukturGudang = opsi.pertahankanStrukturGudang ?? false;
+    const pelaku = opsi.pelaku || 'Administrator Sistem';
+    const peran = opsi.peran || 'IT & Traceability Hub';
+
+    const manifestLama = this.getManifestData();
+    const batchUpdates: Record<string, unknown> = {};
+    let terhapusDummy = 0;
+    let dipertahankanUser = 0;
+
+    this.isInternalProvenanceOp = true;
+    try {
+      for (const def of KATALOG_KOLEKSI_DATA) {
+        if (def.kategori !== 'operasional') continue;
+        const sebelum = this.bacaKoleksiMentahUntukProvenance(def.key);
+        const manifestEfektif = def.key === 'audit_internal_iso' ? this.getManifestData() : manifestLama;
+        const ringkas = hitungRingkasanAsalKoleksi(def.key, sebelum, manifestEfektif);
+        let sesudah = saringHanyaDataUser(def.key, sebelum, manifestEfektif, {
+          pertahankanEditUser,
+          pertahankanStrukturGudang
+        });
+
+        if (def.key === 'gudang_pergerakan') {
+          sesudah = bangunUlangRantaiPergerakan(sesudah as JejakPergerakan[]);
+        } else if (def.key === 'keuangan_jurnal') {
+          sesudah = bangunUlangRantaiJurnal(sesudah as JurnalKeuangan[]);
+        }
+
+        const berkurang = Math.max(0, sebelum.length - sesudah.length);
+        terhapusDummy += berkurang > 0 ? berkurang : ringkas.dummy;
+        dipertahankanUser += sesudah.length;
+        batchUpdates[def.key] = sesudah;
+      }
+
+      // Sinkronkan kapasitas terpakai pada lokasi bin terhadap stok user yang tersisa
+      const stokSisa = (batchUpdates['stok_gudang'] as StokGudang[]) || [];
+      const isiBin = new Map<string, number>();
+      stokSisa.forEach((s) => {
+        if (s.binId) isiBin.set(s.binId, (isiBin.get(s.binId) ?? 0) + s.jumlahStok);
+      });
+      const binsSisa = ((batchUpdates['gudang_bin'] as LokasiBin[]) || []).map((b) => ({
+        ...b,
+        terpakai: isiBin.get(b.id) ?? 0
+      }));
+      batchUpdates['gudang_bin'] = binsSisa;
+
+      // Pastikan periode akuntansi bulan berjalan tersedia & terbuka agar transaksi user pasca-purge tetap bisa dijurnal
+      const periodeAktif = this.getPeriodeBuku();
+      const periodeBulanIni = new Date().toISOString().slice(0, 7);
+      if (!periodeAktif.some((p) => p.status === 'Terbuka')) {
+        const periodeBaru: PeriodeBuku = {
+          id: periodeBulanIni,
+          label: `Periode ${periodeBulanIni}`,
+          status: 'Terbuka',
+          ditutupPada: null,
+          ditutupOleh: '',
+          alasan: 'Dibuka otomatis pasca-purge data dummy'
+        };
+        const nextPeriode = [periodeBaru, ...periodeAktif];
+        batchUpdates['keuangan_periode'] = nextPeriode;
+      }
+
+      // Tambahkan entri audit ALCOA+ resmi atas aksi purge ini
+      const now = new Date();
+      const waktuWIB = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString('id-ID')} WIB`;
+      const auditSisa = (batchUpdates['audit_trail'] as LogAuditTrail[]) || [];
+      const logPurge: LogAuditTrail = {
+        id: 'LOG-' + now.getTime(),
+        waktu: waktuWIB,
+        pengguna: pelaku,
+        peran,
+        modul: 'IT & Traceability',
+        aktivitas: `Pembersihan selektif (purge) ${terhapusDummy} data dummy; ${dipertahankanUser} data user & seluruh konfigurasi dipertahankan`,
+        nomorReferensi: `PURGE-${now.toISOString().split('T')[0]}`,
+        statusIntegritas: 'Tervalidasi Digital'
+      };
+      batchUpdates['audit_trail'] = [logPurge, ...auditSisa].slice(0, 100);
+
+      const manifestBaru: ManifestAsalData = {
+        ...manifestLama,
+        dummyDihapus: true,
+        dummyDihapusPada: now.toISOString(),
+        dummyDihapusOleh: pelaku,
+        userEditedIds: pertahankanEditUser ? manifestLama.userEditedIds : {},
+        seededAuditIds: []
+      };
+      batchUpdates[KUNCI_MANIFEST_DATA] = manifestBaru;
+
+      if (typeof localStorage !== 'undefined') {
+        for (const [k, val] of Object.entries(batchUpdates)) {
+          localStorage.setItem(STORAGE_PREFIX + k, JSON.stringify(val));
+          this.latestSyncOp.delete(k);
+          this.pendingSyncKeys.delete(k);
+          this.syncRetryCounts.delete(k);
+          const timer = this.syncRetryTimers.get(k);
+          if (timer) {
+            clearTimeout(timer);
+            this.syncRetryTimers.delete(k);
+          }
+        }
+        this.simpanAntreanSyncPersisten();
+      }
+    } finally {
+      this.isInternalProvenanceOp = false;
+    }
+
+    let syncedRevision = this.serverRevision;
+    const token = this.getAuthTokenFromStorage();
+    if (token && typeof fetch === 'function') {
+      try {
+        const res = await fetch('/api/sync/purge-dummy', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            'X-Sync-Client-Id': this.clientTabId
+          },
+          body: JSON.stringify({
+            updates: batchUpdates,
+            mode: 'purge',
+            ringkasan: `Purge ${terhapusDummy} data dummy (dipertahankan ${dipertahankanUser} rekaman user).`,
+            clientId: this.clientTabId
+          })
+        });
+        if (res.ok) {
+          const payload = (await res.json().catch(() => null)) as {
+            revision?: number;
+            versions?: Record<string, number>;
+          } | null;
+          if (typeof payload?.revision === 'number') {
+            this.serverRevision = Math.max(this.serverRevision, payload.revision);
+            syncedRevision = this.serverRevision;
+          }
+          if (payload?.versions) {
+            for (const [k, v] of Object.entries(payload.versions)) {
+              if (typeof v === 'number') {
+                this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
+              }
+            }
+          }
+          this.lastSyncedAt = new Date().toISOString();
+          this.lastSyncError = null;
+        } else {
+          for (const [k, v] of Object.entries(batchUpdates)) {
+            this.enqueueKeySync(k, { type: 'put', value: v });
+          }
+        }
+      } catch {
+        for (const [k, v] of Object.entries(batchUpdates)) {
+          this.enqueueKeySync(k, { type: 'put', value: v });
+        }
+      }
+    }
+
+    for (const k of Object.keys(batchUpdates)) {
+      this.notify(k);
+    }
+    this.notify('all');
+    this.updateConnectionStatusLabel();
+
+    return {
+      ok: true,
+      terhapusDummy,
+      dipertahankanUser,
+      revision: syncedRevision,
+      pesan: `Berhasil membersihkan ${terhapusDummy} data dummy. ${dipertahankanUser} rekaman pengguna, CoA, pajak, RBAC, dan pengaturan situs tetap utuh.`
+    };
+  }
+
+  public async pulihkanDataDummy(
+    pelaku = 'Administrator Sistem',
+    peran = 'IT & Traceability Hub'
+  ): Promise<{ ok: boolean; revision: number; pesan: string }> {
+    const manifestBaru = buatManifestDefault();
+    const keysReset: string[] = [];
+
+    this.isInternalProvenanceOp = true;
+    try {
+      if (typeof localStorage !== 'undefined') {
+        for (const def of KATALOG_KOLEKSI_DATA) {
+          if (def.kategori !== 'operasional') continue;
+          localStorage.removeItem(STORAGE_PREFIX + def.key);
+          keysReset.push(def.key);
+        }
+        localStorage.setItem(STORAGE_PREFIX + KUNCI_MANIFEST_DATA, JSON.stringify(manifestBaru));
+      }
+
+      // Bangun kembali seluruh koleksi awal + audit internal
+      const batchUpdates: Record<string, unknown> = {
+        [KUNCI_MANIFEST_DATA]: manifestBaru
+      };
+      for (const def of KATALOG_KOLEKSI_DATA) {
+        if (def.kategori !== 'operasional') continue;
+        batchUpdates[def.key] = this.bacaKoleksiMentahUntukProvenance(def.key);
+      }
+
+      const now = new Date();
+      const waktuWIB = `${now.toISOString().split('T')[0]} ${now.toLocaleTimeString('id-ID')} WIB`;
+      const logRestore: LogAuditTrail = {
+        id: 'LOG-' + now.getTime(),
+        waktu: waktuWIB,
+        pengguna: pelaku,
+        peran,
+        modul: 'IT & Traceability',
+        aktivitas: 'Pemulihan data simulasi (dummy) standar awal sistem',
+        nomorReferensi: `RESTORE-${now.toISOString().split('T')[0]}`,
+        statusIntegritas: 'Tervalidasi Digital'
+      };
+      const auditAwal = (batchUpdates['audit_trail'] as LogAuditTrail[]) || [];
+      batchUpdates['audit_trail'] = [logRestore, ...auditAwal].slice(0, 100);
+      batchUpdates[KUNCI_MANIFEST_DATA] = this.getManifestData();
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_PREFIX + 'audit_trail', JSON.stringify(batchUpdates['audit_trail']));
+      }
+
+      let syncedRevision = this.serverRevision;
+      const token = this.getAuthTokenFromStorage();
+      if (token && typeof fetch === 'function') {
+        try {
+          const res = await fetch('/api/sync/purge-dummy', {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+              'X-Sync-Client-Id': this.clientTabId
+            },
+            body: JSON.stringify({
+              updates: batchUpdates,
+              mode: 'restore',
+              ringkasan: 'Pemulihan seluruh koleksi data simulasi/dummy standar.',
+              clientId: this.clientTabId
+            })
+          });
+          if (res.ok) {
+            const payload = (await res.json().catch(() => null)) as {
+              revision?: number;
+              versions?: Record<string, number>;
+            } | null;
+            if (typeof payload?.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, payload.revision);
+              syncedRevision = this.serverRevision;
+            }
+            if (payload?.versions) {
+              for (const [k, v] of Object.entries(payload.versions)) {
+                if (typeof v === 'number') {
+                  this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
+                }
+              }
+            }
+            this.lastSyncedAt = new Date().toISOString();
+          }
+        } catch {
+          for (const [k, v] of Object.entries(batchUpdates)) {
+            this.enqueueKeySync(k, { type: 'put', value: v });
+          }
+        }
+      }
+
+      for (const k of keysReset) {
+        this.notify(k);
+      }
+      this.notify(KUNCI_MANIFEST_DATA);
+      this.notify('all');
+      this.updateConnectionStatusLabel();
+
+      return {
+        ok: true,
+        revision: syncedRevision,
+        pesan: 'Seluruh data simulasi standar telah dipulihkan; pengaturan situs, quotation, e-Katalog, CoA, pajak, dan RBAC tetap terjaga.'
+      };
+    } finally {
+      this.isInternalProvenanceOp = false;
+    }
+  }
+
+  private async mirrorOpToFirestore(key: string, op: SyncOp, version: number): Promise<void> {
+    if (!authFirebase.currentUser?.emailVerified) return;
+    const actor = this.firebaseUserInfo?.email || 'ams-admin';
+    try {
+      if (op.type === 'put') {
+        await pushSyncEntryToFirestore(key, op.value, version, actor);
+        if (key === 'website_published' && op.value && typeof op.value === 'object') {
+          await pushPublicSiteToFirestore(op.value as Record<string, unknown>, actor);
+        }
+      } else {
+        await deleteSyncEntryFromFirestore(key);
+      }
+      this.firebaseSyncedAt = new Date().toISOString();
+      this.firebaseSyncError = null;
+      this.updateConnectionStatusLabel();
+    } catch (err) {
+      this.firebaseSyncError = err instanceof Error ? err.message : 'Gagal sinkronisasi ke Firestore';
+      this.updateConnectionStatusLabel();
+    }
+  }
+
+  public async pushRbacSnapshotToFirebase(): Promise<void> {
+    if (!authFirebase.currentUser?.emailVerified) return;
+    const token = this.getAuthTokenFromStorage();
+    if (!token || typeof fetch !== 'function') return;
+    try {
+      const res = await fetch('/api/firebase/rbac-snapshot', {
+        cache: 'no-store',
+        credentials: 'include',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { roles?: RoleDefinition[]; users?: ServerUserRecord[] };
+      await pushRbacSnapshotToFirestore(data.roles || [], data.users || []);
+      this.firebaseSyncedAt = new Date().toISOString();
+      this.firebaseSyncError = null;
+      this.updateConnectionStatusLabel();
+    } catch (err) {
+      this.firebaseSyncError = err instanceof Error ? err.message : 'Gagal sinkronisasi RBAC ke Firestore';
+      this.updateConnectionStatusLabel();
+    }
+  }
+
+  public async archivePocketBaseSettingsToCloud(): Promise<void> {
+    if (!authFirebase.currentUser?.emailVerified) return;
+    await this.muatKonfigurasiDriverServer();
+    if (!this.pocketbaseArchiveConfig) return;
+    const actor = this.firebaseUserInfo?.email || 'ams-admin';
+    await pushArchiveConfigToFirestore(
+      'pocketbase_legacy',
+      this.activeDbDriver,
+      this.pocketbaseArchiveConfig,
+      actor
+    );
+    this.firebaseSyncedAt = new Date().toISOString();
+    this.updateConnectionStatusLabel();
+  }
+
+  public async syncWithFirebaseCloud(): Promise<{
+    ok: boolean;
+    pulledEntries: number;
+    pushedEntries: number;
+    rolesSynced: number;
+    usersSynced: number;
+    pesan: string;
+  }> {
+    if (!authFirebase.currentUser?.emailVerified) {
+      return {
+        ok: false,
+        pulledEntries: 0,
+        pushedEntries: 0,
+        rolesSynced: 0,
+        usersSynced: 0,
+        pesan: 'Akun Google Firebase belum terhubung di browser ini.'
+      };
+    }
+
+    const token = this.getAuthTokenFromStorage();
+    const actor = this.firebaseUserInfo?.email || 'ams-admin';
+
+    try {
+      // 1. Tarik seluruh state yang ada di Firestore
+      const cloud = await pullAllCloudStateFromFirestore();
+      const idToken = await authFirebase.currentUser.getIdToken();
+
+      // 2. Pulihkan data Cloud ke server Express (apabila server habis restart / re-publish)
+      if (
+        (Object.keys(cloud.entries).length > 0 || cloud.roles.length > 0 || cloud.users.length > 0 || cloud.pocketbaseArchive) &&
+        typeof fetch === 'function'
+      ) {
+        await fetch('/api/firebase/hydrate', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify({
+            idToken,
+            roles: cloud.roles,
+            users: cloud.users,
+            entries: cloud.entries,
+            activeDriver: cloud.pocketbaseArchive?.driver,
+            pocketbaseArchive: cloud.pocketbaseArchive?.config
+          })
+        });
+      }
+
+      // 3. Tarik snapshot terbaru dari Express dan unggah entri lokal/server yang belum ada di Cloud
+      await this.syncFromServer(false);
+      let pushedEntries = 0;
+      let rolesSynced = 0;
+      let usersSynced = 0;
+
+      if (token && typeof fetch === 'function') {
+        const [stateRes, rbacRes] = await Promise.all([
+          fetch('/api/sync/state', { cache: 'no-store', credentials: 'include', headers: { Authorization: `Bearer ${token}` } }),
+          fetch('/api/firebase/rbac-snapshot', { cache: 'no-store', credentials: 'include', headers: { Authorization: `Bearer ${token}` } })
+        ]);
+
+        if (stateRes.ok) {
+          const serverState = (await stateRes.json()) as {
+            entries?: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }>;
+          };
+          for (const [k, entry] of Object.entries(serverState.entries || {})) {
+            const cloudItem = cloud.entries[k];
+            const serverTime = new Date(entry.updatedAt || 0).getTime();
+            const cloudTime = cloudItem ? new Date(cloudItem.updatedAt || 0).getTime() : 0;
+            if (!cloudItem || serverTime > cloudTime) {
+              await pushSyncEntryToFirestore(k, entry.value, entry.version || 1, entry.updatedBy || actor);
+              if (k === 'website_published' && entry.value && typeof entry.value === 'object') {
+                await pushPublicSiteToFirestore(entry.value as Record<string, unknown>, entry.updatedBy || actor);
+              }
+              pushedEntries += 1;
+            }
+          }
+        }
+
+        if (rbacRes.ok) {
+          const rbacData = (await rbacRes.json()) as { roles?: RoleDefinition[]; users?: ServerUserRecord[] };
+          const pushed = await pushRbacSnapshotToFirestore(rbacData.roles || [], rbacData.users || []);
+          rolesSynced = pushed.rolesPushed;
+          usersSynced = pushed.usersPushed;
+        }
+      }
+
+      // 4. Pastikan arsip konfigurasi PocketBase selalu aman tersimpan di Firestore
+      await this.archivePocketBaseSettingsToCloud();
+
+      this.firebaseSyncedAt = new Date().toISOString();
+      this.firebaseSyncError = null;
+      this.updateConnectionStatusLabel();
+
+      return {
+        ok: true,
+        pulledEntries: Object.keys(cloud.entries).length,
+        pushedEntries,
+        rolesSynced,
+        usersSynced,
+        pesan: 'Sinkronisasi dua arah dengan Firebase Firestore selesai.'
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gagal sinkronisasi dengan Firebase Firestore';
+      this.firebaseSyncError = msg;
+      this.updateConnectionStatusLabel();
+      return {
+        ok: false,
+        pulledEntries: 0,
+        pushedEntries: 0,
+        rolesSynced: 0,
+        usersSynced: 0,
+        pesan: msg
+      };
+    }
+  }
+
+  public async switchDbDriver(driver: 'firebase' | 'pocketbase', pocketbaseUrl?: string): Promise<{ ok: boolean; pesan: string }> {
+    const token = this.getAuthTokenFromStorage();
+    if (!token || typeof fetch !== 'function') {
+      return { ok: false, pesan: 'Sesi login aktif diperlukan untuk mengganti driver database.' };
+    }
+    try {
+      const res = await fetch('/api/system/db-driver', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ driver, pocketbaseUrl })
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        activeDriver?: 'firebase' | 'pocketbase';
+        pocketbaseArchive?: Record<string, unknown>;
+        pesan?: string;
+      };
+      if (!res.ok) {
+        return { ok: false, pesan: data.pesan || 'Gagal mengalihkan driver database.' };
+      }
+      if (data.activeDriver) this.activeDbDriver = data.activeDriver;
+      if (data.pocketbaseArchive) this.pocketbaseArchiveConfig = data.pocketbaseArchive;
+      if (authFirebase.currentUser?.emailVerified && this.pocketbaseArchiveConfig) {
+        await pushArchiveConfigToFirestore(
+          'pocketbase_legacy',
+          this.activeDbDriver,
+          this.pocketbaseArchiveConfig,
+          this.firebaseUserInfo?.email || 'ams-admin'
+        ).catch(() => {});
+      }
+      if (this.activeDbDriver === 'pocketbase') {
+        await this.checkPBConnection();
+      } else {
+        this.isOnlinePocketBase = false;
+        this.updateConnectionStatusLabel();
+      }
+      return {
+        ok: true,
+        pesan:
+          driver === 'pocketbase'
+            ? 'Mode database dikembalikan ke PocketBase. Seluruh pengaturan arsip PocketBase aktif kembali.'
+            : 'Mode database dialihkan ke Firebase Firestore (fase pengembangan). Pengaturan PocketBase tetap aman diarsipkan.'
+      };
+    } catch {
+      return { ok: false, pesan: 'Tidak dapat menghubungi server untuk mengubah mode database.' };
+    }
+  }
+
+  // Reset defaults for testing
+  public async resetToDefaults() {
+    const token = this.getAuthTokenFromStorage();
+    if (token && typeof fetch === 'function') {
+      try {
+        await fetch('/api/sync/reset', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ clientId: this.clientTabId })
+        });
+      } catch {
+        /* lanjutkan reset lokal */
+      }
+    }
+    this.serverVersions = {};
+    this.pendingSyncKeys.clear();
+    this.latestSyncOp.clear();
+    if (typeof localStorage !== 'undefined') {
+      const sesiTersimpan = localStorage.getItem(KUNCI_SESI_AUTH);
+      localStorage.clear();
+      if (sesiTersimpan) {
+        localStorage.setItem(KUNCI_SESI_AUTH, sesiTersimpan);
+      }
+    }
+    this.notify('all');
+    if (typeof window !== 'undefined') {
+      window.location.reload();
+    }
+  }
+}
+
+export const db = new AMSDatabaseManager();
