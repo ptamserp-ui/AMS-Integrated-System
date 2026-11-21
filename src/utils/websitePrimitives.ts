@@ -97,6 +97,21 @@ export interface MediaWebsite {
 }
 
 let cacheMediaWebsite: MediaWebsite[] | null = null;
+const cachePratinjauMemori = new Map<string, string>();
+const MAX_PRATINJAU_MEMORI = 80;
+
+export function setPratinjauMemori(id: string, dataUrl: string): void {
+  if (!id || !dataUrl) return;
+  if (cachePratinjauMemori.size >= MAX_PRATINJAU_MEMORI) {
+    const firstKey = cachePratinjauMemori.keys().next().value;
+    if (firstKey) cachePratinjauMemori.delete(firstKey);
+  }
+  cachePratinjauMemori.set(id, dataUrl);
+}
+
+export function hapusPratinjauMemori(id: string): void {
+  cachePratinjauMemori.delete(id);
+}
 
 export function daftarMediaWebsite(): MediaWebsite[] {
   if (cacheMediaWebsite) return cacheMediaWebsite;
@@ -141,6 +156,7 @@ export function simpanMediaWebsite(media: MediaWebsite): MediaWebsite[] {
 }
 
 export function hapusMediaWebsite(id: string): MediaWebsite[] {
+  cachePratinjauMemori.delete(id);
   const baru = daftarMediaWebsite().filter((m) => m.id !== id);
   try {
     if (typeof localStorage !== 'undefined') {
@@ -160,11 +176,13 @@ export function hapusMediaWebsite(id: string): MediaWebsite[] {
   return baru;
 }
 
-/** Nilai gambar bisa berupa URL biasa atau rujukan `media:<id>` ke penyimpanan lokal. */
+/** Nilai gambar bisa berupa URL biasa atau rujukan `media:<id>` yang disajikan langsung oleh server. */
 export function selesaikanGambar(referensi?: string): string | undefined {
   if (!referensi) return undefined;
   if (!referensi.startsWith('media:')) return referensi;
   const id = referensi.slice('media:'.length);
+  const memUrl = cachePratinjauMemori.get(id);
+  if (memUrl) return memUrl;
   const media = daftarMediaWebsite().find((m) => m.id === id);
   return media?.dataUrl ?? `/api/website/media/${encodeURIComponent(id)}`;
 }

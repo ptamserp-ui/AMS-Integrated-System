@@ -5,9 +5,10 @@
  * struktur bersarang tetap memakai definisi medan yang sama.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, ImageOff, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CheckCircle2, ImageOff, Plus, Trash2 } from 'lucide-react';
 import { HalamanWebsite, TautanWebsite } from '../../../../types';
-import { kompresGambarWebsite, selesaikanGambar, simpanMediaWebsite } from '../../../../utils/website';
+import { selesaikanGambar } from '../../../../utils/website';
+import { unggahFotoKeServer } from '../../../../utils/mediaUpload';
 import type { Medan, NilaiMedan } from '../skema';
 
 export const KELAS_INPUT =
@@ -224,6 +225,7 @@ function MedanGambar({
   label?: string;
 }) {
   const [sedangOlah, setSedangOlah] = useState(false);
+  const [statusUnggah, setStatusUnggah] = useState<'server' | 'antrean' | ''>('');
   const [gagal, setGagal] = useState('');
   const rujukan = String(nilai ?? '');
   const pratinjau = selesaikanGambar(rujukan || undefined);
@@ -250,6 +252,7 @@ function MedanGambar({
     if (!berkas) return;
     setSedangOlah(true);
     setGagal('');
+    setStatusUnggah('');
     try {
       const adalahLogoAtauIkon =
         kunciLower.includes('logo') ||
@@ -258,15 +261,17 @@ function MedanGambar({
         labelLower.includes('favicon') ||
         labelLower.includes('banner') ||
         labelLower.includes('hero');
-      const dataUrl = await kompresGambarWebsite(berkas, 1280, 0.82, adalahLogoAtauIkon);
-      const id = `img-${Math.random().toString(36).slice(2, 9)}`;
-      const mediaTersimpan = simpanMediaWebsite({ id, nama: berkas.name, dataUrl, ukuran: berkas.size });
-      if (!mediaTersimpan.some((media) => media.id === id)) {
-        throw new Error('Penyimpanan media website penuh.');
-      }
-      onChange(`media:${id}`);
-    } catch {
-      setGagal('Gambar gagal diolah. Gunakan PNG/JPG di bawah 8 MB.');
+      const hasil = await unggahFotoKeServer(berkas, {
+        lebarMaks: 1280,
+        kualitas: 0.82,
+        pertahankanTransparansi: adalahLogoAtauIkon,
+        visibility: 'public',
+        scope: 'website'
+      });
+      onChange(hasil.referensi);
+      setStatusUnggah(hasil.storedOnServer ? 'server' : 'antrean');
+    } catch (err) {
+      setGagal(err instanceof Error ? err.message : 'Gambar gagal diunggah. Gunakan PNG/JPG/WebP di bawah 8 MB.');
     } finally {
       setSedangOlah(false);
     }
@@ -346,6 +351,16 @@ function MedanGambar({
         className={KELAS_INPUT}
       />
       {petunjuk && <Bacaan petunjuk={petunjuk} />}
+      {statusUnggah === 'server' && (
+        <p className="inline-flex items-center gap-1 text-3xs font-semibold text-emerald-700">
+          <CheckCircle2 className="w-3 h-3" /> Foto tersimpan real-time di server
+        </p>
+      )}
+      {statusUnggah === 'antrean' && (
+        <p className="text-3xs font-semibold text-amber-700">
+          Foto tersimpan lokal &amp; akan diunggah otomatis ke server saat online.
+        </p>
+      )}
       {gagal && <p className="text-3xs font-semibold text-rose-700">{gagal}</p>}
     </div>
   );
@@ -362,6 +377,7 @@ export function MedanGambarBanyak({
 }) {
   const daftar = Array.isArray(nilai) ? nilai.filter((foto): foto is string => typeof foto === 'string') : [];
   const [sedangOlah, setSedangOlah] = useState(false);
+  const [statusUnggah, setStatusUnggah] = useState<'server' | 'antrean' | ''>('');
   const [urlBaru, setUrlBaru] = useState('');
   const [gagal, setGagal] = useState('');
 
@@ -374,21 +390,23 @@ export function MedanGambarBanyak({
     }
     setSedangOlah(true);
     setGagal('');
+    setStatusUnggah('');
     try {
-      const referensiBaru = await Promise.all(
-        berkas.map(async (file) => {
-          const dataUrl = await kompresGambarWebsite(file, 1280, 0.82, true);
-          const id = `img-${Math.random().toString(36).slice(2, 9)}`;
-          const mediaTersimpan = simpanMediaWebsite({ id, nama: file.name, dataUrl, ukuran: file.size });
-          if (!mediaTersimpan.some((media) => media.id === id)) {
-            throw new Error('Penyimpanan media website penuh.');
-          }
-          return `media:${id}`;
-        })
+      const hasilSemua = await Promise.all(
+        berkas.map((file) =>
+          unggahFotoKeServer(file, {
+            lebarMaks: 1280,
+            kualitas: 0.82,
+            pertahankanTransparansi: true,
+            visibility: 'public',
+            scope: 'product-catalog'
+          })
+        )
       );
-      onChange([...daftar, ...referensiBaru]);
-    } catch {
-      setGagal('Foto gagal diolah. Gunakan PNG atau JPG yang valid.');
+      onChange([...daftar, ...hasilSemua.map((h) => h.referensi)]);
+      setStatusUnggah(hasilSemua.every((h) => h.storedOnServer) ? 'server' : 'antrean');
+    } catch (err) {
+      setGagal(err instanceof Error ? err.message : 'Foto gagal diunggah ke server. Gunakan PNG, JPG, atau WebP.');
     } finally {
       setSedangOlah(false);
     }
@@ -471,7 +489,7 @@ export function MedanGambarBanyak({
 
       <label className="flex items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer">
         <Plus className="w-4 h-4" />
-        {sedangOlah ? 'Mengolah foto…' : 'Unggah satu atau beberapa foto'}
+        {sedangOlah ? 'Mengunggah foto ke server…' : 'Unggah satu atau beberapa foto'}
         <input
           type="file"
           accept="image/*"
@@ -510,6 +528,16 @@ export function MedanGambarBanyak({
         </button>
       </div>
       {petunjuk && <Bacaan petunjuk={petunjuk} />}
+      {statusUnggah === 'server' && (
+        <p className="inline-flex items-center gap-1 text-3xs font-semibold text-emerald-700">
+          <CheckCircle2 className="w-3 h-3" /> Foto tersimpan real-time di server
+        </p>
+      )}
+      {statusUnggah === 'antrean' && (
+        <p className="text-3xs font-semibold text-amber-700">
+          Foto tersimpan lokal &amp; akan diunggah otomatis ke server saat online.
+        </p>
+      )}
       {gagal && <p className="text-3xs font-semibold text-rose-700">{gagal}</p>}
     </div>
   );

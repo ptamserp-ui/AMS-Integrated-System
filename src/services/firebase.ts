@@ -513,6 +513,74 @@ export async function pushArchiveConfigToFirestore(
   }
 }
 
+export async function pushMediaAssetToFirestore(asset: {
+  id: string;
+  filename: string;
+  contentType: 'image/png' | 'image/jpeg' | 'image/webp';
+  dataUrl: string;
+  size: number;
+  visibility: 'public' | 'internal';
+  scope: string;
+  sha256: string;
+  uploadedBy: string;
+}): Promise<boolean> {
+  const user = authFirebase.currentUser;
+  if (!user || !user.emailVerified) return false;
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(asset.id)) return false;
+  if (asset.dataUrl.length > 980_000 || estimatePayloadBytes(asset) > MAX_DOC_BYTES) {
+    return false;
+  }
+
+  const path = `ams_media_assets/${asset.id}`;
+  const ref = doc(dbFirestore, 'ams_media_assets', asset.id);
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(ref, {
+        id: asset.id,
+        filename: (asset.filename || `${asset.id}.jpg`).slice(0, 160),
+        contentType: asset.contentType,
+        dataUrl: asset.dataUrl,
+        size: Math.max(1, Math.floor(asset.size || 1)),
+        visibility: asset.visibility === 'internal' ? 'internal' : 'public',
+        scope: (asset.scope || 'website').slice(0, 64),
+        sha256: (asset.sha256 || '0000000000000000').slice(0, 128),
+        uploadedBy: (asset.uploadedBy || user.email || 'admin').slice(0, 120),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        ownerUid: user.uid
+      });
+    } else {
+      await updateDoc(ref, {
+        filename: (asset.filename || `${asset.id}.jpg`).slice(0, 160),
+        contentType: asset.contentType,
+        dataUrl: asset.dataUrl,
+        size: Math.max(1, Math.floor(asset.size || 1)),
+        visibility: asset.visibility === 'internal' ? 'internal' : 'public',
+        scope: (asset.scope || 'website').slice(0, 64),
+        sha256: (asset.sha256 || '0000000000000000').slice(0, 128),
+        uploadedBy: (asset.uploadedBy || user.email || 'admin').slice(0, 120),
+        updatedAt: serverTimestamp()
+      });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function fetchMediaAssetFromFirestore(mediaId: string): Promise<string | null> {
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(mediaId)) return null;
+  try {
+    const snap = await getDoc(doc(dbFirestore, 'ams_media_assets', mediaId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as { dataUrl?: unknown } | undefined;
+    return typeof data?.dataUrl === 'string' ? data.dataUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface CloudPulledState {
   entries: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }>;
   roles: RoleDefinition[];

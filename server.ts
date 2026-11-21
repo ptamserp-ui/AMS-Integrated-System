@@ -21,11 +21,15 @@ import {
   setSessionCookie
 } from './server/rbacMiddleware';
 import {
+  canDeleteMedia,
   canDeleteSyncKey,
+  canUploadMedia,
   canWriteSyncKey,
+  containsMediaReference,
   isLegacyRbacSyncKey,
   isValidSyncKey,
   mapSyncKeyToResource,
+  mergeCatalogIntoPublishedSnapshot,
   PUBLIC_SYNC_KEYS,
   ServerDataSyncStore
 } from './server/dataSyncStore';
@@ -35,6 +39,14 @@ import { loadDeploymentEnv, resolveDeploymentEnvironment } from './server/envLoa
 import { buildWindowsDeploymentGuides } from './server/deploymentGuides';
 import { WebsiteTranslationError, WebsiteTranslationService } from './server/websiteTranslation';
 import {
+  encodeImageDataUrl,
+  isValidMediaId,
+  ServerMediaStore,
+  type MediaVisibility,
+  type StoredMediaMeta
+} from './server/mediaStore';
+import {
+  getFirebaseAdminDb,
   getFirebaseAdminStatus,
   initializeFirebaseAdmin,
   isAiStudioPreviewRuntime,
@@ -55,6 +67,8 @@ const BERKAS_SNAPSHOT_STATIS = path.resolve(__dirname, 'public', 'website-publis
 const BERKAS_INDEKS = path.resolve(__dirname, 'index.html');
 const rbacStore = new ServerRbacStore(DATA_DIR);
 const dataSyncStore = new ServerDataSyncStore(DATA_DIR);
+const mediaStore = new ServerMediaStore(DATA_DIR);
+mediaStore.migrateLegacyMediaEntries(dataSyncStore.getEntry('website_media_v1')?.value, 'startup-migration');
 const dbDriverManager = new ServerDbDriverManager(DATA_DIR, __dirname);
 const websiteTranslationService = new WebsiteTranslationService(DATA_DIR);
 const { attachAuth, requireAuth, requirePermission } = createRbacMiddleware(rbacStore);
@@ -771,6 +785,10 @@ async function startServer() {
       dbDriverManager.hydrateArchiveFromCloud(body.activeDriver, body.pocketbaseArchive, actorUsername || 'firebase-sync');
     }
 
+    if (syncRes.appliedKeys.includes('website_media_v1') && body.entries?.website_media_v1?.value) {
+      mediaStore.migrateLegacyMediaEntries(body.entries.website_media_v1.value, actorUsername || 'firebase-hydrate');
+    }
+
     if (syncRes.appliedKeys.includes('website_published') && body.entries?.website_published?.value && adalahKonfigurasiSitus(body.entries.website_published.value)) {
       try {
         const serialized = JSON.stringify(body.entries.website_published.value, null, 2);
@@ -1118,7 +1136,19 @@ async function startServer() {
 
   // ================= REAL-TIME SERVER DATA & SETTINGS SYNC =================
   app.get('/api/sync/public-settings', (_req, res) => {
-    res.set('Cache-Control', 'no-store').json(dataSyncStore.getPublicState());
+    const publicState = dataSyncStore.getPublicState();
+    if (!publicState.entries.website_published) {
+      const diskSnapshot = bacaSnapshot();
+      if (diskSnapshot) {
+        publicState.entries.website_published = {
+          value: diskSnapshot,
+          version: 1,
+          updatedAt: new Date(diskSnapshot.lastPublishedAt || diskSnapshot.lastModifiedAt || Date.now()).toISOString(),
+          updatedBy: String(diskSnapshot.lastModifiedBy || 'server')
+        };
+      }
+    }
+    res.set('Cache-Control', 'no-store').json(publicState);
   });
 
   app.get('/api/sync/state', requireAuth, (req, res) => {
@@ -1175,6 +1205,10 @@ async function startServer() {
       return res.status(400).json({ error: 'BAD_REQUEST', pesan: 'Field "value" wajib disertakan.' });
     }
 
+    if (key === 'website_media_v1') {
+      mediaStore.migrateLegacyMediaEntries(body.value, req.auth!.user.username);
+    }
+
     // Jika situs publik diperbarui via key sync, cerminkan ke snapshot disk bila valid
     if (key === 'website_published' && adalahKonfigurasiSitus(body.value)) {
       try {
@@ -1196,6 +1230,30 @@ async function startServer() {
           ? req.headers['x-sync-client-id']
           : undefined;
     broadcastSyncUpdate(key, synced.entry, synced.revision, sourceClientId);
+
+    // Selaraskan foto/detail produk terbaru dari Product Catalog ke snapshot website terbit secara real-time
+    if (key === 'product_catalog') {
+      const currentSnapshot =
+        (dataSyncStore.getEntry('website_published')?.value as Record<string, unknown> | undefined) ||
+        bacaSnapshot();
+      if (currentSnapshot && adalahKonfigurasiSitus(currentSnapshot)) {
+        const merged = mergeCatalogIntoPublishedSnapshot(currentSnapshot, body.value);
+        if (merged) {
+          try {
+            const serialized = JSON.stringify(merged, null, 2);
+            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
+            fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
+            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
+            fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
+          } catch {
+            /* abaikan kegagalan tulis berkas statis */
+          }
+          const syncedPub = dataSyncStore.setKey('website_published', merged, req.auth!.user.username);
+          broadcastSyncUpdate('website_published', syncedPub.entry, syncedPub.revision);
+        }
+      }
+    }
+
     res.json({
       ok: true,
       key,
@@ -1297,6 +1355,10 @@ async function startServer() {
       }
     }
 
+    if (updates.website_media_v1) {
+      mediaStore.migrateLegacyMediaEntries(updates.website_media_v1, req.auth!.user.username);
+    }
+
     if (updates.website_published && adalahKonfigurasiSitus(updates.website_published)) {
       try {
         const serialized = JSON.stringify(updates.website_published, null, 2);
@@ -1318,6 +1380,28 @@ async function startServer() {
           : undefined;
     if (Object.keys(result.updated).length > 0 || result.deleted.length > 0) {
       broadcastSyncBatch(result.updated, result.deleted, result.revision, sourceClientId);
+    }
+
+    if (updates.product_catalog && !updates.website_published) {
+      const currentSnapshot =
+        (dataSyncStore.getEntry('website_published')?.value as Record<string, unknown> | undefined) ||
+        bacaSnapshot();
+      if (currentSnapshot && adalahKonfigurasiSitus(currentSnapshot)) {
+        const merged = mergeCatalogIntoPublishedSnapshot(currentSnapshot, updates.product_catalog);
+        if (merged) {
+          try {
+            const serialized = JSON.stringify(merged, null, 2);
+            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
+            fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
+            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
+            fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
+          } catch {
+            /* abaikan */
+          }
+          const syncedPub = dataSyncStore.setKey('website_published', merged, req.auth!.user.username);
+          broadcastSyncUpdate('website_published', syncedPub.entry, syncedPub.revision);
+        }
+      }
     }
 
     const versions: Record<string, number> = {};
@@ -1486,21 +1570,312 @@ async function startServer() {
     });
   });
 
-  // ================= SITUS PUBLIK (konten diatur dari menu Website di dashboard) =================
-  // Snapshot terbit dibaca halaman /web lintas perangkat; hanya konfigurasi valid yang diterima.
-  app.get('/api/website/media/:id', (req, res) => {
-    const media = dataSyncStore.getPublicWebsiteMedia(req.params.id, bacaSnapshot());
-    if (!media) {
-      return res.status(404).json({ pesan: 'Media situs tidak ditemukan atau belum diterbitkan.' });
+  // ================= PENYIMPANAN & STREAMING MEDIA SERVER REAL-TIME =================
+  const uploadHits = new Map<string, { count: number; reset: number }>();
+  const UPLOAD_WINDOW_MS = 15 * 60 * 1000;
+  const UPLOAD_MAX_HITS = 120;
+  const dapatUnggahMedia = (kunci: string): boolean => {
+    const now = Date.now();
+    const cur = uploadHits.get(kunci);
+    if (!cur || now > cur.reset) {
+      uploadHits.set(kunci, { count: 1, reset: now + UPLOAD_WINDOW_MS });
+      return true;
     }
+    if (cur.count >= UPLOAD_MAX_HITS) return false;
+    cur.count += 1;
+    return true;
+  };
+
+  const mirrorMediaToFirebaseAdmin = async (meta: StoredMediaMeta, bytes: Buffer) => {
+    try {
+      const adminDb = getFirebaseAdminDb();
+      if (!adminDb || bytes.length > 650_000) return;
+      const dataUrl = encodeImageDataUrl(meta.contentType, bytes);
+      if (dataUrl.length > 980_000) return;
+      const now = new Date();
+      await adminDb.collection('ams_media_assets').doc(meta.id).set({
+        id: meta.id,
+        filename: meta.filename,
+        contentType: meta.contentType,
+        dataUrl,
+        size: meta.size,
+        visibility: meta.visibility,
+        scope: meta.scope,
+        sha256: meta.sha256,
+        uploadedBy: meta.uploadedBy,
+        createdAt: now,
+        updatedAt: now,
+        ownerUid: 'server-admin'
+      });
+    } catch {
+      /* penyimpanan disk tetap sukses walau mirror Firestore gagal sementara */
+    }
+  };
+
+  const serveMediaById = async (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    if (!isValidMediaId(id)) {
+      return res.status(400).json({ error: 'INVALID_MEDIA_ID', pesan: 'ID media tidak valid.' });
+    }
+
+    // 1. Prioritas utama: file gambar biner langsung di disk server (${DATA_DIR}/uploads/)
+    let stored = mediaStore.getMedia(id);
+
+    // 2. Fallback: entri media lama di dataSyncStore (materialisasi langsung ke file disk)
+    if (!stored) {
+      const legacyEntries = dataSyncStore.getEntry('website_media_v1')?.value;
+      const snapshot = bacaSnapshot();
+      const catalogVal = dataSyncStore.getEntry('product_catalog')?.value;
+      const bolehAksesLegacy =
+        Boolean(req.auth) ||
+        Boolean(dataSyncStore.getPublicWebsiteMedia(id, snapshot)) ||
+        containsMediaReference(catalogVal, id);
+
+      if (bolehAksesLegacy && Array.isArray(legacyEntries)) {
+        const match = legacyEntries.find(
+          (item) => item && typeof item === 'object' && (item as { id?: unknown }).id === id
+        ) as { nama?: unknown; dataUrl?: unknown } | undefined;
+        if (typeof match?.dataUrl === 'string') {
+          try {
+            mediaStore.saveFromDataUrl({
+              id,
+              dataUrl: match.dataUrl,
+              filename: typeof match.nama === 'string' ? match.nama : undefined,
+              visibility: 'public',
+              scope: 'website',
+              uploadedBy: 'legacy-fallback'
+            });
+            stored = mediaStore.getMedia(id);
+          } catch {
+            /* abaikan jika korup */
+          }
+        }
+      }
+    }
+
+    // 3. Fallback cloud: tarik dari Firestore Admin (jika container baru restart) & tulis ulang ke disk
+    if (!stored) {
+      try {
+        const adminDb = getFirebaseAdminDb();
+        if (adminDb) {
+          const docSnap = await adminDb.collection('ams_media_assets').doc(id).get();
+          if (docSnap.exists) {
+            const docData = docSnap.data() as {
+              dataUrl?: unknown;
+              filename?: unknown;
+              visibility?: unknown;
+              scope?: unknown;
+              uploadedBy?: unknown;
+            };
+            const vis: MediaVisibility = docData?.visibility === 'internal' ? 'internal' : 'public';
+            if ((vis === 'public' || req.auth) && typeof docData?.dataUrl === 'string') {
+              mediaStore.saveFromDataUrl({
+                id,
+                dataUrl: docData.dataUrl,
+                filename: typeof docData.filename === 'string' ? docData.filename : undefined,
+                visibility: vis,
+                scope: typeof docData.scope === 'string' ? docData.scope : 'website',
+                uploadedBy: typeof docData.uploadedBy === 'string' ? docData.uploadedBy : 'firestore-hydrate'
+              });
+              stored = mediaStore.getMedia(id);
+            }
+          }
+        }
+      } catch {
+        /* abaikan jika Firestore belum terhubung */
+      }
+    }
+
+    if (!stored) {
+      return res.status(404).json({ error: 'MEDIA_NOT_FOUND', pesan: 'File foto tidak ditemukan di server.' });
+    }
+
+    if (stored.meta.visibility === 'internal' && !req.auth) {
+      return res.status(401).json({ error: 'UNAUTHORIZED', pesan: 'Autentikasi diperlukan untuk melihat lampiran internal.' });
+    }
+
+    const etag = `"${stored.meta.sha256}"`;
+    if (req.headers['if-none-match'] === etag) {
+      return res.status(304).end();
+    }
+
     res
       .set({
-        'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
-        'X-Content-Type-Options': 'nosniff'
+        ETag: etag,
+        'Cache-Control':
+          stored.meta.visibility === 'internal'
+            ? 'private, max-age=3600'
+            : 'public, max-age=3600, stale-while-revalidate=604800',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': `inline; filename="${stored.meta.filename}"`
       })
-      .type(media.contentType)
-      .send(media.bytes);
+      .type(stored.meta.contentType)
+      .send(stored.bytes);
+  };
+
+  app.post(
+    '/api/media/upload',
+    requireAuth,
+    express.raw({ limit: '8mb', type: ['image/png', 'image/jpeg', 'image/webp'] }),
+    (req, res) => {
+      if (!canUploadMedia(req.auth!.role)) {
+        rbacStore.recordAudit({
+          actorUsername: req.auth!.user.username,
+          actorRole: req.auth!.role.id,
+          action: 'PERMISSION_DENIED',
+          resource: 'media:upload',
+          status: 'DENIED',
+          ip: getClientIp(req),
+          detail: 'Percobaan upload file foto ke server ditolak oleh RBAC.'
+        });
+        return res.status(403).json({
+          error: 'FORBIDDEN',
+          pesan: `Akses ditolak: peran "${req.auth!.role.name}" tidak memiliki izin mengunggah foto ke server.`
+        });
+      }
+
+      const rateKey = `${req.auth!.user.id}:${getClientIp(req)}`;
+      if (!dapatUnggahMedia(rateKey)) {
+        return res.status(429).json({
+          error: 'RATE_LIMITED',
+          pesan: 'Terlalu banyak unggahan foto dalam waktu singkat. Coba lagi beberapa menit.'
+        });
+      }
+
+      try {
+        let meta: StoredMediaMeta;
+        let savedBytes: Buffer;
+        if (Buffer.isBuffer(req.body)) {
+          const rawHeaderId = typeof req.headers['x-media-id'] === 'string' ? req.headers['x-media-id'] : undefined;
+          const rawFilename =
+            typeof req.headers['x-media-filename'] === 'string'
+              ? decodeURIComponent(req.headers['x-media-filename'])
+              : undefined;
+          const rawVis = req.headers['x-media-visibility'] === 'internal' ? 'internal' : 'public';
+          const rawScope = typeof req.headers['x-media-scope'] === 'string' ? req.headers['x-media-scope'] : 'website';
+          savedBytes = req.body;
+          meta = mediaStore.saveFromBuffer({
+            id: rawHeaderId,
+            bytes: savedBytes,
+            filename: rawFilename,
+            visibility: rawVis,
+            scope: rawScope,
+            uploadedBy: req.auth!.user.username
+          });
+        } else {
+          const body = (req.body || {}) as {
+            id?: string;
+            filename?: string;
+            dataUrl?: string;
+            visibility?: MediaVisibility;
+            scope?: string;
+          };
+          if (typeof body.dataUrl !== 'string' || !body.dataUrl.trim()) {
+            return res.status(400).json({
+              error: 'BAD_REQUEST',
+              pesan: 'Kirim file biner (image/png, image/jpeg, image/webp) atau field dataUrl.'
+            });
+          }
+          meta = mediaStore.saveFromDataUrl({
+            id: body.id,
+            dataUrl: body.dataUrl,
+            filename: body.filename,
+            visibility: body.visibility === 'internal' ? 'internal' : 'public',
+            scope: body.scope || 'website',
+            uploadedBy: req.auth!.user.username
+          });
+          savedBytes = mediaStore.getMedia(meta.id)?.bytes ?? Buffer.alloc(0);
+        }
+
+        const sourceClientId =
+          typeof req.headers['x-sync-client-id'] === 'string' ? req.headers['x-sync-client-id'] : undefined;
+
+        broadcastMessage(
+          {
+            type: 'media:uploaded',
+            media: meta,
+            url: `/api/website/media/${encodeURIComponent(meta.id)}`,
+            revision: dataSyncStore.getRevision(),
+            sourceClientId: sourceClientId || null
+          },
+          meta.visibility === 'public'
+        );
+
+        rbacStore.recordAudit({
+          actorUsername: req.auth!.user.username,
+          actorRole: req.auth!.role.id,
+          action: 'MEDIA_UPLOADED',
+          resource: `media:${meta.scope}`,
+          status: 'ALLOWED',
+          ip: getClientIp(req),
+          detail: `Foto "${meta.filename}" (${meta.contentType}, ${meta.size} byte) disimpan sebagai file server ID ${meta.id}.`
+        });
+
+        void mirrorMediaToFirebaseAdmin(meta, savedBytes);
+
+        return res.status(201).json({
+          ok: true,
+          id: meta.id,
+          url: `/api/website/media/${encodeURIComponent(meta.id)}`,
+          fileUrl: `/api/media/${encodeURIComponent(meta.id)}`,
+          media: meta
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Gagal menyimpan file gambar di server.';
+        return res.status(400).json({ error: 'INVALID_MEDIA', pesan: msg });
+      }
+    }
+  );
+
+  app.get('/api/media', requireAuth, (req, res) => {
+    const scope = typeof req.query.scope === 'string' && req.query.scope.trim() ? req.query.scope.trim() : undefined;
+    const items = mediaStore.listMeta({ scope });
+    res.set('Cache-Control', 'no-store').json({ ok: true, items });
   });
+
+  app.delete('/api/media/:id', requireAuth, (req, res) => {
+    if (!canDeleteMedia(req.auth!.role)) {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        pesan: `Akses ditolak: peran "${req.auth!.role.name}" tidak memiliki izin menghapus file media.`
+      });
+    }
+    const { id } = req.params;
+    if (!isValidMediaId(id)) {
+      return res.status(400).json({ error: 'INVALID_MEDIA_ID', pesan: 'ID media tidak valid.' });
+    }
+    const existingMeta = mediaStore.getMeta(id);
+    const deleted = mediaStore.deleteMedia(id);
+    const sourceClientId =
+      typeof req.headers['x-sync-client-id'] === 'string' ? req.headers['x-sync-client-id'] : undefined;
+    if (deleted) {
+      broadcastMessage(
+        {
+          type: 'media:deleted',
+          id,
+          revision: dataSyncStore.getRevision(),
+          sourceClientId: sourceClientId || null
+        },
+        existingMeta?.visibility !== 'internal'
+      );
+      rbacStore.recordAudit({
+        actorUsername: req.auth!.user.username,
+        actorRole: req.auth!.role.id,
+        action: 'MEDIA_DELETED',
+        resource: `media:${id}`,
+        status: 'ALLOWED',
+        ip: getClientIp(req),
+        detail: `File media "${id}" dihapus dari disk server.`
+      });
+    }
+    res.json({ ok: true, id, deleted });
+  });
+
+  app.get('/api/media/:id', serveMediaById);
+
+  // ================= SITUS PUBLIK (konten diatur dari menu Website di dashboard) =================
+  // Snapshot terbit dibaca halaman /web lintas perangkat; hanya konfigurasi valid yang diterima.
+  app.get('/api/website/media/:id', serveMediaById);
 
   app.get('/api/website/published', (req, res) => {
     const snapshot = bacaSnapshot();

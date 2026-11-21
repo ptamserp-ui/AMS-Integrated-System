@@ -11,6 +11,7 @@ import {
   FilePlus2,
   FileText,
   History,
+  ImagePlus,
   Lock,
   PackagePlus,
   Plus,
@@ -70,6 +71,7 @@ import {
   unduhDokumenInternalPdfA4
 } from '../../../utils/dokumenInternalPdf';
 import { gabungkanKatalogProduk, selesaikanGambar } from '../../../utils/website';
+import { unggahFotoKeServer } from '../../../utils/mediaUpload';
 import { namaPengguna } from '../../layout/Navbar';
 import {
   Badge,
@@ -259,6 +261,7 @@ export default function DokumenInternalModule({
 
   const [pesanStatus, setPesanStatus] = useState<{ ok: boolean; teks: string } | null>(null);
   const [sedangUnduhPdf, setSedangUnduhPdf] = useState(false);
+  const [sedangUnggahLogo, setSedangUnggahLogo] = useState(false);
   const [qrPreviewUrl, setQrPreviewUrl] = useState<string>('');
 
   // Modals
@@ -791,10 +794,39 @@ export default function DokumenInternalModule({
     }));
   };
 
-  const simpanIdentitasKop = () => {
-    db.setSettingJson(KUNCI_IDENTITAS_DOKUMEN_INTERNAL, identitas);
-    db.setSettingJson('quotation_identitas_v1', identitas);
-    setPesanStatus({ ok: true, teks: 'Pengaturan Kop Surat Internal Document & Quotation disimpan & disinkronkan.' });
+  const simpanIdentitasKop = (next?: IdentitasKopDokumenInternal) => {
+    const target = next ?? identitas;
+    db.setSettingJson(KUNCI_IDENTITAS_DOKUMEN_INTERNAL, target);
+    db.setSettingJson('quotation_identitas_v1', target);
+    setPesanStatus({ ok: true, teks: 'Pengaturan Kop Surat Internal Document & Quotation disimpan & disinkronkan ke server.' });
+  };
+
+  const unggahLogoKopSurat = async (file?: File) => {
+    if (!file) return;
+    setSedangUnggahLogo(true);
+    try {
+      const hasil = await unggahFotoKeServer(file, {
+        lebarMaks: 800,
+        kualitas: 0.88,
+        pertahankanTransparansi: true,
+        visibility: 'public',
+        scope: 'dokumen-internal'
+      });
+      const next: IdentitasKopDokumenInternal = {
+        ...identitas,
+        tampilkanLogo: true,
+        logoUrl: hasil.referensi
+      };
+      setIdentitas(next);
+      simpanIdentitasKop(next);
+    } catch (err) {
+      setPesanStatus({
+        ok: false,
+        teks: err instanceof Error ? err.message : 'Gagal mengunggah logo Kop Surat ke server.'
+      });
+    } finally {
+      setSedangUnggahLogo(false);
+    }
   };
 
   const tanganiUnduhPdf = async () => {
@@ -1698,6 +1730,57 @@ export default function DokumenInternalModule({
               keterangan="Diterapkan otomatis pada pratinjau A4 dan seluruh cetakan PDF Internal Document & Quotation."
             >
               <div className="space-y-3 text-xs">
+                <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="font-bold text-slate-800">Logo Kop Surat (Tersimpan di Server)</label>
+                    <label className="inline-flex items-center gap-1.5 text-2xs font-medium text-slate-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={identitas.tampilkanLogo}
+                        onChange={(e) => setIdentitas((p) => ({ ...p, tampilkanLogo: e.target.checked }))}
+                      />
+                      Tampilkan Logo
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="h-14 w-28 rounded-lg border border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden p-1">
+                      {identitas.logoUrl ? (
+                        <img
+                          src={selesaikanGambar(identitas.logoUrl)}
+                          alt="Logo Kop Surat"
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-3xs text-slate-400">Belum ada logo</span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-100 cursor-pointer">
+                        <ImagePlus className="w-3.5 h-3.5" />
+                        {sedangUnggahLogo ? 'Mengunggah…' : 'Unggah Logo'}
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          className="hidden"
+                          disabled={sedangUnggahLogo}
+                          onChange={(e) => {
+                            void unggahLogoKopSurat(e.target.files?.[0]);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      {identitas.logoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setIdentitas((p) => ({ ...p, logoUrl: '' }))}
+                          className="px-2.5 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 font-semibold cursor-pointer"
+                        >
+                          Hapus
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
                 <div>
                   <label className={labelClass}>Nama Perusahaan</label>
                   <input
@@ -1751,7 +1834,7 @@ export default function DokumenInternalModule({
                   />
                 </div>
                 <div className="flex justify-end pt-2">
-                  <button type="button" onClick={simpanIdentitasKop} className={tombolPrimer}>
+                  <button type="button" onClick={() => simpanIdentitasKop()} className={tombolPrimer}>
                     <Check className="w-3.5 h-3.5" />
                     Simpan Pengaturan Kop
                   </button>

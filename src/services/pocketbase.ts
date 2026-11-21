@@ -548,6 +548,9 @@ class AMSDatabaseManager {
       this.isOnlineBrowser = true;
       this.updateConnectionStatusLabel();
       void this.flushPendingSync();
+      void import('../utils/mediaUpload')
+        .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+        .catch(() => {});
       if (this.wsShouldConnect) {
         void this.syncFromServer(true);
       }
@@ -565,6 +568,9 @@ class AMSDatabaseManager {
           if (this.pendingSyncKeys.size > 0) {
             void this.flushPendingSync();
           }
+          void import('../utils/mediaUpload')
+            .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+            .catch(() => {});
           if (this.wsShouldConnect) {
             void this.syncFromServer(true);
           }
@@ -1390,12 +1396,18 @@ class AMSDatabaseManager {
           }
         }
         void this.flushPendingSync().then(() => this.syncFromServer(true));
+        void import('../utils/mediaUpload')
+          .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+          .catch(() => {});
       };
 
       socket.onmessage = (ev: MessageEvent) => {
         try {
           const msg = JSON.parse(String(ev.data)) as {
             type?: string;
+            id?: string;
+            url?: string;
+            media?: { id?: string; scope?: string };
             key?: string;
             value?: unknown;
             version?: number;
@@ -1531,6 +1543,24 @@ class AMSDatabaseManager {
                 /* abaikan */
               }
             });
+            return;
+          }
+
+          if (msg.type === 'media:uploaded' || msg.type === 'media:deleted') {
+            if (typeof msg.revision === 'number') {
+              this.serverRevision = Math.max(this.serverRevision, msg.revision);
+            }
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(msg.type === 'media:uploaded' ? 'ams:media-uploaded' : 'ams:media-deleted', {
+                  detail: msg
+                })
+              );
+            }
+            this.notifyLocal('website_draft');
+            this.notifyLocal('website_published');
+            this.notifyLocal('product_catalog');
+            this.notifyLocal('dokumen_internal_identitas_v1');
             return;
           }
 

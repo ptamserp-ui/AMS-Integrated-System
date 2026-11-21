@@ -181,6 +181,9 @@ export default function PublicWebsiteApp() {
     if (ADALAH_PRATINJAU) return;
     let batal = false;
     let berhentiTerbit: (() => void) | undefined;
+    let publicWs: WebSocket | null = null;
+    let publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let diketahuiRevision = 0;
 
     const muatKonten = () => {
       tentukanKontenTayang().then((hasil) => {
@@ -189,6 +192,83 @@ export default function PublicWebsiteApp() {
     };
 
     muatKonten();
+
+    const padaMediaBerubah = () => {
+      muatKonten();
+    };
+    window.addEventListener('ams:media-uploaded', padaMediaBerubah);
+    window.addEventListener('ams:media-deleted', padaMediaBerubah);
+
+    const pasangWsPublikRingan = () => {
+      if (batal || typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/sync/ws`;
+      try {
+        const ws = new WebSocket(wsUrl);
+        publicWs = ws;
+        ws.onmessage = (ev: MessageEvent) => {
+          if (batal) return;
+          try {
+            const msg = JSON.parse(String(ev.data)) as {
+              type?: string;
+              key?: string;
+              value?: unknown;
+              revision?: number;
+              entries?: Record<string, { value?: unknown }>;
+            };
+            if (!msg?.type) return;
+            if (msg.type === 'sync:hello' && typeof msg.revision === 'number') {
+              if (diketahuiRevision > 0 && msg.revision > diketahuiRevision) {
+                muatKonten();
+              }
+              diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
+              return;
+            }
+            if (typeof msg.revision === 'number') {
+              diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
+            }
+            if (msg.type === 'sync:update' && msg.key === 'website_published' && adalahKonfigurasiSitus(msg.value)) {
+              setIsi({
+                konfigurasi: msg.value,
+                status: msg.value.isPublished ? 'tayang' : 'tahan'
+              });
+              return;
+            }
+            if (msg.type === 'sync:batch-update' && msg.entries?.website_published?.value && adalahKonfigurasiSitus(msg.entries.website_published.value)) {
+              const cfg = msg.entries.website_published.value;
+              setIsi({
+                konfigurasi: cfg,
+                status: cfg.isPublished ? 'tayang' : 'tahan'
+              });
+              return;
+            }
+            if (msg.type === 'media:uploaded' || msg.type === 'media:deleted') {
+              muatKonten();
+            }
+          } catch {
+            /* abaikan pesan tidak dikenal */
+          }
+        };
+        ws.onclose = () => {
+          if (publicWs === ws) publicWs = null;
+          if (!batal && !publicReconnectTimer) {
+            publicReconnectTimer = setTimeout(() => {
+              publicReconnectTimer = null;
+              pasangWsPublikRingan();
+            }, 4000);
+          }
+        };
+        ws.onerror = () => {
+          try {
+            ws.close();
+          } catch {
+            /* abaikan */
+          }
+        };
+      } catch {
+        /* fallback tetap aman via fetch */
+      }
+    };
 
     const hubungkanOperasional = async () => {
       const { db } = await import('../../../../services/pocketbase');
@@ -202,11 +282,23 @@ export default function PublicWebsiteApp() {
 
     if (punyaDataOperasionalLokal()) {
       void hubungkanOperasional();
+    } else {
+      pasangWsPublikRingan();
     }
 
     return () => {
       batal = true;
+      window.removeEventListener('ams:media-uploaded', padaMediaBerubah);
+      window.removeEventListener('ams:media-deleted', padaMediaBerubah);
       berhentiTerbit?.();
+      if (publicReconnectTimer) clearTimeout(publicReconnectTimer);
+      if (publicWs) {
+        try {
+          publicWs.close();
+        } catch {
+          /* abaikan */
+        }
+      }
     };
   }, []);
 

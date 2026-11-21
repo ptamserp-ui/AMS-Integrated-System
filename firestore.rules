@@ -134,6 +134,23 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidMediaAsset(data) {
+      return data.keys().hasAll(['id', 'filename', 'contentType', 'dataUrl', 'size', 'visibility', 'scope', 'sha256', 'uploadedBy', 'createdAt', 'updatedAt', 'ownerUid'])
+        && data.keys().hasOnly(['id', 'filename', 'contentType', 'dataUrl', 'size', 'visibility', 'scope', 'sha256', 'uploadedBy', 'createdAt', 'updatedAt', 'ownerUid'])
+        && isValidId(data.id)
+        && data.filename is string && data.filename.size() >= 1 && data.filename.size() <= 160
+        && data.contentType is string && data.contentType.size() >= 9 && data.contentType.size() <= 20 && data.contentType in ['image/png', 'image/jpeg', 'image/webp']
+        && data.dataUrl is string && data.dataUrl.size() >= 24 && data.dataUrl.size() <= 1000000
+        && data.size is int && data.size >= 1 && data.size <= 8388608
+        && data.visibility is string && data.visibility.size() >= 6 && data.visibility.size() <= 16 && data.visibility in ['public', 'internal']
+        && data.scope is string && data.scope.size() >= 1 && data.scope.size() <= 64
+        && data.sha256 is string && data.sha256.size() >= 16 && data.sha256.size() <= 128
+        && data.uploadedBy is string && data.uploadedBy.size() >= 1 && data.uploadedBy.size() <= 120
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128;
+    }
+
     // ==================== COLLECTION RULES ====================
     match /test/{docId} {
       allow get: if isSignedIn() && isValidId(docId);
@@ -285,6 +302,30 @@ service cloud.firestore {
         && incoming().uid == existing().uid
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
+    }
+
+    match /ams_media_assets/{mediaId} {
+      allow get: if isValidId(mediaId) && (
+        resource.data.visibility == 'public' ||
+        (isVerified() && (isAdmin() || resource.data.ownerUid == request.auth.uid))
+      );
+      allow list: if isBootstrappedAdmin() || (isVerified() && resource.data.ownerUid == request.auth.uid);
+      allow create: if isAdmin()
+        && isValidId(mediaId)
+        && isValidMediaAsset(incoming())
+        && incoming().id == mediaId
+        && incoming().ownerUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin()
+        && isValidId(mediaId)
+        && isValidMediaAsset(incoming())
+        && incoming().id == existing().id
+        && incoming().ownerUid == existing().ownerUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['filename', 'contentType', 'dataUrl', 'size', 'visibility', 'scope', 'sha256', 'uploadedBy', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(mediaId);
     }
   }
 }
