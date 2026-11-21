@@ -4457,6 +4457,7 @@ class AMSDatabaseManager {
       'gudang_pengaturan',
       'surat_pengaturan',
       'quotation_identitas_v1',
+      'dokumen_internal_identitas_v1',
       'catalog_settings_v1'
     ]);
 

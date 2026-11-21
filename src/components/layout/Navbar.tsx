@@ -31,7 +31,8 @@ import {
   LogOut,
   Smartphone,
   PackageSearch,
-  ShieldAlert
+  ShieldAlert,
+  FileCheck2
 } from 'lucide-react';
 import { AksesEfektif, DivisionId, ModuleId, UserRole } from '../../types';
 import LogoAplikasi from '../common/LogoAplikasi';
@@ -87,6 +88,7 @@ export const MAIN_MENU: MainMenuItem[] = [
   { kind: 'division', id: 'operations' },
   { kind: 'division', id: 'finance' },
   { kind: 'division', id: 'support' },
+  { kind: 'tab', id: 'dokumen-internal' },
   { kind: 'tab', id: 'overview' }
 ];
 
@@ -110,6 +112,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'hrd-pelatihan', label: 'HRD & General Affairs (GA)', short: 'HRD & GA', icon: Users, group: 'support' },
   { id: 'it-traceability', label: 'Information Technology (IT)', short: 'IT Hub', icon: Cpu, group: 'support', badge: 'CADDY' },
 
+  { id: 'dokumen-internal', label: 'Internal Document', short: 'Internal Doc', icon: FileCheck2, badge: 'CDAKB' },
   { id: 'overview', label: 'Executive Overview', short: 'Overview', icon: LayoutDashboard, badge: 'Cockpit' },
 ];
 

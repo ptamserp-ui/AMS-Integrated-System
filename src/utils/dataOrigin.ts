@@ -227,8 +227,10 @@ export const KATALOG_KOLEKSI_DATA: readonly DefinisiKoleksiData[] = [
   { key: 'website_draft', label: 'Draf Situs Web Publik', modul: 'Website & CMS', kategori: 'konfigurasi_user' },
   { key: 'website_published', label: 'Situs Web Terbit', modul: 'Website & CMS', kategori: 'konfigurasi_user' },
   { key: 'website_media_v1', label: 'Galeri Media Website', modul: 'Website & CMS', kategori: 'konfigurasi_user' },
-  { key: 'quotation_identitas_v1', label: 'Identitas Kop Quotation', modul: 'Sales & Marketing', kategori: 'konfigurasi_user' },
-  { key: 'quotation_riwayat_v1', label: 'Riwayat Dokumen Quotation', modul: 'Sales & Marketing', kategori: 'konfigurasi_user' },
+  { key: 'quotation_identitas_v1', label: 'Identitas Kop Quotation (Sinkron Internal Document)', modul: 'Internal Document', kategori: 'konfigurasi_user' },
+  { key: 'quotation_riwayat_v1', label: 'Riwayat Quotation Legacy', modul: 'Internal Document', kategori: 'konfigurasi_user' },
+  { key: 'dokumen_internal_identitas_v1', label: 'Identitas Kop Internal Document', modul: 'Internal Document', kategori: 'konfigurasi_user' },
+  { key: 'dokumen_internal_v1', label: 'Arsip Internal Document & Quotation', modul: 'Internal Document', kategori: 'konfigurasi_user' },
   { key: 'catalog_settings_v1', label: 'Pengaturan e-Katalog PDF Internal', modul: 'Sales & Marketing', kategori: 'konfigurasi_user' }
 ] as const;
 

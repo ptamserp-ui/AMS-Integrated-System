@@ -17,6 +17,7 @@ export type ModuleId =
   // 4. Supporting System
   | 'hrd-pelatihan'
   | 'finance-akuntansi'
+  | 'dokumen-internal'
   | 'it-traceability';
 
 export type UserRole =
@@ -2043,3 +2044,199 @@ export interface ServerAuditEntry {
   ip: string;
   detail: string;
 }
+
+// ==================== MODUL DOKUMEN INTERNAL (CDAKB) ====================
+
+export type KategoriDokumenInternal =
+  | 'komersial_penawaran'
+  | 'operasional_logistik'
+  | 'pengadaan'
+  | 'teknis_after_sales'
+  | 'keuangan_umum'
+  | 'mutu_qa';
+
+export type JenisDokumenInternal =
+  | 'quotation'
+  | 'material_requisition'
+  | 'surat_jalan'
+  | 'bast'
+  | 'kartu_stok'
+  | 'pemantauan_suhu'
+  | 'retur_recall'
+  | 'purchase_requisition'
+  | 'purchase_order'
+  | 'evaluasi_supplier'
+  | 'permintaan_demo'
+  | 'ba_instalasi'
+  | 'maintenance_kalibrasi'
+  | 'cash_advance'
+  | 'reimbursement'
+  | 'form_hrd'
+  | 'ncr'
+  | 'capa';
+
+export type StatusDokumenInternal =
+  | 'Draft'
+  | 'Submitted'
+  | 'Reviewed'
+  | 'Approved'
+  | 'Rejected'
+  | 'Closed';
+
+export type TingkatPeranDokumen =
+  | 'staff'
+  | 'kepala_gudang'
+  | 'pjt'
+  | 'manager'
+  | 'direktur';
+
+export type TipeFieldDinamis =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'date'
+  | 'select'
+  | 'boolean'
+  | 'currency';
+
+export interface DefinisiFieldDinamis {
+  key: string;
+  label: string;
+  type: TipeFieldDinamis;
+  required?: boolean;
+  placeholder?: string;
+  options?: string[];
+  defaultValue?: string | number | boolean;
+  fullWidth?: boolean;
+  satuan?: string;
+}
+
+export interface SkemaPersetujuanTahap {
+  urutan: number;
+  labelTahap: string;
+  peranWajib: TingkatPeranDokumen[];
+  targetStatusSetelahAksi: 'Reviewed' | 'Approved';
+}
+
+export interface SkemaJenisDokumen {
+  jenis: JenisDokumenInternal;
+  kategori: KategoriDokumenInternal;
+  nama: string;
+  kodeNomor: string;
+  kodeFormIso: string;
+  versiForm: string;
+  departemenDefault: string;
+  deskripsi: string;
+  wajibTraceabilityAlkes: boolean;
+  tampilkanNilaiFinansial: boolean;
+  labelPihakTerkait: string;
+  fields: DefinisiFieldDinamis[];
+  tahapPersetujuan: SkemaPersetujuanTahap[];
+}
+
+export interface ItemAlkesDokumenInternal {
+  id: string;
+  produkId?: string;
+  namaProduk: string;
+  tipeModel: string;
+  nomorIzinEdar: string; // KEMENKES RI AKL / AKD
+  nomorBatch: string; // Nomor Batch / Lot
+  expiredDate: string; // YYYY-MM-DD atau '-'
+  nomorSerial?: string;
+  qty: number;
+  satuan: string;
+  hargaSatuan?: number;
+  diskonPersen?: number;
+  spesifikasi?: string;
+  suhuPenyimpanan?: string;
+  kondisiFisik?: string;
+  catatan?: string;
+}
+
+export interface PihakTerkaitDokumen {
+  namaPihak: string;
+  instansi: string;
+  jabatan: string;
+  kontak: string;
+  alamat: string;
+}
+
+export interface LangkahPersetujuanDokumen {
+  urutan: number;
+  labelTahap: string;
+  peranWajib: TingkatPeranDokumen[];
+  status: 'Menunggu' | 'Disetujui' | 'Ditolak';
+  disetujuiOleh?: string;
+  peranAktual?: UserRole;
+  tingkatAktual?: TingkatPeranDokumen;
+  waktu?: string;
+  catatan?: string;
+  hashTandaTangan?: string;
+}
+
+export interface RevisiDokumenInternal {
+  revisiKe: number;
+  waktu: string;
+  oleh: string;
+  peran: UserRole;
+  aksi: 'Draft Dibuat' | 'Disimpan' | 'Diajukan' | 'Ditinjau' | 'Disetujui' | 'Ditolak' | 'Revisi Baru' | 'Ditutup';
+  statusSebelum?: StatusDokumenInternal;
+  statusSesudah: StatusDokumenInternal;
+  catatan: string;
+}
+
+export interface TandaTanganDigitalDokumen {
+  kodeVerifikasi: string;
+  sha256Ringkas: string;
+  qrPayload: string;
+  ditandatanganiPada?: string;
+  penandatanganUtama?: string;
+  jabatanUtama?: string;
+}
+
+export interface DokumenInternal {
+  id: string;
+  nomorDokumen: string;
+  kodeFormIso: string;
+  versiForm: string;
+  kategori: KategoriDokumenInternal;
+  jenisDokumen: JenisDokumenInternal;
+  judul: string;
+  departemen: string;
+  tanggalDokumen: string;
+  tanggalBerlaku: string;
+  status: StatusDokumenInternal;
+  revisiKe: number;
+  prioritas: 'Normal' | 'Prioritas' | 'Kritis CDAKB';
+  referensiDokumen?: string;
+  ringkasan: string;
+  pihakTerkait: PihakTerkaitDokumen;
+  dataDinamis: Record<string, string | number | boolean>;
+  items: ItemAlkesDokumenInternal[];
+  alurPersetujuan: LangkahPersetujuanDokumen[];
+  riwayatRevisi: RevisiDokumenInternal[];
+  tandaTanganDigital: TandaTanganDigitalDokumen;
+  dibuatOleh: string;
+  dibuatPeran: UserRole;
+  dibuatPada: string;
+  diperbaruiOleh: string;
+  diperbaruiPada: string;
+}
+
+export interface IdentitasKopDokumenInternal {
+  tampilkanLogo: boolean;
+  logoUrl?: string;
+  namaPerusahaan: string;
+  tagline: string;
+  tampilkanLegalitas: boolean;
+  nomorLegalitas: string;
+  tampilkanNpwp: boolean;
+  npwp: string;
+  alamat: string;
+  telepon: string;
+  email: string;
+  website: string;
+  kotaTandaTangan: string;
+  warnaAksen: string;
+}
+

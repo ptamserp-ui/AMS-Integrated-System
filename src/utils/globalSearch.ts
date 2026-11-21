@@ -76,7 +76,7 @@ export const SEARCH_COLLECTION_META: readonly SearchCollectionMeta[] = [
   { key: 'sales_unit_demo', label: 'Pelacakan Unit Demo', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'kampanye' },
   { key: 'sales_rebate', label: 'Program Rebate', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'kampanye' },
   { key: 'sales_riwayat_bulanan', label: 'Riwayat Penjualan Bulanan', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'analitik' },
-  { key: 'quotation_riwayat_v1', label: 'Riwayat Quotation', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'quotation' },
+  { key: 'quotation_riwayat_v1', label: 'Riwayat Quotation (Arsip Penawaran)', moduleId: 'dokumen-internal', moduleLabel: 'Internal Document' },
   { key: 'surat_daftar', label: 'Daftar Milis Newsletter', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'listmonk' },
   { key: 'surat_subscriber', label: 'Subscriber Newsletter', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'listmonk' },
   { key: 'surat_kampanye', label: 'Kampanye Newsletter', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'listmonk' },
@@ -110,7 +110,8 @@ export const SEARCH_COLLECTION_META: readonly SearchCollectionMeta[] = [
   { key: 'keuangan_periode', label: 'Periode Buku Akuntansi', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
   { key: 'keuangan_tetapan_pajak', label: 'Tetapan Tarif Pajak', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
 
-  // IT & Audit Trail
+  // Internal Document, IT & Audit Trail
+  { key: 'dokumen_internal_v1', label: 'Internal Document (Quotation/MR/DO/PR/PO/NCR/CAPA)', moduleId: 'dokumen-internal', moduleLabel: 'Internal Document' },
   { key: 'audit_trail', label: 'Jejak Audit Trail Sistem', moduleId: 'it-traceability', moduleLabel: 'IT & Traceability', extraResource: 'audit-trail', itSubTab: 'audit' },
 
   // Website CMS
@@ -152,6 +153,8 @@ const PREFERRED_TITLE_KEYS = [
   'judulPekerjaan',
   'judulKampanye',
   'nomorIzinEdar',
+  'nomorDokumen',
+  'nomorQuotation',
   'nomorSertifikat',
   'nomorCAPA',
   'nomorLaporan',
@@ -185,6 +188,7 @@ const PREFERRED_TITLE_KEYS = [
 
 const PREFERRED_SUBTITLE_KEYS = [
   'nomorIzinEdar',
+  'nomorDokumen',
   'nomorBatch',
   'kodeSKU',
   'sku',

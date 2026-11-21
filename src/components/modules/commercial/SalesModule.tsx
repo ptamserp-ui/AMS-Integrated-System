@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import {
   Users,
-  FileText,
   Gavel,
   MapPinned,
   ShoppingCart,
@@ -13,7 +12,6 @@ import {
 import { PelangganB2B, UserRole } from '../../../types';
 
 const CrmProspekModule = lazy(() => import('./sales/CrmProspekModule'));
-const QuotationModule = lazy(() => import('./sales/QuotationModule'));
 const TenderKontrakModule = lazy(() => import('./sales/TenderKontrakModule'));
 const SalesForceModule = lazy(() => import('./sales/SalesForceModule'));
 const SalesOrderModule = lazy(() => import('./sales/SalesOrderModule'));
@@ -22,12 +20,11 @@ const AnalitikSalesModule = lazy(() => import('./sales/AnalitikSalesModule'));
 const ListmonkModule = lazy(() => import('./sales/ListmonkModule'));
 const InternalCatalogModule = lazy(() => import('./sales/InternalCatalogModule'));
 
-export type SalesTab = 'crm' | 'quotation' | 'tender' | 'sfa' | 'order' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
+export type SalesTab = 'crm' | 'tender' | 'sfa' | 'order' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
 
 const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
   { id: 'analitik', label: 'Analitik & Dashboard (BI)', ikon: ChartColumn },
   { id: 'crm', label: 'CRM & Management Prospek', ikon: Users },
-  { id: 'quotation', label: 'Quotation (Penawaran PDF A4)', ikon: FileText },
   { id: 'tender', label: 'Manajemen Tender & Kontrak (e-Katalog & LPSE)', ikon: Gavel },
   { id: 'sfa', label: 'Otomasi Sales Force (SFA)', ikon: MapPinned },
   { id: 'order', label: 'Manajemen Order & Penjualan', ikon: ShoppingCart },
@@ -39,14 +36,15 @@ const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
 export default function SalesModule({
   currentRole,
   initialTab = 'order',
-  onTabChange
+  onTabChange,
+  onBuatQuotationUntukPelanggan
 }: {
   currentRole: UserRole;
   initialTab?: SalesTab;
   onTabChange?: (tab: SalesTab) => void;
+  onBuatQuotationUntukPelanggan?: (pelanggan: PelangganB2B) => void;
 }) {
   const [activeTab, setActiveTab] = useState<SalesTab>(initialTab);
-  const [quotationPelanggan, setQuotationPelanggan] = useState<PelangganB2B | null>(null);
 
   useEffect(() => {
     setActiveTab(initialTab);
@@ -74,9 +72,9 @@ export default function SalesModule({
           Distribusi alkes ke Rumah Sakit Pemerintah (LKPP), RS Swasta, dan Klinik dengan verifikasi etika promosi alkes oleh PJT (bebas dari klaim medis palsu) dan alokasi stok sistem FEFO sadar-kunci.
         </p>
         <p className="text-xs text-slate-500 mt-2 max-w-3xl leading-relaxed">
-          Cetak biru divisi komersial: 9 kelompok kerja (Analitik BI, CRM &amp; Prospek, Penerbitan Quotation PDF A4, Tender &amp; Kontrak, Otomasi Sales Force,
-          Manajemen Order, Penyusun e-Brochure PDF, Kampanye &amp; Rebate, Newsletter &amp; Mailing List). Ketertelusuran batch &amp;
-          nomor serial dipusatkan penuh pada menu Gudang &amp; Logistik (Tab 3).
+          Cetak biru divisi komersial: 8 kelompok kerja (Analitik BI, CRM &amp; Prospek, Tender &amp; Kontrak, Otomasi Sales Force,
+          Manajemen Order, Penyusun e-Brochure PDF, Kampanye &amp; Rebate, Newsletter &amp; Mailing List). Penerbitan Quotation resmi kini terintegrasi pada menu{' '}
+          <strong className="text-slate-700">Internal Document</strong> bersama seluruh formulir terkendali CDAKB.
         </p>
       </div>
 
@@ -108,15 +106,7 @@ export default function SalesModule({
         }
       >
         {activeTab === 'crm' && (
-          <CrmProspekModule
-            onBuatQuotation={(pel) => {
-              setQuotationPelanggan(pel);
-              pilihTab('quotation');
-            }}
-          />
-        )}
-        {activeTab === 'quotation' && (
-          <QuotationModule currentRole={currentRole} pelangganAwal={quotationPelanggan} />
+          <CrmProspekModule onBuatQuotation={onBuatQuotationUntukPelanggan} />
         )}
         {activeTab === 'tender' && <TenderKontrakModule />}
         {activeTab === 'sfa' && <SalesForceModule />}
