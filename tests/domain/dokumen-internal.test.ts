@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { JenisDokumenInternal, KategoriDokumenInternal } from '../../src/types';
 import {
   SKEMA_DOKUMEN_INTERNAL,
+  ambilDetailHargaPoUmum,
   ambilSkemaDokumen,
   buatContohDokumenInternalAwal,
   buatDokumenInternalBaru,
@@ -11,6 +12,7 @@ import {
   evaluasiAksiWorkflow,
   hakAksesPeranDokumen,
   hitungRingkasanFinansialDokumen,
+  hitungSubtotalPoUmum,
   jalankanTransisiWorkflow,
   konversiDokumenKeTurunan,
   konversiQuotationLegacyKeDokumenInternal,
@@ -27,6 +29,7 @@ const JENIS_WAJIB: Array<{ jenis: JenisDokumenInternal; kategori: KategoriDokume
   { jenis: 'retur_recall', kategori: 'operasional_logistik' },
   { jenis: 'purchase_requisition', kategori: 'pengadaan' },
   { jenis: 'purchase_order', kategori: 'pengadaan' },
+  { jenis: 'purchase_order_umum', kategori: 'pengadaan' },
   { jenis: 'evaluasi_supplier', kategori: 'pengadaan' },
   { jenis: 'permintaan_demo', kategori: 'teknis_after_sales' },
   { jenis: 'ba_instalasi', kategori: 'teknis_after_sales' },
@@ -39,14 +42,20 @@ const JENIS_WAJIB: Array<{ jenis: JenisDokumenInternal; kategori: KategoriDokume
 ];
 
 describe('Modul Dokumen Internal CDAKB — Skema, Penomoran, RBAC & Workflow', () => {
-  it('menyediakan seluruh 18 jenis dokumen lintas 6 kategori beserta kode form ISO dan field dinamis', () => {
-    expect(SKEMA_DOKUMEN_INTERNAL).toHaveLength(18);
+  it('menyediakan seluruh 19 jenis dokumen lintas 6 kategori beserta kode form ISO dan field dinamis', () => {
+    expect(SKEMA_DOKUMEN_INTERNAL).toHaveLength(19);
+    expect(SKEMA_DOKUMEN_INTERNAL.filter((skema) => skema.kategori === 'pengadaan').map((skema) => skema.jenis))
+      .toEqual(['purchase_requisition', 'purchase_order', 'evaluasi_supplier', 'purchase_order_umum']);
     for (const item of JENIS_WAJIB) {
       const skema = ambilSkemaDokumen(item.jenis);
       expect(skema.jenis).toBe(item.jenis);
       expect(skema.kategori).toBe(item.kategori);
       expect(skema.kodeFormIso).toMatch(/^FRM-/);
-      expect(skema.fields.length).toBeGreaterThanOrEqual(3);
+      if (item.jenis !== 'purchase_order_umum') {
+        expect(skema.fields.length).toBeGreaterThanOrEqual(3);
+      } else {
+        expect(skema.fields.length).toBeGreaterThanOrEqual(1);
+      }
       expect(skema.tahapPersetujuan).toHaveLength(2);
     }
   });
@@ -401,6 +410,139 @@ describe('Modul Dokumen Internal CDAKB — Skema, Penomoran, RBAC & Workflow', (
     expect(turunanDo.pihakTerkait.instansi).toBe('RSUD Kebayoran Baru');
     expect(turunanDo.items).toHaveLength(1);
     expect(turunanDo.items[0].namaProduk).toBe('Patient Monitor 5 Parameter');
+  });
+
+  it('mendukung Purchase Order (PO) Umum tanpa Syarat Pembayaran & tabel terlampir, dengan grup Detail + Harga berulang dan Subtotal', () => {
+    const skemaPoUmum = ambilSkemaDokumen('purchase_order_umum');
+    expect(skemaPoUmum.kategori).toBe('pengadaan');
+    expect(skemaPoUmum.wajibTraceabilityAlkes).toBe(false);
+    expect(skemaPoUmum.tampilkanNilaiFinansial).toBe(true);
+    expect(skemaPoUmum.fields.map((f) => f.key)).toEqual(['metodePembayaran']);
+    expect(skemaPoUmum.fields.some((f) => f.key === 'syaratPembayaran')).toBe(false);
+
+    const draft = buatDokumenInternalBaru({
+      jenis: 'purchase_order_umum',
+      daftarAda: [],
+      namaPembuat: 'Dewi Purchasing',
+      peranPembuat: 'purchasing',
+      tanggalIso: '2026-11-22'
+    });
+    expect(draft.nomorDokumen).toBe('POU/AMS/2026/11/001');
+    expect(draft.kodeFormIso).toBe('FRM-PRC-04');
+    expect(draft.items).toEqual([]);
+    expect(draft.detailHargaPoUmum).toHaveLength(1);
+    expect(ambilDetailHargaPoUmum(draft)).toHaveLength(1);
+
+    // Submit dengan Detail kosong -> ditolak
+    const gagalKosong = jalankanTransisiWorkflow(draft, 'submit', {
+      nama: 'Dewi Purchasing',
+      role: 'purchasing'
+    });
+    expect(gagalKosong.ok).toBe(false);
+
+    // Lengkapi Prinsipal manual, >1 group Detail & Harga di Spesifikasi, dan Metode Pembayaran (tanpa items terlampir)
+    const poSiap = {
+      ...draft,
+      judul: 'Pengadaan Laptop Kerja & Perpanjangan Hosting Website',
+      pihakTerkait: {
+        ...draft.pihakTerkait,
+        instansi: 'PT Solusi Komputasi & Cloud Nusantara',
+        namaPihak: 'Rizky Pratama'
+      },
+      detailHargaPoUmum: [
+        {
+          id: 'po-det-1',
+          detail: '2 unit Laptop Kerja Core i7 / 16GB / 1TB SSD',
+          harga: 29000000
+        },
+        {
+          id: 'po-det-2',
+          detail: 'Layanan Hosting & Domain Website Perusahaan (12 Bulan)',
+          harga: 4200000
+        }
+      ],
+      dataDinamis: {
+        metodePembayaran: 'Transfer bank'
+      }
+    };
+
+    expect(hitungSubtotalPoUmum(poSiap.detailHargaPoUmum)).toBe(33200000);
+    expect(hitungRingkasanFinansialDokumen(poSiap).subtotal).toBe(33200000);
+
+    // Jika salah satu group memiliki Detail kosong -> submit ditolak
+    const gagalSebagianKosong = jalankanTransisiWorkflow(
+      {
+        ...poSiap,
+        detailHargaPoUmum: [...poSiap.detailHargaPoUmum, { id: 'po-det-3', detail: '   ', harga: 500000 }]
+      },
+      'submit',
+      { nama: 'Dewi Purchasing', role: 'purchasing' }
+    );
+    expect(gagalSebagianKosong.ok).toBe(false);
+
+    const resSubmit = jalankanTransisiWorkflow(poSiap, 'submit', {
+      nama: 'Dewi Purchasing',
+      role: 'purchasing'
+    });
+    expect(resSubmit.ok).toBe(true);
+    if (!resSubmit.ok) return;
+    expect(resSubmit.dokumen.status).toBe('Submitted');
+
+    const resReview = jalankanTransisiWorkflow(resSubmit.dokumen, 'review', {
+      nama: 'Budi Manager',
+      role: 'qa_manager'
+    });
+    expect(resReview.ok).toBe(true);
+    if (!resReview.ok) return;
+
+    const resApprove = jalankanTransisiWorkflow(resReview.dokumen, 'approve', {
+      nama: 'Direktur Operasional',
+      role: 'developer_it_support'
+    });
+    expect(resApprove.ok).toBe(true);
+    if (!resApprove.ok) return;
+    expect(resApprove.dokumen.status).toBe('Approved');
+  });
+
+  it('mempertahankan detail, syarat pembayaran dan nilai item PO Umum lama', () => {
+    const draft = buatDokumenInternalBaru({
+      jenis: 'purchase_order_umum',
+      daftarAda: [],
+      namaPembuat: 'Purchasing',
+      peranPembuat: 'purchasing'
+    });
+    const legacy = {
+      ...draft,
+      detailHargaPoUmum: undefined,
+      dataDinamis: { details: 'Spesifikasi lama', syaratPembayaran: 'Net 30 hari', metodePembayaran: 'Transfer' },
+      items: [{
+        id: 'legacy-item',
+        namaProduk: 'Laptop',
+        tipeModel: '',
+        nomorIzinEdar: '',
+        nomorBatch: '',
+        expiredDate: '',
+        qty: 2,
+        satuan: 'Unit',
+        hargaSatuan: 1000,
+        diskonPersen: 10
+      }]
+    };
+    const groups = ambilDetailHargaPoUmum(legacy);
+    expect(groups[0].detail).toContain('Spesifikasi lama');
+    expect(groups[0].detail).toContain('Net 30 hari');
+    expect(groups[1]).toMatchObject({ detail: 'Laptop — 2 Unit', harga: 1800 });
+    expect(hitungRingkasanFinansialDokumen(legacy).subtotal).toBe(1800);
+
+    const pr = { ...legacy, jenisDokumen: 'purchase_requisition' as const };
+    const hasil = konversiDokumenKeTurunan({
+      sumber: pr,
+      targetJenis: 'purchase_order_umum',
+      daftarAda: [],
+      namaPembuat: 'Purchasing',
+      peranPembuat: 'purchasing'
+    });
+    expect(hasil.detailHargaPoUmum?.[0]).toMatchObject({ detail: 'Laptop — 2 Unit', harga: 1800 });
   });
 });
 

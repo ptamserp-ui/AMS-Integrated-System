@@ -2065,6 +2065,7 @@ export type JenisDokumenInternal =
   | 'retur_recall'
   | 'purchase_requisition'
   | 'purchase_order'
+  | 'purchase_order_umum'
   | 'evaluasi_supplier'
   | 'permintaan_demo'
   | 'ba_instalasi'
@@ -2194,6 +2195,12 @@ export interface TandaTanganDigitalDokumen {
   jabatanUtama?: string;
 }
 
+export interface DetailHargaPoUmum {
+  id: string;
+  detail: string;
+  harga: number;
+}
+
 export interface DokumenInternal {
   id: string;
   nomorDokumen: string;
@@ -2212,6 +2219,7 @@ export interface DokumenInternal {
   ringkasan: string;
   pihakTerkait: PihakTerkaitDokumen;
   dataDinamis: Record<string, string | number | boolean>;
+  detailHargaPoUmum?: DetailHargaPoUmum[];
   items: ItemAlkesDokumenInternal[];
   alurPersetujuan: LangkahPersetujuanDokumen[];
   riwayatRevisi: RevisiDokumenInternal[];

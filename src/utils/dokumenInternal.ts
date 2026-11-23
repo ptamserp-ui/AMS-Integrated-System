@@ -1,4 +1,5 @@
 import type {
+  DetailHargaPoUmum,
   DokumenInternal,
   ItemAlkesDokumenInternal,
   JenisDokumenInternal,
@@ -33,7 +34,7 @@ export const KATEGORI_DOKUMEN_META: Record<
   pengadaan: {
     label: 'Pengadaan',
     warnaAksen: '#1d4ed8',
-    deskripsi: 'Purchase Requisition (PR), Purchase Order (PO), dan Evaluasi Kualifikasi Supplier/Prinsipal.'
+    deskripsi: 'Purchase Requisition (PR), Purchase Order (PO) Alkes, PO Umum (Non-Alkes), dan Evaluasi Supplier.'
   },
   teknis_after_sales: {
     label: 'Teknis & After-Sales',
@@ -515,6 +516,32 @@ export const SKEMA_DOKUMEN_INTERNAL: SkemaJenisDokumen[] = [
       { urutan: 2, labelTahap: 'Pengesahan Approved Vendor List oleh PJT / QA Manager', peranWajib: ['pjt', 'manager', 'direktur'], targetStatusSetelahAksi: 'Approved' }
     ]
   },
+  {
+    jenis: 'purchase_order_umum',
+    kategori: 'pengadaan',
+    nama: 'Purchase Order (PO) Umum',
+    kodeNomor: 'POU',
+    kodeFormIso: 'FRM-PRC-04',
+    versiForm: 'Rev.01',
+    departemenDefault: 'Purchasing & Umum',
+    deskripsi: 'Pembelian barang dan jasa di luar kebutuhan alkes (contoh: pembelian komputer, pembayaran hosting website, pembayaran jasa Event Organizer, dll.).',
+    wajibTraceabilityAlkes: false,
+    tampilkanNilaiFinansial: true,
+    labelPihakTerkait: 'Requested by:',
+    fields: [
+      {
+        key: 'metodePembayaran',
+        label: 'Metode Pembayaran',
+        type: 'text',
+        placeholder: 'Contoh: Transfer Bank BCA / Virtual Account / Kartu Kredit / Tunai',
+        fullWidth: true
+      }
+    ],
+    tahapPersetujuan: [
+      { urutan: 1, labelTahap: 'Review Spesifikasi & Anggaran oleh Manager / PJT', peranWajib: ['manager', 'pjt'], targetStatusSetelahAksi: 'Reviewed' },
+      { urutan: 2, labelTahap: 'Otorisasi Pembelian Umum oleh Direktur / Manager', peranWajib: ['direktur', 'manager'], targetStatusSetelahAksi: 'Approved' }
+    ]
+  },
 
   // ==================== 3. TEKNIS & AFTER-SALES ====================
   {
@@ -865,6 +892,17 @@ export function buatDokumenInternalBaru(params: {
       alamat: ''
     },
     dataDinamis: buatDataDinamisAwal(skema.jenis),
+    ...(skema.jenis === 'purchase_order_umum'
+      ? {
+          detailHargaPoUmum: [
+            {
+              id: `po-det-${crypto.randomUUID().slice(0, 8)}`,
+              detail: '',
+              harga: 0
+            }
+          ]
+        }
+      : {}),
     items: [],
     alurPersetujuan: buatAlurPersetujuanAwal(skema.jenis),
     riwayatRevisi: [
@@ -1014,6 +1052,16 @@ export function validasiSebelumSubmit(doc: DokumenInternal): string | null {
     const val = doc.dataDinamis[field.key];
     if (val === undefined || val === null || String(val).trim() === '') {
       return `Kolom wajib "${field.label}" belum diisi.`;
+    }
+  }
+  if (doc.jenisDokumen === 'purchase_order_umum') {
+    const groups = ambilDetailHargaPoUmum(doc);
+    if (groups.length === 0 || groups.every((g) => !g.detail.trim())) {
+      return 'Isi minimal 1 group Detail & Harga pada bagian Spesifikasi Purchase Order (PO) Umum sebelum diajukan.';
+    }
+    const emptyDetail = groups.find((g) => !g.detail.trim());
+    if (emptyDetail) {
+      return 'Kolom Detail wajib diisi pada setiap group Detail & Harga di bagian Spesifikasi.';
     }
   }
   if (skema.wajibTraceabilityAlkes && doc.items.length > 0) {
@@ -1349,6 +1397,54 @@ export function jalankanTransisiWorkflow(
   };
 }
 
+function ubahItemKeDetailHargaPoUmum(item: ItemAlkesDokumenInternal, id: string): DetailHargaPoUmum {
+  return {
+    id,
+    detail: [item.namaProduk, `${item.qty || 0} ${item.satuan || 'Unit'}`].filter(Boolean).join(' — '),
+    harga: Math.max(0, hitungNilaiTotalItems([item]))
+  };
+}
+
+export function ambilDetailHargaPoUmum(
+  doc: Pick<DokumenInternal, 'detailHargaPoUmum' | 'dataDinamis' | 'items'>
+): DetailHargaPoUmum[] {
+  if (Array.isArray(doc.detailHargaPoUmum) && doc.detailHargaPoUmum.length > 0) {
+    return doc.detailHargaPoUmum.map((g, idx) => ({
+      id: g.id || `po-det-${idx + 1}`,
+      detail: String(g.detail ?? ''),
+      harga: Math.max(0, Math.round(Number(g.harga) || 0))
+    }));
+  }
+
+  const legacyDetails = String(doc.dataDinamis?.details ?? '').trim();
+  const legacyTerms = String(doc.dataDinamis?.syaratPembayaran ?? '').trim();
+  const legacyNotes = [
+    legacyDetails ? `Spesifikasi sebelumnya: ${legacyDetails}` : '',
+    legacyTerms ? `Syarat pembayaran sebelumnya: ${legacyTerms}` : ''
+  ].filter(Boolean).join('\n');
+  const legacyItems = (doc.items || []).map((item, idx) =>
+    ubahItemKeDetailHargaPoUmum(item, item.id || `po-det-legacy-${idx + 1}`)
+  );
+  if (legacyNotes || legacyItems.length > 0) {
+    return [
+      ...(legacyNotes ? [{ id: 'po-det-legacy-notes', detail: legacyNotes, harga: 0 }] : []),
+      ...legacyItems
+    ];
+  }
+
+  return [
+    {
+      id: 'po-det-1',
+      detail: '',
+      harga: 0
+    }
+  ];
+}
+
+export function hitungSubtotalPoUmum(groups: DetailHargaPoUmum[]): number {
+  return groups.reduce((total, g) => total + Math.max(0, Math.round(Number(g.harga) || 0)), 0);
+}
+
 export function hitungNilaiTotalItems(items: ItemAlkesDokumenInternal[]): number {
   return items.reduce((total, it) => {
     const kotor = (it.qty || 0) * (it.hargaSatuan || 0);
@@ -1369,8 +1465,13 @@ export interface RingkasanFinansialDokumen {
   total: number;
 }
 
-export function hitungRingkasanFinansialDokumen(doc: Pick<DokumenInternal, 'items' | 'dataDinamis' | 'jenisDokumen'>): RingkasanFinansialDokumen {
-  const subtotal = hitungNilaiTotalItems(doc.items);
+export function hitungRingkasanFinansialDokumen(
+  doc: Pick<DokumenInternal, 'items' | 'dataDinamis' | 'jenisDokumen' | 'detailHargaPoUmum'>
+): RingkasanFinansialDokumen {
+  const subtotal =
+    doc.jenisDokumen === 'purchase_order_umum'
+      ? hitungSubtotalPoUmum(ambilDetailHargaPoUmum(doc))
+      : hitungNilaiTotalItems(doc.items);
   const rawDiskon = Number(doc.dataDinamis.diskonGlobalRp || 0);
   const diskonGlobal = Number.isFinite(rawDiskon) ? Math.max(0, Math.min(subtotal, rawDiskon)) : 0;
   const dpp = Math.max(0, subtotal - diskonGlobal);
@@ -1405,7 +1506,8 @@ export const TARGET_KONVERSI_DOKUMEN: Partial<
     { jenis: 'ba_instalasi', label: 'Buat BA Instalasi' }
   ],
   purchase_requisition: [
-    { jenis: 'purchase_order', label: 'Terbitkan Purchase Order (PO)' }
+    { jenis: 'purchase_order', label: 'Terbitkan Purchase Order (PO)' },
+    { jenis: 'purchase_order_umum', label: 'Terbitkan PO Umum (Non-Alkes)' }
   ],
   ncr: [
     { jenis: 'capa', label: 'Buka Tindakan CAPA' }
@@ -1447,6 +1549,15 @@ export function konversiDokumenKeTurunan(params: {
     dataDinamisBaru.tujuanPenggunaan = `${params.sumber.nomorDokumen} — ${params.sumber.pihakTerkait.instansi || params.sumber.judul}`;
   }
 
+  const isTargetPoUmum = params.targetJenis === 'purchase_order_umum';
+  const detailHargaPoUmumBaru = isTargetPoUmum
+    ? params.sumber.items.length > 0
+      ? params.sumber.items.map((item) =>
+          ubahItemKeDetailHargaPoUmum(item, `po-det-${crypto.randomUUID().slice(0, 8)}`)
+        )
+      : base.detailHargaPoUmum
+    : undefined;
+
   return {
     ...base,
     judul: `${skemaTarget.nama} (${params.sumber.pihakTerkait.instansi || params.sumber.nomorDokumen})`,
@@ -1454,10 +1565,13 @@ export function konversiDokumenKeTurunan(params: {
     prioritas: params.sumber.prioritas,
     pihakTerkait: { ...params.sumber.pihakTerkait },
     dataDinamis: dataDinamisBaru,
-    items: params.sumber.items.map((it) => ({
-      ...it,
-      id: `item-${crypto.randomUUID().slice(0, 8)}`
-    })),
+    ...(detailHargaPoUmumBaru ? { detailHargaPoUmum: detailHargaPoUmumBaru } : {}),
+    items: isTargetPoUmum
+      ? []
+      : params.sumber.items.map((it) => ({
+          ...it,
+          id: `item-${crypto.randomUUID().slice(0, 8)}`
+        })),
     riwayatRevisi: [
       {
         revisiKe: 0,

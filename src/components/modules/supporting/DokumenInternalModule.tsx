@@ -30,6 +30,7 @@ import { useDbTick } from '../../../hooks/useDbSync';
 import { db } from '../../../services/pocketbase';
 import type {
   DefinisiFieldDinamis,
+  DetailHargaPoUmum,
   DokumenInternal,
   IdentitasKopDokumenInternal,
   ItemAlkesDokumenInternal,
@@ -50,6 +51,7 @@ import {
   SKEMA_DOKUMEN_INTERNAL,
   STATUS_DOKUMEN_URUT,
   TARGET_KONVERSI_DOKUMEN,
+  ambilDetailHargaPoUmum,
   ambilSkemaDokumen,
   buatContohDokumenInternalAwal,
   buatDokumenInternalBaru,
@@ -60,6 +62,7 @@ import {
   hakAksesPeranDokumen,
   hitungNilaiTotalItems,
   hitungRingkasanFinansialDokumen,
+  hitungSubtotalPoUmum,
   jalankanTransisiWorkflow,
   konversiDokumenKeTurunan,
   konversiQuotationLegacyKeDokumenInternal,
@@ -457,7 +460,8 @@ export default function DokumenInternalModule({
       const itemText = doc.items
         .map((i) => `${i.namaProduk} ${i.nomorBatch} ${i.nomorIzinEdar} ${i.nomorSerial ?? ''}`)
         .join(' ');
-      return `${doc.nomorDokumen} ${doc.judul} ${doc.kodeFormIso} ${doc.departemen} ${doc.pihakTerkait.instansi} ${itemText}`
+      const poDetailText = (doc.detailHargaPoUmum ?? []).map((g) => g.detail).join(' ');
+      return `${doc.nomorDokumen} ${doc.judul} ${doc.kodeFormIso} ${doc.departemen} ${doc.pihakTerkait.instansi} ${itemText} ${poDetailText}`
         .toLowerCase()
         .includes(q);
     });
@@ -475,11 +479,23 @@ export default function DokumenInternalModule({
   }, [daftar]);
 
   const skemaAktif = useMemo(() => ambilSkemaDokumen(draf.jenisDokumen), [draf.jenisDokumen]);
+  const adalahPoUmum = draf.jenisDokumen === 'purchase_order_umum';
+  const detailHargaPoUmum = useMemo(
+    () => (adalahPoUmum ? ambilDetailHargaPoUmum(draf) : []),
+    [adalahPoUmum, draf]
+  );
+  const subtotalPoUmum = useMemo(() => hitungSubtotalPoUmum(detailHargaPoUmum), [detailHargaPoUmum]);
   const katAktif = KATEGORI_DOKUMEN_META[draf.kategori];
   const aksiWorkflow = useMemo(
     () => evaluasiAksiWorkflow(draf, currentRole, sesi),
     [draf, currentRole, sesi]
   );
+
+  useEffect(() => {
+    if (adalahPoUmum && subPanel === 'items') {
+      setSubPanel('form');
+    }
+  }, [adalahPoUmum, subPanel]);
 
   const logoResolved = useMemo(() => selesaikanGambar(identitas.logoUrl), [identitas.logoUrl]);
 
@@ -593,6 +609,9 @@ export default function DokumenInternalModule({
       tanggalBerlaku: today,
       status: 'Draft',
       revisiKe: 0,
+      ...(draf.detailHargaPoUmum
+        ? { detailHargaPoUmum: draf.detailHargaPoUmum.map((g) => ({ ...g })) }
+        : {}),
       alurPersetujuan: draf.alurPersetujuan.map((l) => ({
         urutan: l.urutan,
         labelTahap: l.labelTahap,
@@ -765,7 +784,7 @@ export default function DokumenInternalModule({
       id: `item-${crypto.randomUUID().slice(0, 8)}`,
       namaProduk: '',
       tipeModel: '',
-      nomorIzinEdar: 'KEMENKES RI AKL ',
+      nomorIzinEdar: adalahPoUmum ? '' : 'KEMENKES RI AKL ',
       nomorBatch: '',
       expiredDate: '',
       nomorSerial: '',
@@ -774,8 +793,8 @@ export default function DokumenInternalModule({
       hargaSatuan: 0,
       diskonPersen: 0,
       spesifikasi: '',
-      suhuPenyimpanan: '15–25°C',
-      kondisiFisik: 'Baik'
+      suhuPenyimpanan: adalahPoUmum ? '' : '15–25°C',
+      kondisiFisik: adalahPoUmum ? '' : 'Baik'
     };
     setDraf((prev) => ({ ...prev, items: [...prev.items, baru] }));
   };
@@ -792,6 +811,36 @@ export default function DokumenInternalModule({
       ...prev,
       items: prev.items.filter((it) => it.id !== itemId)
     }));
+  };
+
+  const tambahGroupPoUmum = () => {
+    const baru: DetailHargaPoUmum = {
+      id: `po-det-${crypto.randomUUID().slice(0, 8)}`,
+      detail: '',
+      harga: 0
+    };
+    setDraf((prev) => ({
+      ...prev,
+      detailHargaPoUmum: [...ambilDetailHargaPoUmum(prev), baru]
+    }));
+  };
+
+  const perbaruiGroupPoUmum = (groupId: string, patch: Partial<DetailHargaPoUmum>) => {
+    setDraf((prev) => ({
+      ...prev,
+      detailHargaPoUmum: ambilDetailHargaPoUmum(prev).map((g) => (g.id === groupId ? { ...g, ...patch } : g))
+    }));
+  };
+
+  const hapusGroupPoUmum = (groupId: string) => {
+    setDraf((prev) => {
+      const current = ambilDetailHargaPoUmum(prev);
+      if (current.length <= 1) return prev;
+      return {
+        ...prev,
+        detailHargaPoUmum: current.filter((g) => g.id !== groupId)
+      };
+    });
   };
 
   const simpanIdentitasKop = (next?: IdentitasKopDokumenInternal) => {
@@ -927,7 +976,7 @@ export default function DokumenInternalModule({
               Internal Document
             </h2>
             <p className="text-xs text-slate-600 mt-1 max-w-3xl leading-relaxed">
-              Standarisasi 18 formulir terstandar lintas 6 kategori (termasuk Quotation B2B/LKPP) dengan auto-numbering, form input dinamis, ketertelusuran NIE AKL/AKD &amp; Batch FEFO, approval berjenjang, serta PDF A4 ber-QR Code.
+              Standarisasi {SKEMA_DOKUMEN_INTERNAL.length} formulir terstandar lintas 6 kategori (termasuk Quotation B2B/LKPP &amp; PO Umum) dengan auto-numbering, form input dinamis, ketertelusuran NIE AKL/AKD &amp; Batch FEFO, approval berjenjang, serta PDF A4 ber-QR Code.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -1155,7 +1204,7 @@ export default function DokumenInternalModule({
             {(
               [
                 ['form', 'Form Dinamis', FileText],
-                ['items', `Alkes (${draf.items.length})`, PackagePlus],
+                ...(!adalahPoUmum ? ([['items', `Alkes (${draf.items.length})`, PackagePlus]] as const) : []),
                 ['workflow', 'Approval & Revisi', History],
                 ['daftar', `Daftar (${daftar.length})`, ClipboardList],
                 ['kop', 'Kop Surat', Settings2],
@@ -1240,7 +1289,7 @@ export default function DokumenInternalModule({
                 <div className="pt-3 border-t border-slate-200 space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h4 className="text-xs font-bold text-slate-800">{skemaAktif.labelPihakTerkait}</h4>
-                    {pelangganList.length > 0 && (
+                    {!adalahPoUmum && pelangganList.length > 0 && (
                       <select
                         value=""
                         disabled={!aksiWorkflow.dapatEditKonten}
@@ -1271,10 +1320,13 @@ export default function DokumenInternalModule({
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className={labelClass}>Instansi / Bagian</label>
+                      <label className={labelClass}>
+                        {adalahPoUmum ? 'Prinsipal / Vendor (Isi Manual)' : 'Instansi / Bagian'}
+                      </label>
                       <input
                         type="text"
                         value={draf.pihakTerkait.instansi}
+                        placeholder={adalahPoUmum ? 'Contoh: PT Vendor Teknologi / Penyedia Hosting / EO' : undefined}
                         onChange={(e) =>
                           setDraf((p) => ({
                             ...p,
@@ -1343,38 +1395,157 @@ export default function DokumenInternalModule({
                   </div>
                 </div>
 
-                {/* Dynamic Fields sesuai skema jenis dokumen */}
+                {/* Dynamic Fields sesuai skema jenis dokumen / Spesifikasi */}
                 <div className="pt-3 border-t border-slate-200 space-y-3">
-                  <h4 className="text-xs font-bold text-slate-800">
-                    Field Khusus Formulir ({skemaAktif.kodeFormIso})
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {skemaAktif.fields.map(renderDynamicField)}
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-xs font-bold text-slate-800">
+                      {adalahPoUmum
+                        ? `Spesifikasi (${skemaAktif.kodeFormIso})`
+                        : `Field Khusus Formulir (${skemaAktif.kodeFormIso})`}
+                    </h4>
+                    {adalahPoUmum && aksiWorkflow.dapatEditKonten && (
+                      <button
+                        type="button"
+                        onClick={tambahGroupPoUmum}
+                        className={`${tombolSekunder} inline-flex items-center gap-1 font-semibold`}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Tambah Group
+                      </button>
+                    )}
                   </div>
+
+                  {adalahPoUmum ? (
+                    <div className="space-y-3">
+                      {detailHargaPoUmum.map((group, idx) => (
+                        <div
+                          key={group.id}
+                          className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-800">
+                              Detail &amp; Harga #{idx + 1}
+                            </span>
+                            {aksiWorkflow.dapatEditKonten && detailHargaPoUmum.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => hapusGroupPoUmum(group.id)}
+                                className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                                aria-label={`Hapus group detail & harga ${idx + 1}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <div>
+                            <label className={labelClass}>
+                              Detail <span className="text-rose-600">*</span>
+                            </label>
+                            <textarea
+                              rows={2}
+                              disabled={!aksiWorkflow.dapatEditKonten}
+                              value={group.detail}
+                              placeholder="Tuliskan detail barang/jasa (contoh: 2 unit Laptop Core i7 RAM 16GB / Paket Hosting 1 Tahun / Jasa Event Organizer)..."
+                              onChange={(e) =>
+                                perbaruiGroupPoUmum(group.id, { detail: e.target.value })
+                              }
+                              className={`${inputClass} bg-white disabled:bg-slate-50`}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Harga (Rp)</label>
+                            <input
+                              type="number"
+                              min={0}
+                              disabled={!aksiWorkflow.dapatEditKonten}
+                              value={group.harga}
+                              onChange={(e) =>
+                                perbaruiGroupPoUmum(group.id, {
+                                  harga: Math.max(0, Number(e.target.value) || 0)
+                                })
+                              }
+                              className={`${inputClass} bg-white disabled:bg-slate-50`}
+                            />
+                          </div>
+                        </div>
+                      ))}
+
+                      {aksiWorkflow.dapatEditKonten && (
+                        <button
+                          type="button"
+                          onClick={tambahGroupPoUmum}
+                          className="w-full py-2 rounded-xl border border-dashed border-slate-300 hover:border-teal-500 hover:bg-teal-50/40 text-xs font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5 text-teal-700" />
+                          Tambah Detail &amp; Harga
+                        </button>
+                      )}
+
+                      <div className="rounded-xl border border-teal-200 bg-teal-50/70 px-3.5 py-2.5 flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-800">Subtotal</span>
+                        <span className="font-mono font-bold text-teal-900">
+                          {formatRupiah(subtotalPoUmum)}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {skemaAktif.fields.map(renderDynamicField)}
+                    </div>
+                  )}
                 </div>
+
+                {adalahPoUmum && (
+                  <div className="pt-3 border-t border-slate-200 space-y-2">
+                    <label className={labelClass}>Metode Pembayaran (Isi Manual)</label>
+                    <input
+                      type="text"
+                      disabled={!aksiWorkflow.dapatEditKonten}
+                      value={String(draf.dataDinamis.metodePembayaran ?? '')}
+                      placeholder="Contoh: Transfer Bank BCA / Virtual Account / Kartu Kredit / Tunai"
+                      onChange={(e) =>
+                        setDraf((prev) => ({
+                          ...prev,
+                          dataDinamis: { ...prev.dataDinamis, metodePembayaran: e.target.value }
+                        }))
+                      }
+                      className={`${inputClass} disabled:bg-slate-50`}
+                    />
+                  </div>
+                )}
               </fieldset>
             </Panel>
           )}
 
-          {subPanel === 'items' && (
+          {subPanel === 'items' && !adalahPoUmum && (
             <Panel
-              judul="Ketertelusuran Alkes (AKL/AKD, Batch & ED)"
-              keterangan="Setiap baris item terhubung ke Nomor Izin Edar Kemenkes RI, Nomor Batch/Lot, dan Expired Date sesuai CDAKB."
+              judul={adalahPoUmum ? 'Rincian Produk / Jasa (PO Umum)' : 'Ketertelusuran Alkes (AKL/AKD, Batch & ED)'}
+              keterangan={
+                adalahPoUmum
+                  ? 'Isi manual Nama Produk/Jasa, Qty/Durasi, dan Harga untuk pembelian barang dan jasa di luar kebutuhan alkes.'
+                  : 'Setiap baris item terhubung ke Nomor Izin Edar Kemenkes RI, Nomor Batch/Lot, dan Expired Date sesuai CDAKB.'
+              }
               aksi={
                 aksiWorkflow.dapatEditKonten && (
                   <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setModalAlkesTerbuka(true)}
-                      className={tombolPrimer}
-                    >
-                      <PackagePlus className="w-3.5 h-3.5" />
-                      Pilih dari Stok/NIE
-                    </button>
+                    {!adalahPoUmum && (
+                      <button
+                        type="button"
+                        onClick={() => setModalAlkesTerbuka(true)}
+                        className={tombolPrimer}
+                      >
+                        <PackagePlus className="w-3.5 h-3.5" />
+                        Pilih dari Stok/NIE
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={tambahItemKosong}
-                      className={`${tombolSekunder} inline-flex items-center gap-1 font-semibold`}
+                      className={
+                        adalahPoUmum
+                          ? tombolPrimer
+                          : `${tombolSekunder} inline-flex items-center gap-1 font-semibold`
+                      }
                     >
                       <Plus className="w-3.5 h-3.5" />
                       Baris Manual
@@ -1387,159 +1558,233 @@ export default function DokumenInternalModule({
                 {draf.items.length === 0 && (
                   <div className="p-6 rounded-xl border border-dashed border-slate-300 text-center text-xs text-slate-500 space-y-2">
                     <p>
-                      {skemaAktif.wajibTraceabilityAlkes
-                        ? 'Tambahkan minimal 1 item alkes dengan NIE AKL/AKD dan Nomor Batch untuk kelengkapan dokumen ini.'
-                        : 'Dokumen kategori ini tidak mewajibkan rincian batch alkes, namun tetap dapat dilampirkan bila relevan.'}
+                      {adalahPoUmum
+                        ? 'Tambahkan minimal 1 item Nama Produk/Jasa, Qty/Durasi, dan Harga secara manual.'
+                        : skemaAktif.wajibTraceabilityAlkes
+                          ? 'Tambahkan minimal 1 item alkes dengan NIE AKL/AKD dan Nomor Batch untuk kelengkapan dokumen ini.'
+                          : 'Dokumen kategori ini tidak mewajibkan rincian batch alkes, namun tetap dapat dilampirkan bila relevan.'}
                     </p>
                   </div>
                 )}
 
-                {draf.items.map((item, idx) => (
-                  <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-slate-800">Item #{idx + 1}</span>
-                      {aksiWorkflow.dapatEditKonten && (
-                        <button
-                          type="button"
-                          onClick={() => hapusItem(item.id)}
-                          className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
-                          aria-label="Hapus item alkes"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-                      <div className="sm:col-span-2">
-                        <label className={labelClass}>Nama Alkes / Produk</label>
-                        <input
-                          disabled={!aksiWorkflow.dapatEditKonten}
-                          value={item.namaProduk}
-                          onChange={(e) => perbaruiItem(item.id, { namaProduk: e.target.value })}
-                          className={`${inputClass} bg-white`}
-                        />
+                {draf.items.map((item, idx) =>
+                  adalahPoUmum ? (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-800">Produk / Jasa #{idx + 1}</span>
+                        {aksiWorkflow.dapatEditKonten && (
+                          <button
+                            type="button"
+                            onClick={() => hapusItem(item.id)}
+                            className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                            aria-label="Hapus item produk/jasa"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
-                      <div>
-                        <label className={labelClass}>Nomor Izin Edar (AKL/AKD)</label>
-                        <input
-                          disabled={!aksiWorkflow.dapatEditKonten}
-                          value={item.nomorIzinEdar}
-                          onChange={(e) => perbaruiItem(item.id, { nomorIzinEdar: e.target.value })}
-                          className={`${inputClass} bg-white font-mono`}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Nomor Batch / Lot</label>
-                        <input
-                          disabled={!aksiWorkflow.dapatEditKonten}
-                          value={item.nomorBatch}
-                          onChange={(e) => perbaruiItem(item.id, { nomorBatch: e.target.value })}
-                          className={`${inputClass} bg-white font-mono`}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Expired Date (YYYY-MM-DD / -)</label>
-                        <input
-                          disabled={!aksiWorkflow.dapatEditKonten}
-                          value={item.expiredDate}
-                          placeholder="2028-12-31"
-                          onChange={(e) => perbaruiItem(item.id, { expiredDate: e.target.value })}
-                          className={`${inputClass} bg-white`}
-                        />
-                      </div>
-                      <div>
-                        <label className={labelClass}>Nomor Serial (Opsional)</label>
-                        <input
-                          disabled={!aksiWorkflow.dapatEditKonten}
-                          value={item.nomorSerial ?? ''}
-                          onChange={(e) => perbaruiItem(item.id, { nomorSerial: e.target.value })}
-                          className={`${inputClass} bg-white font-mono`}
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className={labelClass}>Qty</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        <div className="sm:col-span-2">
+                          <label className={labelClass}>Nama Produk/Jasa *</label>
                           <input
-                            type="number"
-                            min={1}
                             disabled={!aksiWorkflow.dapatEditKonten}
-                            value={item.qty}
-                            onChange={(e) => perbaruiItem(item.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                            value={item.namaProduk}
+                            placeholder="Contoh: Laptop Kerja / Hosting Website 1 Tahun / Jasa Event Organizer"
+                            onChange={(e) => perbaruiItem(item.id, { namaProduk: e.target.value })}
                             className={`${inputClass} bg-white`}
                           />
                         </div>
-                        <div>
-                          <label className={labelClass}>Satuan</label>
-                          <input
-                            disabled={!aksiWorkflow.dapatEditKonten}
-                            value={item.satuan}
-                            onChange={(e) => perbaruiItem(item.id, { satuan: e.target.value })}
-                            className={`${inputClass} bg-white`}
-                          />
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className={labelClass}>Qty/Durasi</label>
+                            <input
+                              type="number"
+                              min={1}
+                              disabled={!aksiWorkflow.dapatEditKonten}
+                              value={item.qty}
+                              onChange={(e) => perbaruiItem(item.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                              className={`${inputClass} bg-white`}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Satuan / Durasi</label>
+                            <input
+                              disabled={!aksiWorkflow.dapatEditKonten}
+                              value={item.satuan}
+                              placeholder="Unit / Paket / Bulan / Tahun"
+                              onChange={(e) => perbaruiItem(item.id, { satuan: e.target.value })}
+                              className={`${inputClass} bg-white`}
+                            />
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <label className={labelClass}>
-                          {skemaAktif.tampilkanNilaiFinansial ? 'Harga Satuan (Rp)' : 'Suhu / Kondisi Fisik'}
-                        </label>
-                        {skemaAktif.tampilkanNilaiFinansial ? (
+                        <div>
+                          <label className={labelClass}>Harga (Rp)</label>
                           <input
                             type="number"
                             min={0}
                             disabled={!aksiWorkflow.dapatEditKonten}
                             value={item.hargaSatuan ?? 0}
-                            onChange={(e) => perbaruiItem(item.id, { hargaSatuan: Math.max(0, Number(e.target.value) || 0) })}
+                            onChange={(e) =>
+                              perbaruiItem(item.id, { hargaSatuan: Math.max(0, Number(e.target.value) || 0) })
+                            }
                             className={`${inputClass} bg-white`}
                           />
-                        ) : (
-                          <input
-                            disabled={!aksiWorkflow.dapatEditKonten}
-                            value={item.kondisiFisik ?? ''}
-                            onChange={(e) => perbaruiItem(item.id, { kondisiFisik: e.target.value })}
-                            className={`${inputClass} bg-white`}
-                          />
+                        </div>
+                        <div className="sm:col-span-2 flex items-center justify-between pt-1.5 border-t border-slate-200 text-xs">
+                          <span className="text-slate-600 font-medium">Subtotal Baris</span>
+                          <span className="font-mono font-bold text-slate-900">
+                            {formatRupiah((item.qty || 0) * (item.hargaSatuan || 0))}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-800">Item #{idx + 1}</span>
+                        {aksiWorkflow.dapatEditKonten && (
+                          <button
+                            type="button"
+                            onClick={() => hapusItem(item.id)}
+                            className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                            aria-label="Hapus item alkes"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
-                      {skemaAktif.tampilkanNilaiFinansial && (
-                        <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                        <div className="sm:col-span-2">
+                          <label className={labelClass}>Nama Alkes / Produk</label>
+                          <input
+                            disabled={!aksiWorkflow.dapatEditKonten}
+                            value={item.namaProduk}
+                            onChange={(e) => perbaruiItem(item.id, { namaProduk: e.target.value })}
+                            className={`${inputClass} bg-white`}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Nomor Izin Edar (AKL/AKD)</label>
+                          <input
+                            disabled={!aksiWorkflow.dapatEditKonten}
+                            value={item.nomorIzinEdar}
+                            onChange={(e) => perbaruiItem(item.id, { nomorIzinEdar: e.target.value })}
+                            className={`${inputClass} bg-white font-mono`}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Nomor Batch / Lot</label>
+                          <input
+                            disabled={!aksiWorkflow.dapatEditKonten}
+                            value={item.nomorBatch}
+                            onChange={(e) => perbaruiItem(item.id, { nomorBatch: e.target.value })}
+                            className={`${inputClass} bg-white font-mono`}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Expired Date (YYYY-MM-DD / -)</label>
+                          <input
+                            disabled={!aksiWorkflow.dapatEditKonten}
+                            value={item.expiredDate}
+                            placeholder="2028-12-31"
+                            onChange={(e) => perbaruiItem(item.id, { expiredDate: e.target.value })}
+                            className={`${inputClass} bg-white`}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass}>Nomor Serial (Opsional)</label>
+                          <input
+                            disabled={!aksiWorkflow.dapatEditKonten}
+                            value={item.nomorSerial ?? ''}
+                            onChange={(e) => perbaruiItem(item.id, { nomorSerial: e.target.value })}
+                            className={`${inputClass} bg-white font-mono`}
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
-                            <label className={labelClass}>Diskon Item (%)</label>
+                            <label className={labelClass}>Qty</label>
+                            <input
+                              type="number"
+                              min={1}
+                              disabled={!aksiWorkflow.dapatEditKonten}
+                              value={item.qty}
+                              onChange={(e) => perbaruiItem(item.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                              className={`${inputClass} bg-white`}
+                            />
+                          </div>
+                          <div>
+                            <label className={labelClass}>Satuan</label>
+                            <input
+                              disabled={!aksiWorkflow.dapatEditKonten}
+                              value={item.satuan}
+                              onChange={(e) => perbaruiItem(item.id, { satuan: e.target.value })}
+                              className={`${inputClass} bg-white`}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className={labelClass}>
+                            {skemaAktif.tampilkanNilaiFinansial ? 'Harga Satuan (Rp)' : 'Suhu / Kondisi Fisik'}
+                          </label>
+                          {skemaAktif.tampilkanNilaiFinansial ? (
                             <input
                               type="number"
                               min={0}
-                              max={100}
                               disabled={!aksiWorkflow.dapatEditKonten}
-                              value={item.diskonPersen ?? 0}
-                              onChange={(e) =>
-                                perbaruiItem(item.id, {
-                                  diskonPersen: Math.max(0, Math.min(100, Number(e.target.value) || 0))
-                                })
-                              }
+                              value={item.hargaSatuan ?? 0}
+                              onChange={(e) => perbaruiItem(item.id, { hargaSatuan: Math.max(0, Number(e.target.value) || 0) })}
                               className={`${inputClass} bg-white`}
                             />
-                          </div>
-                          <div className="sm:col-span-2">
-                            <label className={labelClass}>Spesifikasi / Catatan Penawaran Item</label>
+                          ) : (
                             <input
                               disabled={!aksiWorkflow.dapatEditKonten}
-                              value={item.spesifikasi ?? ''}
-                              placeholder="Contoh: Layar 12.1 inch, 5-lead ECG, baterai cadangan..."
-                              onChange={(e) => perbaruiItem(item.id, { spesifikasi: e.target.value })}
+                              value={item.kondisiFisik ?? ''}
+                              onChange={(e) => perbaruiItem(item.id, { kondisiFisik: e.target.value })}
                               className={`${inputClass} bg-white`}
                             />
-                          </div>
-                        </>
-                      )}
+                          )}
+                        </div>
+                        {skemaAktif.tampilkanNilaiFinansial && (
+                          <>
+                            <div>
+                              <label className={labelClass}>Diskon Item (%)</label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                disabled={!aksiWorkflow.dapatEditKonten}
+                                value={item.diskonPersen ?? 0}
+                                onChange={(e) =>
+                                  perbaruiItem(item.id, {
+                                    diskonPersen: Math.max(0, Math.min(100, Number(e.target.value) || 0))
+                                  })
+                                }
+                                className={`${inputClass} bg-white`}
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className={labelClass}>Spesifikasi / Catatan Penawaran Item</label>
+                              <input
+                                disabled={!aksiWorkflow.dapatEditKonten}
+                                value={item.spesifikasi ?? ''}
+                                placeholder="Contoh: Layar 12.1 inch, 5-lead ECG, baterai cadangan..."
+                                onChange={(e) => perbaruiItem(item.id, { spesifikasi: e.target.value })}
+                                className={`${inputClass} bg-white`}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                )}
 
                 {skemaAktif.tampilkanNilaiFinansial && draf.items.length > 0 && (() => {
                   const fin = hitungRingkasanFinansialDokumen(draf);
                   return (
                     <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3 text-xs space-y-1">
                       <div className="flex justify-between text-slate-600">
-                        <span>Subtotal Item (DPP)</span>
+                        <span>{adalahPoUmum ? 'Subtotal' : 'Subtotal Item (DPP)'}</span>
                         <span className="font-mono font-semibold">{formatRupiah(fin.subtotal)}</span>
                       </div>
                       {fin.diskonGlobal > 0 && (
@@ -1561,12 +1806,31 @@ export default function DokumenInternalModule({
                         </div>
                       )}
                       <div className="flex justify-between pt-1 border-t border-teal-200 font-bold text-teal-900">
-                        <span>Total Nilai Dokumen</span>
+                        <span>{adalahPoUmum ? 'Total PO Umum' : 'Total Nilai Dokumen'}</span>
                         <span className="font-mono">{formatRupiah(fin.total)}</span>
                       </div>
                     </div>
                   );
                 })()}
+
+                {adalahPoUmum && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                    <label className={labelClass}>Metode Pembayaran (Isi Manual)</label>
+                    <input
+                      type="text"
+                      disabled={!aksiWorkflow.dapatEditKonten}
+                      value={String(draf.dataDinamis.metodePembayaran ?? '')}
+                      placeholder="Contoh: Transfer Bank BCA / Virtual Account / Kartu Kredit / Tunai"
+                      onChange={(e) =>
+                        setDraf((prev) => ({
+                          ...prev,
+                          dataDinamis: { ...prev.dataDinamis, metodePembayaran: e.target.value }
+                        }))
+                      }
+                      className={`${inputClass} bg-white disabled:bg-slate-50`}
+                    />
+                  </div>
+                )}
               </div>
             </Panel>
           )}
@@ -1999,127 +2263,162 @@ export default function DokumenInternalModule({
                 </div>
               </div>
 
-              {/* TABEL DATA DINAMIS */}
+              {/* TABEL DATA DINAMIS / SPESIFIKASI */}
               <div className="rounded-lg border border-slate-200 overflow-hidden">
                 <div
                   className="px-3 py-1.5 text-white text-[10px] font-bold uppercase tracking-wide"
                   style={{ backgroundColor: identitas.warnaAksen || katAktif.warnaAksen }}
                 >
-                  Rincian Data Formulir ({skemaAktif.nama})
+                  {adalahPoUmum
+                    ? `Spesifikasi (${skemaAktif.nama})`
+                    : `Rincian Data Formulir (${skemaAktif.nama})`}
                 </div>
-                <table className="w-full text-left border-collapse text-[10px]">
-                  <tbody className="divide-y divide-slate-200">
-                    {skemaAktif.fields
-                      .filter(
-                        (field) =>
-                          !(
-                            draf.jenisDokumen === 'quotation' &&
-                            (field.key === 'syaratKetentuan' ||
-                              field.key === 'catatanTambahan' ||
-                              field.key === 'pakaiPpn' ||
-                              field.key === 'persenPpn' ||
-                              field.key === 'diskonGlobalRp' ||
-                              field.key === 'biayaLainRp' ||
-                              field.key === 'labelBiayaLain')
-                          )
-                      )
-                      .map((field, idx) => {
-                      const raw = draf.dataDinamis[field.key];
-                      let display = raw === undefined || raw === null || raw === '' ? '-' : String(raw);
-                      if (field.type === 'date' && raw) display = formatTanggal(String(raw));
-                      if (field.type === 'currency' && raw !== '' && raw !== undefined) {
-                        const n = Number(raw);
-                        display = Number.isFinite(n) ? formatRupiah(n) : String(raw);
-                      }
-                      if (field.type === 'boolean') display = raw ? 'Ya / Memenuhi' : 'Tidak';
-
-                      return (
-                        <tr key={field.key} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
-                          <td className="py-2 px-3 w-52 font-semibold text-slate-600 align-top">{field.label}</td>
-                          <td className="py-2 px-3 text-slate-900 whitespace-pre-line">{display}</td>
+                {adalahPoUmum ? (
+                  <>
+                    <table className="w-full text-left border-collapse text-[10px]">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                          <th className="py-1.5 px-2 text-center w-9 font-bold">No</th>
+                          <th className="py-1.5 px-3 font-bold">Detail</th>
+                          <th className="py-1.5 px-3 text-right w-36 font-bold">Harga</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {detailHargaPoUmum.map((group, idx) => (
+                          <tr key={group.id} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
+                            <td className="py-2 px-2 text-center text-slate-500 align-top">{idx + 1}</td>
+                            <td className="py-2 px-3 text-slate-900 whitespace-pre-line align-top">
+                              {group.detail.trim() || '-'}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono font-semibold text-slate-900 align-top whitespace-nowrap">
+                              {formatRupiah(group.harga || 0)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between font-bold text-[11px]">
+                      <span className="text-slate-800">Subtotal</span>
+                      <span className="font-mono" style={{ color: identitas.warnaAksen || katAktif.warnaAksen }}>
+                        {formatRupiah(subtotalPoUmum)}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <table className="w-full text-left border-collapse text-[10px]">
+                    <tbody className="divide-y divide-slate-200">
+                      {skemaAktif.fields
+                        .filter(
+                          (field) =>
+                            !(
+                              draf.jenisDokumen === 'quotation' &&
+                              (field.key === 'syaratKetentuan' ||
+                                field.key === 'catatanTambahan' ||
+                                field.key === 'pakaiPpn' ||
+                                field.key === 'persenPpn' ||
+                                field.key === 'diskonGlobalRp' ||
+                                field.key === 'biayaLainRp' ||
+                                field.key === 'labelBiayaLain')
+                            )
+                        )
+                        .map((field, idx) => {
+                          const raw = draf.dataDinamis[field.key];
+                          let display = raw === undefined || raw === null || raw === '' ? '-' : String(raw);
+                          if (field.type === 'date' && raw) display = formatTanggal(String(raw));
+                          if (field.type === 'currency' && raw !== '' && raw !== undefined) {
+                            const n = Number(raw);
+                            display = Number.isFinite(n) ? formatRupiah(n) : String(raw);
+                          }
+                          if (field.type === 'boolean') display = raw ? 'Ya / Memenuhi' : 'Tidak';
+
+                          return (
+                            <tr key={field.key} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
+                              <td className="py-2 px-3 w-52 font-semibold text-slate-600 align-top">{field.label}</td>
+                              <td className="py-2 px-3 text-slate-900 whitespace-pre-line">{display}</td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
               {/* TABEL KETERTELUSURAN ALKES */}
-              {(draf.items.length > 0 || skemaAktif.wajibTraceabilityAlkes) && (
+              {!adalahPoUmum && (draf.items.length > 0 || skemaAktif.wajibTraceabilityAlkes) && (
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
                   <table className="w-full text-left border-collapse text-[10px]">
-                    <thead>
-                      <tr className="text-white" style={{ backgroundColor: identitas.warnaAksen || katAktif.warnaAksen }}>
-                        <th className="py-2 px-2 text-center w-8">No</th>
-                        <th className="py-2 px-2.5">Nama Alkes / Tipe / Izin Edar (AKL/AKD)</th>
-                        <th className="py-2 px-2">No. Batch &amp; Serial</th>
-                        <th className="py-2 px-2 text-center">Exp. Date</th>
-                        <th className="py-2 px-2 text-center">Qty</th>
-                        <th className="py-2 px-2 text-right">
-                          {skemaAktif.tampilkanNilaiFinansial ? 'Subtotal' : 'Suhu / Kondisi'}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {draf.items.map((item, idx) => {
-                        const kotor = (item.qty || 0) * (item.hargaSatuan || 0);
-                        const subtotalNet = Math.round(kotor * (1 - (item.diskonPersen || 0) / 100));
-                        return (
-                        <tr key={item.id} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
-                          <td className="py-2 px-2 text-center text-slate-500 align-top">{idx + 1}</td>
-                          <td className="py-2 px-2.5 align-top">
-                            <p className="font-bold text-slate-900">{item.namaProduk || '-'}</p>
-                            <p className="text-[9px] font-semibold" style={{ color: identitas.warnaAksen }}>
-                              {[
-                                item.tipeModel ? `Tipe: ${item.tipeModel}` : '',
-                                item.nomorIzinEdar ? `NIE: ${item.nomorIzinEdar}` : ''
-                              ]
-                                .filter(Boolean)
-                                .join(' | ')}
-                            </p>
-                            {item.spesifikasi && (
-                              <p className="text-[8.5px] text-slate-500 mt-0.5">{item.spesifikasi}</p>
-                            )}
-                          </td>
-                          <td className="py-2 px-2 font-mono text-[9.5px] align-top">
-                            <div className="font-bold text-slate-800">{item.nomorBatch || '-'}</div>
-                            {item.nomorSerial && <div className="text-slate-500">SN: {item.nomorSerial}</div>}
-                          </td>
-                          <td className="py-2 px-2 text-center tabular-nums align-top whitespace-nowrap">
-                            {item.expiredDate && item.expiredDate !== '-' ? formatTanggal(item.expiredDate) : '-'}
-                          </td>
-                          <td className="py-2 px-2 text-center font-semibold tabular-nums align-top whitespace-nowrap">
-                            {item.qty} {item.satuan}
-                          </td>
-                          <td className="py-2 px-2 text-right align-top">
-                            {skemaAktif.tampilkanNilaiFinansial ? (
-                              <div>
-                                <div className="font-mono font-bold">{formatRupiah(subtotalNet)}</div>
-                                {((item.hargaSatuan || 0) > 0 || (item.diskonPersen || 0) > 0) && (
-                                  <div className="text-[8.5px] text-slate-500 font-mono">
-                                    @{formatRupiah(item.hargaSatuan || 0)}
-                                    {(item.diskonPersen || 0) > 0 ? ` (-${item.diskonPersen}%)` : ''}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-[9px] text-slate-600">
-                                {[item.suhuPenyimpanan, item.kondisiFisik].filter(Boolean).join(' · ') || '-'}
-                              </span>
-                            )}
-                          </td>
+                      <thead>
+                        <tr className="text-white" style={{ backgroundColor: identitas.warnaAksen || katAktif.warnaAksen }}>
+                          <th className="py-2 px-2 text-center w-8">No</th>
+                          <th className="py-2 px-2.5">Nama Alkes / Tipe / Izin Edar (AKL/AKD)</th>
+                          <th className="py-2 px-2">No. Batch &amp; Serial</th>
+                          <th className="py-2 px-2 text-center">Exp. Date</th>
+                          <th className="py-2 px-2 text-center">Qty</th>
+                          <th className="py-2 px-2 text-right">
+                            {skemaAktif.tampilkanNilaiFinansial ? 'Subtotal' : 'Suhu / Kondisi'}
+                          </th>
                         </tr>
-                        );
-                      })}
-                      {draf.items.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="py-5 text-center text-slate-400 italic">
-                            Belum ada item ketertelusuran alkes pada tab Alkes.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {draf.items.map((item, idx) => {
+                          const kotor = (item.qty || 0) * (item.hargaSatuan || 0);
+                          const subtotalNet = Math.round(kotor * (1 - (item.diskonPersen || 0) / 100));
+                          return (
+                          <tr key={item.id} className={idx % 2 === 1 ? 'bg-slate-50/70' : 'bg-white'}>
+                            <td className="py-2 px-2 text-center text-slate-500 align-top">{idx + 1}</td>
+                            <td className="py-2 px-2.5 align-top">
+                              <p className="font-bold text-slate-900">{item.namaProduk || '-'}</p>
+                              <p className="text-[9px] font-semibold" style={{ color: identitas.warnaAksen }}>
+                                {[
+                                  item.tipeModel ? `Tipe: ${item.tipeModel}` : '',
+                                  item.nomorIzinEdar ? `NIE: ${item.nomorIzinEdar}` : ''
+                                ]
+                                  .filter(Boolean)
+                                  .join(' | ')}
+                              </p>
+                              {item.spesifikasi && (
+                                <p className="text-[8.5px] text-slate-500 mt-0.5">{item.spesifikasi}</p>
+                              )}
+                            </td>
+                            <td className="py-2 px-2 font-mono text-[9.5px] align-top">
+                              <div className="font-bold text-slate-800">{item.nomorBatch || '-'}</div>
+                              {item.nomorSerial && <div className="text-slate-500">SN: {item.nomorSerial}</div>}
+                            </td>
+                            <td className="py-2 px-2 text-center tabular-nums align-top whitespace-nowrap">
+                              {item.expiredDate && item.expiredDate !== '-' ? formatTanggal(item.expiredDate) : '-'}
+                            </td>
+                            <td className="py-2 px-2 text-center font-semibold tabular-nums align-top whitespace-nowrap">
+                              {item.qty} {item.satuan}
+                            </td>
+                            <td className="py-2 px-2 text-right align-top">
+                              {skemaAktif.tampilkanNilaiFinansial ? (
+                                <div>
+                                  <div className="font-mono font-bold">{formatRupiah(subtotalNet)}</div>
+                                  {((item.hargaSatuan || 0) > 0 || (item.diskonPersen || 0) > 0) && (
+                                    <div className="text-[8.5px] text-slate-500 font-mono">
+                                      @{formatRupiah(item.hargaSatuan || 0)}
+                                      {(item.diskonPersen || 0) > 0 ? ` (-${item.diskonPersen}%)` : ''}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[9px] text-slate-600">
+                                  {[item.suhuPenyimpanan, item.kondisiFisik].filter(Boolean).join(' · ') || '-'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                          );
+                        })}
+                        {draf.items.length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="py-5 text-center text-slate-400 italic">
+                              Belum ada item ketertelusuran alkes pada tab Alkes.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
                   {skemaAktif.tampilkanNilaiFinansial && draf.items.length > 0 && (
                     draf.jenisDokumen === 'quotation' ? (() => {
                       const fin = hitungRingkasanFinansialDokumen(draf);
@@ -2160,7 +2459,7 @@ export default function DokumenInternalModule({
                       );
                     })() : (
                       <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between font-bold text-xs">
-                        <span>Total Nilai Item</span>
+                        <span>{adalahPoUmum ? 'Subtotal' : 'Total Nilai Item'}</span>
                         <span className="font-mono" style={{ color: identitas.warnaAksen }}>
                           {formatRupiah(hitungNilaiTotalItems(draf.items))}
                         </span>
@@ -2192,6 +2491,20 @@ export default function DokumenInternalModule({
                     )}
                   </div>
                 )}
+
+              {adalahPoUmum && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1 text-[10px]">
+                  <p
+                    className="font-bold uppercase tracking-wider text-[9.5px]"
+                    style={{ color: identitas.warnaAksen || katAktif.warnaAksen }}
+                  >
+                    Metode Pembayaran
+                  </p>
+                  <p className="font-semibold text-slate-900 whitespace-pre-line">
+                    {String(draf.dataDinamis.metodePembayaran || '').trim() || '-'}
+                  </p>
+                </div>
+              )}
 
               {/* BLOK TANDA TANGAN MULTI-LEVEL & QR CODE */}
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 flex flex-col sm:flex-row items-stretch justify-between gap-4">
@@ -2269,7 +2582,7 @@ export default function DokumenInternalModule({
         <Modal
           onClose={() => setModalBuatTerbuka(false)}
           judul="Buat Dokumen Internal Baru"
-          keterangan="Pilih salah satu dari 18 standar formulir CDAKB, ISO 13485 & Penawaran Komersial sesuai kategori."
+          keterangan={`Pilih salah satu dari ${SKEMA_DOKUMEN_INTERNAL.length} standar formulir CDAKB, ISO 13485, Penawaran Komersial & Pengadaan Umum sesuai kategori.`}
         >
           <div className="space-y-4">
             <div className="flex flex-wrap gap-1.5">

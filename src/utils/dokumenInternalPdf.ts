@@ -1,9 +1,11 @@
 import type { DokumenInternal, IdentitasKopDokumenInternal } from '../types';
 import {
   KATEGORI_DOKUMEN_META,
+  ambilDetailHargaPoUmum,
   ambilSkemaDokumen,
   hitungNilaiTotalItems,
-  hitungRingkasanFinansialDokumen
+  hitungRingkasanFinansialDokumen,
+  hitungSubtotalPoUmum
 } from './dokumenInternal';
 
 function formatRpPdf(nilai: number): string {
@@ -306,48 +308,143 @@ export async function unduhDokumenInternalPdfA4(
 
   y += boxH + 5;
 
-  // --- SECTION DATA FORM DINAMIS ---
+  // --- SECTION DATA FORM DINAMIS / SPESIFIKASI ---
+  const isPoUmum = dokumen.jenisDokumen === 'purchase_order_umum';
   doc.setFillColor(accentR, accentG, accentB);
   doc.rect(marginX, y, contentW, 6.8, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.6);
   doc.setTextColor(255, 255, 255);
-  doc.text(`RINCIAN DATA FORMULIR (${skema.nama.toUpperCase()})`, marginX + 3, y + 4.5);
+  doc.text(
+    isPoUmum
+      ? `SPESIFIKASI (${skema.nama.toUpperCase()})`
+      : `RINCIAN DATA FORMULIR (${skema.nama.toUpperCase()})`,
+    marginX + 3,
+    y + 4.5
+  );
   y += 6.8;
 
-  skema.fields
-    .filter((f) => !(dokumen.jenisDokumen === 'quotation' && (f.key === 'syaratKetentuan' || f.key === 'catatanTambahan' || f.key === 'pakaiPpn' || f.key === 'persenPpn' || f.key === 'diskonGlobalRp' || f.key === 'biayaLainRp' || f.key === 'labelBiayaLain')))
-    .forEach((field, idx) => {
-    const formatted = formatNilaiFieldDinamis(dokumen.dataDinamis[field.key], field.type);
-    const valLines = doc.splitTextToSize(formatted, contentW - 62);
-    const rowH = Math.max(6.8, valLines.length * 3.5 + 3);
-    if (y + rowH > pageH - 22) {
+  if (isPoUmum) {
+    const groupsPo = ambilDetailHargaPoUmum(dokumen);
+    const subtotalPo = hitungSubtotalPoUmum(groupsPo);
+    const colNoW = 12;
+    const colHargaW = 42;
+    const colDetailW = contentW - colNoW - colHargaW;
+
+    const gambarSubheaderPo = (posY: number) => {
+      doc.setFillColor(241, 245, 249);
+      doc.rect(marginX, posY, contentW, 6.4, 'F');
+      doc.setDrawColor(203, 213, 225);
+      doc.setLineWidth(0.2);
+      doc.line(marginX, posY + 6.4, pageW - marginX, posY + 6.4);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.2);
+      doc.setTextColor(71, 85, 105);
+      doc.text('No', marginX + colNoW / 2, posY + 4.3, { align: 'center' });
+      doc.text('Detail', marginX + colNoW + 2.5, posY + 4.3);
+      doc.text('Harga', pageW - marginX - 2.5, posY + 4.3, { align: 'right' });
+      return posY + 6.4;
+    };
+
+    y = gambarSubheaderPo(y);
+
+    groupsPo.forEach((group, idx) => {
+      const detailLines = doc.splitTextToSize(group.detail.trim() || '-', colDetailW - 5);
+      const rowH = Math.max(7.6, detailLines.length * 3.5 + 3.4);
+      if (y + rowH > pageH - 22) {
+        doc.addPage();
+        y = 16;
+        y = gambarSubheaderPo(y);
+      }
+      if (idx % 2 === 1) {
+        doc.setFillColor(248, 250, 252);
+        doc.rect(marginX, y, contentW, rowH, 'F');
+      }
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.2);
+      doc.line(marginX, y + rowH, pageW - marginX, y + rowH);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.4);
+      doc.setTextColor(75, 85, 99);
+      doc.text(String(idx + 1), marginX + colNoW / 2, y + 4.5, { align: 'center' });
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(17, 24, 39);
+      doc.text(detailLines, marginX + colNoW + 2.5, y + 4.5);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(17, 24, 39);
+      doc.text(formatRpPdf(group.harga || 0), pageW - marginX - 2.5, y + 4.5, { align: 'right' });
+
+      y += rowH;
+    });
+
+    if (y + 8 > pageH - 22) {
       doc.addPage();
       y = 16;
     }
-    if (idx % 2 === 1) {
-      doc.setFillColor(248, 250, 252);
-      doc.rect(marginX, y, contentW, rowH, 'F');
-    }
-    doc.setDrawColor(226, 232, 240);
-    doc.setLineWidth(0.2);
-    doc.line(marginX, y + rowH, pageW - marginX, y + rowH);
-
+    doc.setFillColor(241, 245, 249);
+    doc.rect(marginX, y, contentW, 7.6, 'F');
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.25);
+    doc.line(marginX, y + 7.6, pageW - marginX, y + 7.6);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.4);
-    doc.setTextColor(71, 85, 105);
-    doc.text(doc.splitTextToSize(field.label, 54), marginX + 2.5, y + 4.3);
-
-    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
     doc.setTextColor(17, 24, 39);
-    doc.text(valLines, marginX + 59, y + 4.3);
-    y += rowH;
-  });
+    doc.text('SUBTOTAL', marginX + 3, y + 5.1);
+    doc.setTextColor(accentR, accentG, accentB);
+    doc.text(formatRpPdf(subtotalPo), pageW - marginX - 2.5, y + 5.1, { align: 'right' });
+    y += 7.6;
+  } else {
+    skema.fields
+      .filter(
+        (f) =>
+          !(
+            dokumen.jenisDokumen === 'quotation' &&
+            (f.key === 'syaratKetentuan' ||
+              f.key === 'catatanTambahan' ||
+              f.key === 'pakaiPpn' ||
+              f.key === 'persenPpn' ||
+              f.key === 'diskonGlobalRp' ||
+              f.key === 'biayaLainRp' ||
+              f.key === 'labelBiayaLain')
+          )
+      )
+      .forEach((field, idx) => {
+        const formatted = formatNilaiFieldDinamis(dokumen.dataDinamis[field.key], field.type);
+        const valLines = doc.splitTextToSize(formatted, contentW - 62);
+        const rowH = Math.max(6.8, valLines.length * 3.5 + 3);
+        if (y + rowH > pageH - 22) {
+          doc.addPage();
+          y = 16;
+        }
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(marginX, y, contentW, rowH, 'F');
+        }
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.2);
+        doc.line(marginX, y + rowH, pageW - marginX, y + rowH);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.4);
+        doc.setTextColor(71, 85, 105);
+        doc.text(doc.splitTextToSize(field.label, 54), marginX + 2.5, y + 4.3);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(17, 24, 39);
+        doc.text(valLines, marginX + 59, y + 4.3);
+        y += rowH;
+      });
+  }
 
   y += 5;
 
-  // --- TABEL ITEM ALKES & KETERTELUSURAN CDAKB ---
-  if (dokumen.items.length > 0 || skema.wajibTraceabilityAlkes) {
+  // --- TABEL ITEM ALKES ---
+  if (!isPoUmum && (dokumen.items.length > 0 || skema.wajibTraceabilityAlkes)) {
     if (y + 24 > pageH - 22) {
       doc.addPage();
       y = 16;
@@ -493,7 +590,12 @@ export async function unduhDokumenInternalPdfA4(
       doc.setFont('helvetica', 'italic');
       doc.setFontSize(7.6);
       doc.setTextColor(148, 163, 184);
-      doc.text('Belum ada item alkes / batch ketertelusuran ditambahkan.', pageW / 2, y + 6, { align: 'center' });
+      doc.text(
+        'Belum ada item alkes / batch ketertelusuran ditambahkan.',
+        pageW / 2,
+        y + 6,
+        { align: 'center' }
+      );
       y += 11;
     }
 
@@ -583,6 +685,29 @@ export async function unduhDokumenInternalPdfA4(
     }
 
     y += 5;
+  }
+
+  if (isPoUmum) {
+    const metodeTeks = String(dokumen.dataDinamis.metodePembayaran || '').trim() || '-';
+    const metodeLines = doc.splitTextToSize(metodeTeks, contentW - 6);
+    const metodeBoxH = Math.max(12, 8 + metodeLines.length * 3.5);
+    if (y + metodeBoxH > pageH - 22) {
+      doc.addPage();
+      y = 16;
+    }
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.3);
+    doc.roundedRect(marginX, y, contentW, metodeBoxH, 1.5, 1.5, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(accentR, accentG, accentB);
+    doc.text('METODE PEMBAYARAN', marginX + 3, y + 4.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.8);
+    doc.setTextColor(17, 24, 39);
+    doc.text(metodeLines, marginX + 3, y + 8.8);
+    y += metodeBoxH + 4;
   }
 
   // --- BLOK TANDA TANGAN MULTI-LEVEL & QR CODE VERIFIKASI ---
