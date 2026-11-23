@@ -22,6 +22,134 @@ afterEach(() => {
 });
 
 describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Login Internet Real-Time', () => {
+  it('tidak menimpa secret sesi RBAC yang sudah ada tetapi tidak valid', () => {
+    const dataDir = createTempDataDir();
+    const file = path.join(dataDir, '.session-secret');
+    const previous = process.env.SESSION_SECRET;
+    delete process.env.SESSION_SECRET;
+    try {
+      fs.writeFileSync(file, 'invalid');
+      expect(() => new ServerRbacStore(dataDir)).toThrow(/Secret sesi RBAC tidak valid/);
+      expect(fs.readFileSync(file, 'utf8')).toBe('invalid');
+      expect(fs.existsSync(path.join(dataDir, 'rbac-db.json'))).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env.SESSION_SECRET;
+      else process.env.SESSION_SECRET = previous;
+    }
+  });
+
+  it.each(['{invalid json', 'null', '{"roles":[]}', '{"roles":{},"users":[]}'])(
+    'menolak file RBAC rusak tanpa mengubah isi file: %s',
+    (content) => {
+      const dataDir = createTempDataDir();
+      const file = path.join(dataDir, 'rbac-db.json');
+      fs.writeFileSync(file, content);
+      expect(() => new ServerRbacStore(dataDir)).toThrow(/RBAC.*(rusak|tidak valid)/);
+      expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    }
+  );
+
+  it('pembaruan akun yang tidak valid atau gagal tulis tidak mengubah akun maupun sesi', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const dev = rbac.bootstrapFirstDeveloper(
+      { username: 'dev.test', password: 'StrongPassword123!', fullName: 'Dev Test' },
+      '127.0.0.1', 'Vitest'
+    );
+    expect(dev.ok).toBe(true);
+    if (!dev.ok) return;
+    const created = rbac.createUser(
+      { username: 'staf.test', password: 'Password123!', fullName: 'Staf Test', roleId: 'sales_medrep' },
+      dev.user.username, dev.role.id, '127.0.0.1'
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const login = rbac.authenticate('staf.test', 'Password123!', '127.0.0.1', 'Vitest');
+    expect(login.ok).toBe(true);
+    if (!login.ok) return;
+
+    const update = (newPassword: string) => rbac.updateUser(
+      created.user.id, { isActive: false, newPassword },
+      dev.user.id, dev.user.username, dev.role.id, '127.0.0.1'
+    );
+    expect(update('short')).toMatchObject({ ok: false, status: 400 });
+    expect(rbac.listUsers().find((u) => u.id === created.user.id)?.isActive).toBe(true);
+    expect(rbac.resolveToken(login.token)).not.toBeNull();
+
+    fs.mkdirSync(path.join(dataDir, 'rbac-db.json.tmp'));
+    expect(() => update('NewPassword123!')).toThrow();
+    expect(rbac.listUsers().find((u) => u.id === created.user.id)?.isActive).toBe(true);
+    expect(rbac.resolveToken(login.token)).not.toBeNull();
+    expect(new ServerRbacStore(dataDir).listUsers().find((u) => u.id === created.user.id)?.isActive).toBe(true);
+  });
+
+  it('menolak email duplikat dan login Google dengan akun lama yang memiliki email ambigu', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const dev = rbac.bootstrapFirstDeveloper(
+      { username: 'dev.test', password: 'StrongPassword123!', fullName: 'Dev Test' },
+      '127.0.0.1', 'Vitest'
+    );
+    expect(dev.ok).toBe(true);
+    if (!dev.ok) return;
+    const create = (username: string, email: string) => rbac.createUser(
+      { username, email, password: 'Password123!', fullName: username, roleId: 'sales_medrep' },
+      dev.user.username, dev.role.id, '127.0.0.1'
+    );
+    expect(create('staf.satu', 'tester@example.test').ok).toBe(true);
+    expect(create('staf.dua', ' TESTER@example.test ')).toMatchObject({ ok: false, status: 409 });
+    const other = create('staf.dua', 'other@example.test');
+    expect(other.ok).toBe(true);
+    if (!other.ok) return;
+    expect(rbac.updateUser(
+      other.user.id, { email: 'TESTER@example.test' },
+      dev.user.id, dev.user.username, dev.role.id, '127.0.0.1'
+    )).toMatchObject({ ok: false, status: 409 });
+
+    const file = path.join(dataDir, 'rbac-db.json');
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { users: Array<{ username: string; email: string }> };
+    const otherUser = saved.users.find((u) => u.username === 'staf.dua');
+    expect(otherUser).toBeDefined();
+    if (!otherUser) return;
+    otherUser.email = 'TESTER@example.test';
+    fs.writeFileSync(file, JSON.stringify(saved));
+    const reopened = new ServerRbacStore(dataDir);
+    expect(reopened.authenticateByVerifiedEmail('tester@example.test', 'uid', 'Test', '127.0.0.1', 'Vitest'))
+      .toMatchObject({ ok: false, status: 409 });
+    expect(reopened.authenticate('staf.satu', 'Password123!', '127.0.0.1', 'Vitest').ok).toBe(true);
+  });
+
+  it('gagal menyimpan peran tidak mengubah matriks peran di memori maupun di disk', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const oldPermissions = JSON.stringify(rbac.listRoles().find((r) => r.id === 'sales_medrep')?.permissions);
+    fs.mkdirSync(path.join(dataDir, 'rbac-db.json.tmp'));
+    expect(() => rbac.createRole({ name: 'Peran uji' }, 'admin', 'it_admin', '127.0.0.1')).toThrow();
+    expect(() => rbac.updateRole(
+      'sales_medrep', { permissions: { overview: ['view'] } }, 'admin', 'it_admin', '127.0.0.1'
+    )).toThrow();
+    expect(rbac.listRoles().some((r) => r.name === 'Peran uji')).toBe(false);
+    expect(JSON.stringify(rbac.listRoles().find((r) => r.id === 'sales_medrep')?.permissions)).toBe(oldPermissions);
+    expect(new ServerRbacStore(dataDir).listRoles().some((r) => r.name === 'Peran uji')).toBe(false);
+  });
+
+  it('tidak mencabut hak dari satu-satunya peran pengelola RBAC aktif', () => {
+    const rbac = new ServerRbacStore(createTempDataDir());
+    const role = rbac.createRole(
+      { name: 'Admin Kustom', permissions: { 'rbac-admin': ['view', 'update'] } },
+      'admin', 'it_admin', '127.0.0.1'
+    );
+    expect(role.ok).toBe(true);
+    if (!role.ok) return;
+    expect(rbac.createUser(
+      { username: 'admin.kustom', password: 'Password123!', fullName: 'Admin', roleId: role.role.id },
+      'admin', 'it_admin', '127.0.0.1'
+    ).ok).toBe(true);
+    expect(rbac.updateRole(role.role.id, { permissions: { overview: ['view'] } }, 'admin', 'it_admin', '127.0.0.1'))
+      .toMatchObject({ ok: false, status: 400 });
+    expect(rbac.listRoles().find((r) => r.id === role.role.id)?.permissions['rbac-admin']).toEqual(['view', 'update']);
+  });
+
   it('membatasi daftar bootstrap Firebase dan login ke email yang dikonfigurasi', () => {
     vi.stubEnv('VITE_FIREBASE_CONFIGURED_ADMINS_ONLY', 'true');
     vi.stubEnv('BOOTSTRAP_DEV_EMAIL', ' admin@example.com ');

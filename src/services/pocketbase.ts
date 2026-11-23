@@ -4897,25 +4897,41 @@ class AMSDatabaseManager {
     }
   }
 
-  public async pushRbacSnapshotToFirebase(): Promise<void> {
-    if (!authFirebase.currentUser?.emailVerified) return;
+  public async pushRbacSnapshotToFirebase(): Promise<boolean> {
+    if (!authFirebase.currentUser?.emailVerified) {
+      this.firebaseSyncError = 'Sinkronisasi RBAC ke Firebase belum dilakukan: akun Google terverifikasi tidak terhubung.';
+      this.updateConnectionStatusLabel();
+      return false;
+    }
     const token = this.getAuthTokenFromStorage();
-    if (!token || typeof fetch !== 'function') return;
+    if (!token || typeof fetch !== 'function') {
+      this.firebaseSyncError = 'Sinkronisasi RBAC ke Firebase belum dilakukan: sesi server tidak tersedia.';
+      this.updateConnectionStatusLabel();
+      return false;
+    }
     try {
       const res = await fetch('/api/firebase/rbac-snapshot', {
         cache: 'no-store',
         credentials: 'include',
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`Gagal mengambil snapshot RBAC dari server (HTTP ${res.status}).`);
       const data = (await res.json()) as { roles?: RoleDefinition[]; users?: ServerUserRecord[] };
-      await pushRbacSnapshotToFirestore(data.roles || [], data.users || []);
+      if (!Array.isArray(data.roles) || !Array.isArray(data.users)) {
+        throw new Error('Snapshot RBAC dari server tidak valid.');
+      }
+      const pushed = await pushRbacSnapshotToFirestore(data.roles, data.users);
+      if (pushed.rolesPushed !== data.roles.length || pushed.usersPushed !== data.users.length) {
+        throw new Error('Snapshot RBAC tidak tersinkron sepenuhnya ke Firebase.');
+      }
       this.firebaseSyncedAt = new Date().toISOString();
       this.firebaseSyncError = null;
       this.updateConnectionStatusLabel();
+      return true;
     } catch (err) {
       this.firebaseSyncError = err instanceof Error ? err.message : 'Gagal sinkronisasi RBAC ke Firestore';
       this.updateConnectionStatusLabel();
+      return false;
     }
   }
 

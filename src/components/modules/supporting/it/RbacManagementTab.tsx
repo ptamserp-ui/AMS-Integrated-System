@@ -125,6 +125,9 @@ export default function RbacManagementTab({
         canViewAudit ? authFetch('/api/rbac/audit') : Promise.resolve(null)
       ]);
 
+      const failed = [metaRes, rolesRes, usersRes, sesRes, audRes].find((response) => response && !response.ok);
+      if (failed) throw new Error(`HTTP ${failed.status}`);
+
       if (metaRes.ok) {
         const d = (await metaRes.json()) as { resources?: RbacResourceMeta[] };
         setResources(d.resources || []);
@@ -149,8 +152,9 @@ export default function RbacManagementTab({
         const d = (await audRes.json()) as { logs?: ServerAuditEntry[] };
         setAuditLogs(d.logs || []);
       }
-    } catch {
-      setBanner({ type: 'err', text: 'Gagal memuat data RBAC dari server.' });
+    } catch (error) {
+      console.error('[RBAC] Gagal memuat data dari server.', error);
+      setBanner({ type: 'err', text: 'Gagal memuat data RBAC dari server. Periksa sesi dan koneksi.' });
     } finally {
       setLoading(false);
     }
@@ -256,14 +260,16 @@ export default function RbacManagementTab({
         return;
       }
       setUserModalOpen(false);
-      showMsg(
-        'ok',
-        editingUser
-          ? `Akun @${editingUser.username} diperbarui secara real-time di server.`
-          : `Akun @${cleanUsername} tersimpan di server dan langsung aktif untuk login dari internet.`
-      );
       await loadAll();
-      void db.pushRbacSnapshotToFirebase();
+      const firebaseSynced = await db.pushRbacSnapshotToFirebase();
+      showMsg(
+        firebaseSynced ? 'ok' : 'err',
+        `${editingUser
+          ? `Akun @${editingUser.username} diperbarui di server.`
+          : `Akun @${cleanUsername} tersimpan di server${userForm.isActive ? ' dan aktif untuk login' : ' dalam keadaan tidak aktif'}.`}${
+          firebaseSynced ? ' Data RBAC dikirim ke Firebase; backup dan pemulihan belum otomatis terjamin.' : ' Sinkronisasi RBAC ke Firebase belum berhasil; periksa status koneksi Firebase.'
+        }`
+      );
       onPermissionsUpdated?.();
     } catch (error) {
       console.error('[RBAC] Gagal menyimpan akun pengguna ke server.', error);
@@ -333,6 +339,9 @@ export default function RbacManagementTab({
       await loadAll();
       void db.pushRbacSnapshotToFirebase();
       onPermissionsUpdated?.();
+    } catch (error) {
+      console.error('[RBAC] Gagal menyimpan peran.', error);
+      showMsg('err', 'Tidak dapat menyimpan peran. Periksa koneksi dan coba lagi.');
     } finally {
       setSavingRole(false);
     }
@@ -340,26 +349,31 @@ export default function RbacManagementTab({
 
   const submitNewRole = async (e: FormEvent) => {
     e.preventDefault();
-    const res = await authFetch('/api/rbac/roles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: newRoleForm.name,
-        description: newRoleForm.description,
-        permissions: { overview: ['view'] }
-      })
-    });
-    const data = (await res.json().catch(() => ({}))) as { role?: RoleDefinition; pesan?: string };
-    if (!res.ok || !data.role) {
-      showMsg('err', data.pesan || 'Gagal membuat peran baru.');
-      return;
+    try {
+      const res = await authFetch('/api/rbac/roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newRoleForm.name,
+          description: newRoleForm.description,
+          permissions: { overview: ['view'] }
+        })
+      });
+      const data = (await res.json().catch(() => ({}))) as { role?: RoleDefinition; pesan?: string };
+      if (!res.ok || !data.role) {
+        showMsg('err', data.pesan || 'Gagal membuat peran baru.');
+        return;
+      }
+      setNewRoleOpen(false);
+      setNewRoleForm({ name: '', description: '' });
+      setSelectedRoleId(data.role.id);
+      showMsg('ok', `Peran kustom "${data.role.name}" berhasil dibuat.`);
+      await loadAll();
+      void db.pushRbacSnapshotToFirebase();
+    } catch (error) {
+      console.error('[RBAC] Gagal membuat peran.', error);
+      showMsg('err', 'Tidak dapat membuat peran. Periksa koneksi dan coba lagi.');
     }
-    setNewRoleOpen(false);
-    setNewRoleForm({ name: '', description: '' });
-    setSelectedRoleId(data.role.id);
-    showMsg('ok', `Peran kustom "${data.role.name}" berhasil dibuat.`);
-    await loadAll();
-    void db.pushRbacSnapshotToFirebase();
   };
 
   const removeRole = async (role: RoleDefinition) => {
@@ -933,7 +947,7 @@ export default function RbacManagementTab({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Email</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Email (opsional; untuk login Google harus sesuai akun terverifikasi)</label>
                   <input
                     type="email"
                     value={userForm.email}

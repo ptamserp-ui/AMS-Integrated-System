@@ -463,19 +463,24 @@ export class ServerRbacStore {
   private loadOrCreateSecret(): string {
     const fromEnv = process.env.SESSION_SECRET?.trim();
     if (fromEnv && fromEnv.length >= 16) return fromEnv;
+    let stored: string | undefined;
     try {
-      if (fs.existsSync(this.secretPath)) {
-        const stored = fs.readFileSync(this.secretPath, 'utf8').trim();
-        if (stored.length >= 32) return stored;
+      stored = fs.readFileSync(this.secretPath, 'utf8').trim();
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        throw new Error('Gagal membaca secret sesi RBAC; service tidak dimulai.', { cause: error });
       }
-    } catch {
-      /* fallback generate new */
     }
+    if (stored !== undefined) {
+      if (stored.length < 32) throw new Error('Secret sesi RBAC tidak valid; berkas tidak diubah.');
+      return stored;
+    }
+
     const generated = crypto.randomBytes(48).toString('hex');
     try {
-      fs.writeFileSync(this.secretPath, generated, { encoding: 'utf8', mode: 0o600 });
-    } catch {
-      /* ignore write error on read-only fs */
+      fs.writeFileSync(this.secretPath, generated, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    } catch (error) {
+      throw new Error('Gagal menyimpan secret sesi RBAC; service tidak dimulai.', { cause: error });
     }
     return generated;
   }
@@ -490,90 +495,100 @@ export class ServerRbacStore {
       throw new Error('BOOTSTRAP_DEV_EMAIL wajib diisi saat bootstrap kata sandi dan mode admin Firebase terbatas aktif.');
     }
     const now = new Date().toISOString();
+    let raw: string | undefined;
     try {
-      if (fs.existsSync(this.dbPath)) {
-        const parsed = JSON.parse(fs.readFileSync(this.dbPath, 'utf8')) as Partial<RbacDatabaseState>;
-        if (Array.isArray(parsed.roles) && Array.isArray(parsed.users)) {
-          const defaultRolesList = buildDefaultRoles(now);
-          let roles = parsed.roles.length > 0 ? parsed.roles : defaultRolesList;
-          let rolesBackfilled = false;
-          if (parsed.roles.length > 0) {
-            const existingRoleIds = new Set(roles.map((r) => r.id));
-            const missingRoles = defaultRolesList.filter((r) => !existingRoleIds.has(r.id));
-            if (missingRoles.length > 0) {
-              roles = [...roles, ...missingRoles];
+      raw = fs.readFileSync(this.dbPath, 'utf8');
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+        throw new Error(`Gagal membaca basis data RBAC "${this.dbPath}". Berkas tidak diubah.`, { cause: error });
+      }
+    }
+    if (raw !== undefined) {
+      let parsed: Partial<RbacDatabaseState>;
+      try {
+        parsed = JSON.parse(raw) as Partial<RbacDatabaseState>;
+      } catch (error) {
+        throw new Error(`Basis data RBAC "${this.dbPath}" rusak. Berkas tidak diubah; pulihkan dari backup.`, { cause: error });
+      }
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.roles) || !Array.isArray(parsed.users)) {
+        throw new Error(`Format basis data RBAC "${this.dbPath}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
+      }
+      const defaultRolesList = buildDefaultRoles(now);
+      let roles = parsed.roles.length > 0 ? parsed.roles : defaultRolesList;
+      let rolesBackfilled = false;
+      if (parsed.roles.length > 0) {
+        const existingRoleIds = new Set(roles.map((r) => r.id));
+        const missingRoles = defaultRolesList.filter((r) => !existingRoleIds.has(r.id));
+        if (missingRoles.length > 0) {
+          roles = [...roles, ...missingRoles];
+          rolesBackfilled = true;
+        }
+      }
+      const defaultRolesById = new Map(defaultRolesList.map((role) => [role.id, role]));
+      for (const role of roles) {
+        const defaultPermissions = defaultRolesById.get(role.id)?.permissions;
+        if (defaultPermissions?.['product-catalog'] && !role.permissions?.['product-catalog']) {
+          role.permissions = { ...role.permissions, 'product-catalog': [...defaultPermissions['product-catalog']] };
+          rolesBackfilled = true;
+        }
+        if (defaultPermissions?.['dokumen-internal'] && !role.permissions?.['dokumen-internal']) {
+          role.permissions = { ...role.permissions, 'dokumen-internal': [...defaultPermissions['dokumen-internal']] };
+          rolesBackfilled = true;
+        }
+        const hasWarehouseView = role.permissions?.['gudang-logistik']?.includes('view');
+        for (const resource of ['gudang-penerimaan', 'gudang-mutasi'] as const) {
+          if (!role.permissions?.[resource]) {
+            const fallback = defaultPermissions?.[resource] ?? (hasWarehouseView ? ['view'] : undefined);
+            if (fallback) {
+              role.permissions = { ...role.permissions, [resource]: [...fallback] };
               rolesBackfilled = true;
             }
           }
-          const defaultRolesById = new Map(defaultRolesList.map((role) => [role.id, role]));
-          for (const role of roles) {
-            const defaultPermissions = defaultRolesById.get(role.id)?.permissions;
-            if (defaultPermissions?.['product-catalog'] && !role.permissions?.['product-catalog']) {
-              role.permissions = { ...role.permissions, 'product-catalog': [...defaultPermissions['product-catalog']] };
-              rolesBackfilled = true;
-            }
-            if (defaultPermissions?.['dokumen-internal'] && !role.permissions?.['dokumen-internal']) {
-              role.permissions = { ...role.permissions, 'dokumen-internal': [...defaultPermissions['dokumen-internal']] };
-              rolesBackfilled = true;
-            }
-            const hasWarehouseView = role.permissions?.['gudang-logistik']?.includes('view');
-            for (const resource of ['gudang-penerimaan', 'gudang-mutasi'] as const) {
-              if (!role.permissions?.[resource]) {
-                const fallback = defaultPermissions?.[resource] ?? (hasWarehouseView ? ['view'] : undefined);
-                if (fallback) {
-                  role.permissions = { ...role.permissions, [resource]: [...fallback] };
-                  rolesBackfilled = true;
-                }
-              }
-            }
-          }
-          let users = parsed.users;
-          const auditLogs = Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [];
-          if (users.length === 0) {
-            const envUsers = bootstrapUsersFromEnv(roles, now);
-            if (envUsers.length > 0) {
-              users = envUsers;
-              const updated: RbacDatabaseState = {
-                version: parsed.version ?? 1,
-                roles,
-                users,
-                sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-                auditLogs: [
-                  {
-                    id: `aud-${crypto.randomUUID()}`,
-                    timestamp: now,
-                    actorUsername: 'system',
-                    actorRole: 'system',
-                    action: 'RBAC_ENV_BOOTSTRAP',
-                    resource: 'rbac-admin',
-                    targetId: envUsers[0].id,
-                    status: 'ALLOWED',
-                    ip: '127.0.0.1',
-                    detail: `Akun developer "${envUsers[0].username}" dibuat otomatis dari environment variable.`
-                  },
-                  ...auditLogs
-                ]
-              };
-              this.persistState(updated);
-              return updated;
-            }
-          }
-          const loadedState: RbacDatabaseState = {
+        }
+      }
+      let users = parsed.users;
+      const auditLogs = Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [];
+      if (users.length === 0) {
+        const envUsers = bootstrapUsersFromEnv(roles, now);
+        if (envUsers.length > 0) {
+          users = envUsers;
+          const updated: RbacDatabaseState = {
             version: parsed.version ?? 1,
             roles,
             users,
             sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-            auditLogs,
-            ...(parsed.developerReset ? { developerReset: parsed.developerReset } : {})
+            auditLogs: [
+              {
+                id: `aud-${crypto.randomUUID()}`,
+                timestamp: now,
+                actorUsername: 'system',
+                actorRole: 'system',
+                action: 'RBAC_ENV_BOOTSTRAP',
+                resource: 'rbac-admin',
+                targetId: envUsers[0].id,
+                status: 'ALLOWED',
+                ip: '127.0.0.1',
+                detail: `Akun developer "${envUsers[0].username}" dibuat otomatis dari environment variable.`
+              },
+              ...auditLogs
+            ]
           };
-          if (rolesBackfilled) {
-            this.persistState(loadedState);
-          }
-          return loadedState;
+          this.persistState(updated);
+          return updated;
         }
       }
-    } catch {
-      /* reseed on corrupt db */
+      const loadedState: RbacDatabaseState = {
+        version: parsed.version ?? 1,
+        roles,
+        users,
+        sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+        auditLogs,
+        ...(parsed.developerReset ? { developerReset: parsed.developerReset } : {})
+      };
+      if (rolesBackfilled) {
+        this.persistState(loadedState);
+      }
+      return loadedState;
     }
     const defaultRoles = buildDefaultRoles(now);
     const bootstrappedUsers = bootstrapUsersFromEnv(defaultRoles, now);
@@ -607,6 +622,13 @@ export class ServerRbacStore {
     const tmp = `${this.dbPath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(target, null, 2), 'utf8');
     fs.renameSync(tmp, this.dbPath);
+  }
+
+  private persistWithAudit(next: RbacDatabaseState, entry: Omit<ServerAuditEntry, 'id' | 'timestamp'>): void {
+    const audit: ServerAuditEntry = { id: `aud-${crypto.randomUUID()}`, timestamp: new Date().toISOString(), ...entry };
+    const committed = { ...next, auditLogs: [audit, ...next.auditLogs].slice(0, 500) };
+    this.persistState(committed);
+    this.state = committed;
   }
 
   public pruneExpiredSessions(): boolean {
@@ -804,7 +826,11 @@ export class ServerRbacStore {
 
     const bootstrappedAdminEmails = getFirebaseBootstrapAdmins();
 
-    let user = this.state.users.find((u) => u.email.trim().toLowerCase() === cleanEmail);
+    const matchingUsers = this.state.users.filter((u) => u.email.trim().toLowerCase() === cleanEmail);
+    if (matchingUsers.length > 1) {
+      return { ok: false, status: 409, message: 'Email terdaftar pada beberapa akun. Hubungi administrator RBAC.' };
+    }
+    let user = matchingUsers[0];
 
     if (!user && bootstrappedAdminEmails.has(cleanEmail)) {
       const now = new Date().toISOString();
@@ -1381,10 +1407,8 @@ export class ServerRbacStore {
     if (newPassword.length < 6) {
       return { ok: false, status: 400, message: 'Kata sandi baru minimal 6 karakter.' };
     }
-    user.passwordHash = hashPassword(newPassword);
-    user.updatedAt = new Date().toISOString();
-    this.persistState();
-    this.recordAudit({
+    const updatedUser = { ...user, passwordHash: hashPassword(newPassword), updatedAt: new Date().toISOString() };
+    this.persistWithAudit({ ...this.state, users: this.state.users.map((item) => item.id === userId ? updatedUser : item) }, {
       actorUsername: user.username,
       actorRole: user.roleId,
       action: 'PASSWORD_CHANGED',
@@ -1428,9 +1452,7 @@ export class ServerRbacStore {
       permissions: sanitizePermissions(input.permissions),
       updatedAt: new Date().toISOString()
     };
-    this.state.roles.push(role);
-    this.persistState();
-    this.recordAudit({
+    this.persistWithAudit({ ...this.state, roles: [...this.state.roles, role] }, {
       actorUsername,
       actorRole,
       action: 'ROLE_CREATED',
@@ -1450,8 +1472,9 @@ export class ServerRbacStore {
     actorRole: string,
     ip: string
   ): { ok: true; role: RoleDefinition } | { ok: false; status: number; message: string } {
-    const role = this.state.roles.find((r) => r.id === roleId);
-    if (!role) return { ok: false, status: 404, message: 'Peran tidak ditemukan.' };
+    const existingRole = this.state.roles.find((r) => r.id === roleId);
+    if (!existingRole) return { ok: false, status: 404, message: 'Peran tidak ditemukan.' };
+    const role = { ...existingRole };
 
     if (typeof input.name === 'string' && input.name.trim()) {
       role.name = input.name.trim();
@@ -1466,11 +1489,21 @@ export class ServerRbacStore {
         nextPerms['rbac-admin'] = ['view', 'create', 'update', 'delete'];
         nextPerms['it-traceability'] = Array.from(new Set([...(nextPerms['it-traceability'] || []), 'view']));
       }
+      const hadAdmin = role.permissions['rbac-admin']?.includes('view') && role.permissions['rbac-admin']?.includes('update');
+      const hasAdmin = nextPerms['rbac-admin']?.includes('view') && nextPerms['rbac-admin']?.includes('update');
+      const hasActiveUsers = this.state.users.some((u) => !u.isHiddenDeveloper && u.isActive && u.roleId === roleId);
+      const otherAdminExists = this.state.users.some((u) => {
+        if (u.isHiddenDeveloper || !u.isActive || u.roleId === roleId) return false;
+        const permissions = this.state.roles.find((r) => r.id === u.roleId)?.permissions['rbac-admin'];
+        return permissions?.includes('view') && permissions.includes('update');
+      });
+      if (hadAdmin && !hasAdmin && hasActiveUsers && !otherAdminExists) {
+        return { ok: false, status: 400, message: 'Tidak dapat mencabut hak dari satu-satunya peran pengelola RBAC aktif.' };
+      }
       role.permissions = nextPerms;
     }
     role.updatedAt = new Date().toISOString();
-    this.persistState();
-    this.recordAudit({
+    this.persistWithAudit({ ...this.state, roles: this.state.roles.map((item) => item.id === roleId ? role : item) }, {
       actorUsername,
       actorRole,
       action: 'ROLE_UPDATED',
@@ -1497,9 +1530,7 @@ export class ServerRbacStore {
     if (this.state.users.some((u) => u.roleId === roleId)) {
       return { ok: false, status: 409, message: 'Masih ada pengguna yang menggunakan peran ini. Pindahkan peran mereka terlebih dahulu.' };
     }
-    this.state.roles = this.state.roles.filter((r) => r.id !== roleId);
-    this.persistState();
-    this.recordAudit({
+    this.persistWithAudit({ ...this.state, roles: this.state.roles.filter((r) => r.id !== roleId) }, {
       actorUsername,
       actorRole,
       action: 'ROLE_DELETED',
@@ -1534,6 +1565,7 @@ export class ServerRbacStore {
     const fullName = String(input.fullName || '').trim();
     const password = String(input.password || '');
     const roleId = String(input.roleId || '').trim();
+    const email = String(input.email || '').trim();
 
     if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
       return { ok: false, status: 400, message: 'Username harus 3–32 karakter (huruf kecil, angka, titik, garis bawah, atau hubung).' };
@@ -1546,13 +1578,16 @@ export class ServerRbacStore {
     if (this.state.users.some((u) => u.username.toLowerCase() === username)) {
       return { ok: false, status: 409, message: `Username "${username}" sudah digunakan.` };
     }
+    if (email && this.state.users.some((u) => u.email.trim().toLowerCase() === email.toLowerCase())) {
+      return { ok: false, status: 409, message: 'Email sudah digunakan oleh akun lain.' };
+    }
 
     const now = new Date().toISOString();
     const record: ServerUserRecord = {
       id: `usr-${crypto.randomUUID().slice(0, 8)}`,
       username,
       fullName,
-      email: String(input.email || `${username}@anugrahmitraselaras.co.id`).trim(),
+      email,
       roleId,
       department: String(input.department || 'Umum').trim(),
       isActive: input.isActive !== false,
@@ -1642,29 +1677,31 @@ export class ServerRbacStore {
       return { ok: false, status: 400, message: 'Anda tidak dapat menonaktifkan akun Anda sendiri yang sedang aktif.' };
     }
 
-    if (typeof input.fullName === 'string' && input.fullName.trim()) user.fullName = input.fullName.trim();
-    if (typeof input.email === 'string' && input.email.trim()) user.email = input.email.trim();
-    if (typeof input.department === 'string' && input.department.trim()) user.department = input.department.trim();
-    user.roleId = nextRoleId;
-    user.isActive = nextActive;
-
-    let passwordReset = false;
-    if (typeof input.newPassword === 'string' && input.newPassword.length > 0) {
-      if (input.newPassword.length < 6) {
-        return { ok: false, status: 400, message: 'Kata sandi baru minimal 6 karakter.' };
-      }
-      user.passwordHash = hashPassword(input.newPassword);
-      passwordReset = true;
+    const nextEmail = typeof input.email === 'string' ? input.email.trim() : user.email;
+    if (nextEmail && nextEmail.toLowerCase() !== user.email.trim().toLowerCase() && this.state.users.some(
+      (other) => other.id !== userId && other.email.trim().toLowerCase() === nextEmail.toLowerCase()
+    )) {
+      return { ok: false, status: 409, message: 'Email sudah digunakan oleh akun lain.' };
+    }
+    const newPassword = typeof input.newPassword === 'string' ? input.newPassword : '';
+    const passwordReset = newPassword.length > 0;
+    if (passwordReset && newPassword.length < 6) {
+      return { ok: false, status: 400, message: 'Kata sandi baru minimal 6 karakter.' };
     }
 
-    user.updatedAt = new Date().toISOString();
-
-    if (!user.isActive || (passwordReset && user.id !== actorUserId)) {
-      this.state.sessions = this.state.sessions.filter((s) => s.userId !== user.id);
-    }
-
-    this.persistState();
-    this.recordAudit({
+    const updatedUser: ServerUserRecord = {
+      ...user,
+      fullName: typeof input.fullName === 'string' && input.fullName.trim() ? input.fullName.trim() : user.fullName,
+      email: nextEmail,
+      department: typeof input.department === 'string' && input.department.trim() ? input.department.trim() : user.department,
+      roleId: nextRoleId,
+      isActive: nextActive,
+      passwordHash: passwordReset ? hashPassword(newPassword) : user.passwordHash,
+      updatedAt: new Date().toISOString()
+    };
+    const auditEntry: ServerAuditEntry = {
+      id: `aud-${crypto.randomUUID()}`,
+      timestamp: new Date().toISOString(),
       actorUsername,
       actorRole,
       action: 'USER_UPDATED',
@@ -1672,9 +1709,19 @@ export class ServerRbacStore {
       targetId: user.id,
       status: 'ALLOWED',
       ip,
-      detail: `Akun "${user.username}" diperbarui (peran: ${user.roleId}, aktif: ${user.isActive ? 'Ya' : 'Tidak'}).`
-    });
-    return { ok: true, user: this.toPublicUser(user) };
+      detail: `Akun "${user.username}" diperbarui (peran: ${updatedUser.roleId}, aktif: ${updatedUser.isActive ? 'Ya' : 'Tidak'}).`
+    };
+    const nextState: RbacDatabaseState = {
+      ...this.state,
+      users: this.state.users.map((item) => item.id === userId ? updatedUser : item),
+      sessions: !nextActive || (passwordReset && user.id !== actorUserId)
+        ? this.state.sessions.filter((session) => session.userId !== user.id)
+        : this.state.sessions,
+      auditLogs: [auditEntry, ...this.state.auditLogs].slice(0, 500)
+    };
+    this.persistState(nextState);
+    this.state = nextState;
+    return { ok: true, user: this.toPublicUser(updatedUser) };
   }
 
   public deleteUser(
@@ -1699,10 +1746,11 @@ export class ServerRbacStore {
       return { ok: false, status: 400, message: 'Tidak dapat menghapus satu-satunya pengelola RBAC aktif.' };
     }
 
-    this.state.users = this.state.users.filter((u) => u.id !== userId);
-    this.state.sessions = this.state.sessions.filter((s) => s.userId !== userId);
-    this.persistState();
-    this.recordAudit({
+    this.persistWithAudit({
+      ...this.state,
+      users: this.state.users.filter((u) => u.id !== userId),
+      sessions: this.state.sessions.filter((s) => s.userId !== userId)
+    }, {
       actorUsername,
       actorRole,
       action: 'USER_DELETED',
