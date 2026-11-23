@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadDeploymentEnv, resolveDeploymentEnvironment } from '../../server/envLoader';
 import { buildWindowsDeploymentGuides } from '../../server/deploymentGuides';
 import { ServerRbacStore } from '../../server/rbacStore';
@@ -25,6 +25,7 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     for (const key of TRACKED_KEYS) {
       const prev = prevValues[key];
       if (prev === undefined) delete process.env[key];
@@ -134,13 +135,19 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(guides.powershellQuickDeploy.join('\n')).not.toContain('-ConfigureFirewall');
   });
 
-  it('mengizinkan admin Firebase staging (cloud.ams2026@gmail.com) login tanpa menimpa email developer utama', () => {
+  it('mengizinkan dua admin Firebase yang dikonfigurasi tanpa menimpa akun pertama', () => {
+    vi.stubEnv('VITE_FIREBASE_CONFIGURED_ADMINS_ONLY', 'true');
+    vi.stubEnv('BOOTSTRAP_DEV_EMAIL', 'developer@example.invalid');
+    vi.stubEnv('FIREBASE_ADMIN_EMAILS', 'staging@example.invalid');
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD', '');
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD_HASH', '');
+    vi.stubEnv('BOOTSTRAP_DEV_ROLE_ID', '');
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-win-rbac-'));
     tempDirs.push(dataDir);
 
     const rbac = new ServerRbacStore(dataDir);
     const devLogin = rbac.authenticateByVerifiedEmail(
-      'antraderyll@gmail.com',
+      'developer@example.invalid',
       'uid-dev-1',
       'Developer Utama',
       '127.0.0.1',
@@ -149,7 +156,7 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(devLogin.ok).toBe(true);
 
     const stagingLogin = rbac.authenticateByVerifiedEmail(
-      'cloud.ams2026@gmail.com',
+      'staging@example.invalid',
       'uid-staging-owner',
       'Owner Staging Cloud',
       '127.0.0.1',
@@ -158,11 +165,11 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(stagingLogin.ok).toBe(true);
     if (!stagingLogin.ok) return;
 
-    expect(stagingLogin.user.email).toBe('cloud.ams2026@gmail.com');
+    expect(stagingLogin.user.email).toBe('staging@example.invalid');
     expect(stagingLogin.role.id).toBe('developer_it_support');
 
     const allUsers = rbac.listAllUsersForCloudSync();
-    expect(allUsers.some((u) => u.email === 'antraderyll@gmail.com')).toBe(true);
-    expect(allUsers.some((u) => u.email === 'cloud.ams2026@gmail.com')).toBe(true);
+    expect(allUsers.some((u) => u.email === 'developer@example.invalid')).toBe(true);
+    expect(allUsers.some((u) => u.email === 'staging@example.invalid')).toBe(true);
   });
 });
