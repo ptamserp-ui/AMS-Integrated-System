@@ -23,6 +23,7 @@ import {
   Pencil,
   RefreshCw,
   Save,
+  Search,
   Smartphone,
   Tablet,
   UploadCloud
@@ -105,7 +106,6 @@ const tanpaMeta = (cfg: KonfigurasiSitus) => {
 };
 
 function sinkronkanProdukKatalog(cfg: KonfigurasiSitus): KonfigurasiSitus {
-  if (!db.hasProdukKatalogTersimpan()) return cfg;
   return {
     ...cfg,
     produk: {
@@ -113,6 +113,10 @@ function sinkronkanProdukKatalog(cfg: KonfigurasiSitus): KonfigurasiSitus {
       item: produkKatalogUntukWebsite(db.getProdukKatalog(), cfg.produk.item)
     }
   };
+}
+
+function adalahProdukInputBaru(produk: ProdukWebsite): boolean {
+  return !produk.sumberId?.startsWith('daftar-harga-ams-v6:');
 }
 
 function EditorPemilihProduk({
@@ -124,79 +128,255 @@ function EditorPemilihProduk({
   bolehUbah: boolean;
   onGanti: (seksi: SeksiDaftar<ProdukWebsite>) => void;
 }) {
+  const [cari, setCari] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'semua' | 'baru' | 'publish' | 'draft'>('semua');
   const [previewId, setPreviewId] = useState(seksi.item[0]?.id ?? '');
-  const produkPreview = seksi.item.find((produk) => produk.id === previewId) ?? seksi.item[0];
+  const [gagalPreviewFoto, setGagalPreviewFoto] = useState(false);
+
+  const jumlahBaru = useMemo(
+    () => seksi.item.filter(adalahProdukInputBaru).length,
+    [seksi.item]
+  );
+  const terbit = useMemo(
+    () => seksi.item.filter((produk) => produk.isActive).length,
+    [seksi.item]
+  );
+  const itemTersaring = useMemo(() => {
+    const q = cari.trim().toLowerCase();
+    return seksi.item.filter((produk) => {
+      if (filterStatus === 'baru' && !adalahProdukInputBaru(produk)) return false;
+      if (filterStatus === 'publish' && !produk.isActive) return false;
+      if (filterStatus === 'draft' && produk.isActive) return false;
+      if (!q) return true;
+      const skuTeks = (produk.varianSku ?? [])
+        .map((v) => `${v.kodeSKU} ${v.tipeModel} ${v.nomorIzinEdar}`)
+        .join(' ');
+      return `${produk.nama} ${produk.tipeModel} ${produk.kategori} ${produk.produsen} ${produk.nomorIzinEdar} ${produk.kodeSKU ?? ''} ${skuTeks}`
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [cari, filterStatus, seksi.item]);
+
+  const produkPreview =
+    itemTersaring.find((produk) => produk.id === previewId) ??
+    seksi.item.find((produk) => produk.id === previewId) ??
+    itemTersaring[0] ??
+    seksi.item[0];
   const fotoUtama = produkPreview
     ? selesaikanGambar(produkPreview.imageUrls?.[0] ?? produkPreview.imageUrl)
     : undefined;
+
+  useEffect(() => {
+    setGagalPreviewFoto(false);
+  }, [fotoUtama, produkPreview?.id]);
 
   useEffect(() => {
     if (seksi.item.some((produk) => produk.id === previewId)) return;
     setPreviewId(seksi.item[0]?.id ?? '');
   }, [previewId, seksi.item]);
 
-  const terbit = seksi.item.filter((produk) => produk.isActive).length;
+  const terapkanStatusMassal = (aktifBaru: boolean) => {
+    const ids = new Set(itemTersaring.map((p) => p.id));
+    if (ids.size === 0) return;
+    onGanti({
+      ...seksi,
+      item: seksi.item.map((item) => (ids.has(item.id) ? { ...item, isActive: aktifBaru } : item))
+    });
+  };
+
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-        <h3 className="text-sm font-bold text-blue-950">Pilih produk untuk dipublikasikan</h3>
-        <p className="mt-1 text-xs leading-relaxed text-blue-900">
-          Detail, foto, spesifikasi, dan SKU dikelola di Commercial → Product Catalog. Di sini hanya status publish yang dapat diubah.
-          Semua produk dari Product Catalog muncul otomatis di sini; centang produk yang ingin dipublikasikan.
-        </p>
-        <p className="mt-2 text-xs font-semibold text-blue-900">{terbit} dari {seksi.item.length} produk dipilih</p>
-      </div>
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
-        <div className="max-h-[70vh] space-y-2 overflow-y-auto">
-          {seksi.item.map((produk) => (
-            <div key={produk.id} className={`flex items-center gap-3 rounded-xl border bg-white p-3 ${produkPreview?.id === produk.id ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200'}`}>
-              <input
-                type="checkbox"
-                aria-label={`Publikasikan ${produk.nama || 'produk tanpa nama'}`}
-                checked={produk.isActive}
-                disabled={!bolehUbah}
-                onChange={(e) => onGanti({
-                  ...seksi,
-                  item: seksi.item.map((item) => item.id === produk.id ? { ...item, isActive: e.target.checked } : item)
-                })}
-                className="h-4 w-4 shrink-0 accent-slate-800"
-              />
+      <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-bold text-blue-950">Pilih produk untuk dipublikasikan</h3>
+            <p className="mt-1 text-xs leading-relaxed text-blue-900">
+              Seluruh produk yang diinput di <strong>Commercial → Product Catalog</strong> otomatis muncul di daftar ini.
+              Centang produk yang ingin ditayangkan lalu klik <strong>Terbitkan</strong>.
+            </p>
+          </div>
+          <label className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={seksi.isActive}
+              disabled={!bolehUbah}
+              onChange={(e) => onGanti({ ...seksi, isActive: e.target.checked })}
+              className="h-4 w-4 accent-slate-800"
+            />
+            Tampilkan seksi Katalog di situs
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-blue-200/70">
+          <p className="text-xs font-semibold text-blue-950 tabular-nums">
+            {terbit} dari {seksi.item.length} produk berstatus Publish
+            {jumlahBaru > 0 && <span className="ml-2 text-blue-800">· {jumlahBaru} Input Baru / Custom</span>}
+          </p>
+          {bolehUbah && itemTersaring.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                aria-pressed={produkPreview?.id === produk.id}
-                onClick={() => setPreviewId(produk.id)}
-                className="min-w-0 flex-1 text-left"
+                onClick={() => terapkanStatusMassal(true)}
+                className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-2xs font-bold text-emerald-800 hover:bg-emerald-50 cursor-pointer"
               >
-                <span className="block truncate text-xs font-bold text-slate-900">{produk.nama || '(tanpa nama)'}</span>
-                <span className="mt-0.5 block truncate text-2xs text-slate-500">
-                  {[produk.tipeModel, produk.kategori, produk.produsen].filter(Boolean).join(' · ')}
-                </span>
-                {produk.varianSku && produk.varianSku.length > 0 && (
-                  <span className="mt-1 block text-2xs text-slate-500">{produk.varianSku.length} SKU</span>
-                )}
+                Publish Terfilter ({itemTersaring.length})
               </button>
-              <span className={`shrink-0 rounded-full px-2 py-1 text-2xs font-bold ${produk.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'}`}>
-                {produk.isActive ? 'Publish' : 'Draft'}
-              </span>
+              <button
+                type="button"
+                onClick={() => terapkanStatusMassal(false)}
+                className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-2xs font-bold text-slate-700 hover:bg-slate-100 cursor-pointer"
+              >
+                Jadikan Draft
+              </button>
             </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2 sm:items-center justify-between">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="search"
+            value={cari}
+            onChange={(e) => setCari(e.target.value)}
+            placeholder="Cari nama produk, tipe/model, kode SKU, NIE, atau produsen…"
+            className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs text-slate-900 outline-none focus:border-blue-500"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {([
+            { id: 'semua', label: `Semua (${seksi.item.length})` },
+            { id: 'baru', label: `Input Baru (${jumlahBaru})` },
+            { id: 'publish', label: `Publish (${terbit})` },
+            { id: 'draft', label: `Draft (${seksi.item.length - terbit})` }
+          ] as const).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setFilterStatus(tab.id)}
+              className={`rounded-lg border px-2.5 py-1.5 text-2xs font-semibold transition-colors cursor-pointer ${
+                filterStatus === tab.id
+                  ? 'border-slate-800 bg-slate-800 text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {tab.label}
+            </button>
           ))}
-          {seksi.item.length === 0 && (
+        </div>
+      </div>
+
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
+        <div className="max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+          {itemTersaring.map((produk) => {
+            const inputBaru = adalahProdukInputBaru(produk);
+            return (
+              <div
+                key={produk.id}
+                className={`flex items-center gap-3 rounded-xl border bg-white p-3 ${
+                  produkPreview?.id === produk.id ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`Publikasikan ${produk.nama || 'produk tanpa nama'}`}
+                  checked={produk.isActive}
+                  disabled={!bolehUbah}
+                  onChange={(e) => onGanti({
+                    ...seksi,
+                    item: seksi.item.map((item) => item.id === produk.id ? { ...item, isActive: e.target.checked } : item)
+                  })}
+                  className="h-4 w-4 shrink-0 accent-slate-800 cursor-pointer"
+                />
+                <button
+                  type="button"
+                  aria-pressed={produkPreview?.id === produk.id}
+                  onClick={() => setPreviewId(produk.id)}
+                  className="min-w-0 flex-1 text-left cursor-pointer"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span className="truncate text-xs font-bold text-slate-900">{produk.nama || '(tanpa nama)'}</span>
+                    {inputBaru && (
+                      <span className="shrink-0 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-3xs font-bold text-blue-700">
+                        Input Baru
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block truncate text-2xs text-slate-500">
+                    {[
+                      produk.tipeModel,
+                      produk.kategori,
+                      produk.produsen,
+                      produk.hargaTayang || produk.varianSku?.[0]?.hargaTayang
+                    ].filter(Boolean).join(' · ') || 'Belum ada keterangan'}
+                  </span>
+                  {produk.varianSku && produk.varianSku.length > 0 && (
+                    <span className="mt-1 block truncate text-2xs text-slate-500">
+                      {produk.varianSku.length} SKU ({produk.varianSku.map((v) => v.kodeSKU).filter(Boolean).slice(0, 3).join(', ')})
+                      {(produk.nomorIzinEdar || produk.varianSku[0]?.nomorIzinEdar) ? ` · NIE ${produk.nomorIzinEdar || produk.varianSku[0]?.nomorIzinEdar}` : ''}
+                    </span>
+                  )}
+                </button>
+                <span className={`shrink-0 rounded-md px-2 py-1 text-2xs font-bold ${produk.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
+                  {produk.isActive ? 'Publish' : 'Draft'}
+                </span>
+              </div>
+            );
+          })}
+          {itemTersaring.length === 0 && (
             <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-xs text-slate-500">
-              Belum ada produk tersimpan di Product Catalog.
+              {seksi.item.length === 0
+                ? 'Belum ada produk tersimpan di Product Catalog.'
+                : 'Tidak ada produk yang cocok dengan pencarian atau filter ini.'}
             </p>
           )}
         </div>
-        <aside className="rounded-xl border border-slate-200 bg-white p-4">
-          <h4 className="text-sm font-bold text-slate-900">Foto utama · 400 × 400</h4>
-          <p className="mt-1 truncate text-xs text-slate-500">{produkPreview?.nama || 'Pilih produk untuk melihat foto'}</p>
-          <div className="mx-auto mt-3 flex aspect-square w-full max-w-[400px] items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-            {fotoUtama
-              ? <img src={fotoUtama} alt={`Foto utama ${produkPreview?.nama ?? 'produk'}`} loading="lazy" className="h-full w-full object-contain" />
-              : <div className="flex flex-col items-center gap-2 px-4 text-center text-slate-400">
-                  <ImageIcon className="h-10 w-10" />
-                  <span className="text-xs">Foto utama belum ditambahkan di Product Catalog.</span>
-                </div>}
+        <aside className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+          <div>
+            <h4 className="text-sm font-bold text-slate-900">Foto utama · 400 × 400</h4>
+            <p className="mt-1 truncate text-xs text-slate-500">{produkPreview?.nama || 'Pilih produk untuk melihat foto'}</p>
           </div>
+          <div className="mx-auto flex aspect-square w-full max-w-[400px] items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+            {fotoUtama && !gagalPreviewFoto
+              ? (
+                <img
+                  src={fotoUtama}
+                  alt={`Foto utama ${produkPreview?.nama ?? 'produk'}`}
+                  loading="lazy"
+                  onError={() => setGagalPreviewFoto(true)}
+                  className="h-full w-full object-contain"
+                />
+              )
+              : (
+                <div className="flex flex-col items-center gap-2 px-4 text-center text-slate-400">
+                  <ImageIcon className="h-10 w-10" />
+                  <span className="text-xs">
+                    {fotoUtama ? 'Foto tidak dapat dimuat dari server media.' : 'Foto utama belum ditambahkan di Product Catalog.'}
+                  </span>
+                </div>
+              )}
+          </div>
+          {produkPreview && (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-slate-100 pt-3 text-2xs">
+              <div>
+                <dt className="text-slate-400 font-semibold">Kode SKU Utama</dt>
+                <dd className="text-slate-800 font-mono truncate">{produkPreview.kodeSKU || produkPreview.varianSku?.[0]?.kodeSKU || '-'}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-400 font-semibold">Harga Tayang</dt>
+                <dd className="text-slate-800 font-semibold truncate">{produkPreview.hargaTayang || produkPreview.varianSku?.[0]?.hargaTayang || '-'}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-400 font-semibold">Nomor Izin Edar</dt>
+                <dd className="text-slate-800 font-mono truncate">{produkPreview.nomorIzinEdar || produkPreview.varianSku?.[0]?.nomorIzinEdar || '-'}</dd>
+              </div>
+              <div>
+                <dt className="text-slate-400 font-semibold">Kategori</dt>
+                <dd className="text-slate-800 truncate">{produkPreview.kategori || '-'}</dd>
+              </div>
+            </dl>
+          )}
         </aside>
       </div>
     </div>
@@ -205,9 +385,12 @@ function EditorPemilihProduk({
 
 export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   const [draf, setDraf] = useState<KonfigurasiSitus>(() => sinkronkanProdukKatalog(db.getWebsiteDraft()));
+  const drafRef = useRef(draf);
+  drafRef.current = draf;
   const [baseline, setBaseline] = useState<string>(() => tanpaMeta(sinkronkanProdukKatalog(db.getWebsiteDraft())));
   const baselineRef = useRef(baseline);
   baselineRef.current = baseline;
+  const sedangSimpanLokalRef = useRef(false);
   const [drafRemoteTerbaru, setDrafRemoteTerbaru] = useState(false);
   const [terbit, setTerbit] = useState<KonfigurasiSitus | null>(() => db.getWebsiteTerbit());
   const [kunci, setKunci] = useState<KunciEditorSitus>('identitas');
@@ -227,21 +410,41 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   useEffect(() => {
     const berhentiTerbit = db.subscribe('website_published', () => setTerbit(db.getWebsiteTerbit()));
     const berhentiDraf = db.subscribe('website_draft', () => {
+      if (sedangSimpanLokalRef.current) return;
       const terbaru = sinkronkanProdukKatalog(db.getWebsiteDraft());
       const metaBaru = tanpaMeta(terbaru);
-      if (metaBaru === baselineRef.current) return;
-      setDraf((cur) => {
-        if (tanpaMeta(cur) === baselineRef.current) {
+      const curMeta = tanpaMeta(drafRef.current);
+      if (metaBaru === curMeta) {
+        if (metaBaru !== baselineRef.current) {
+          baselineRef.current = metaBaru;
           setBaseline(metaBaru);
-          setDrafRemoteTerbaru(false);
-          return terbaru;
         }
+        setDrafRemoteTerbaru(false);
+        return;
+      }
+      if (curMeta === baselineRef.current) {
+        baselineRef.current = metaBaru;
+        drafRef.current = terbaru;
+        setDraf(terbaru);
+        setBaseline(metaBaru);
+        setDrafRemoteTerbaru(false);
+      } else {
         setDrafRemoteTerbaru(true);
-        return cur;
-      });
+      }
     });
     const berhentiKatalog = db.subscribe('product_catalog', () => {
-      setDraf((cur) => sinkronkanProdukKatalog(cur));
+      if (sedangSimpanLokalRef.current) return;
+      const cur = drafRef.current;
+      const curTanpaEditLokal = tanpaMeta(cur) === baselineRef.current;
+      const next = sinkronkanProdukKatalog(cur);
+      const nextMeta = tanpaMeta(next);
+      drafRef.current = next;
+      setDraf(next);
+      if (curTanpaEditLokal) {
+        baselineRef.current = nextMeta;
+        setBaseline(nextMeta);
+        setDrafRemoteTerbaru(false);
+      }
     });
     return () => {
       berhentiTerbit();
@@ -260,24 +463,39 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   const belumTerbit = terbit ? tanpaMeta(draf) !== tanpaMeta(terbit) : true;
 
   const tandaiTersimpan = useCallback((cfg: KonfigurasiSitus) => {
+    const meta = tanpaMeta(cfg);
+    drafRef.current = cfg;
+    baselineRef.current = meta;
     setDraf(cfg);
-    setBaseline(tanpaMeta(cfg));
+    setBaseline(meta);
     setDrafRemoteTerbaru(false);
   }, []);
 
   const simpan = () => {
-    tandaiTersimpan(db.simpanWebsiteDraft(draf, pengguna, peran));
-    setPesan({ nada: 'ok', teks: 'Draf konten tersimpan & tersinkronisasi ke server. Jejak perubahan tercatat pada audit trail.' });
+    sedangSimpanLokalRef.current = true;
+    try {
+      const hasil = db.simpanWebsiteDraft(draf, pengguna, peran);
+      tandaiTersimpan(hasil);
+      setPesan({ nada: 'ok', teks: 'Draf konten tersimpan & tersinkronisasi ke server. Jejak perubahan tercatat pada audit trail.' });
+    } finally {
+      sedangSimpanLokalRef.current = false;
+    }
   };
 
   const sinkron = () => {
-    const { baru } = db.sinkronkanWebsiteDraft(pengguna, peran);
-    tandaiTersimpan(baru);
-    const jumlah = BAGIAN_WEBSITE.filter((b) => b.dinamis).reduce((acc, b) => acc + jumlahButir(baru, b.kunci), 0);
-    setPesan({
-      nada: 'ok',
-      teks: `Sinkron selesai — ${jumlah} butir konten dibangun ulang dari register izin edar, sertifikat, pelanggan, kampanye, teritorial, dan stok.`
-    });
+    sedangSimpanLokalRef.current = true;
+    try {
+      const { baru } = db.sinkronkanWebsiteDraft(pengguna, peran);
+      const diselaraskan = sinkronkanProdukKatalog(baru);
+      tandaiTersimpan(diselaraskan);
+      const jumlah = BAGIAN_WEBSITE.filter((b) => b.dinamis).reduce((acc, b) => acc + jumlahButir(diselaraskan, b.kunci), 0);
+      setPesan({
+        nada: 'ok',
+        teks: `Sinkron selesai — ${jumlah} butir konten (termasuk Product Catalog) dibangun ulang dari data aplikasi.`
+      });
+    } finally {
+      sedangSimpanLokalRef.current = false;
+    }
   };
 
   /** Snapshot dikirim ke server agar /web tayang lintas perangkat; hosting statis memakai berkas unduhan. */
@@ -299,10 +517,16 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   };
 
   const terbitkan = async () => {
-    db.simpanWebsiteDraft(draf, pengguna, peran);
-    const snapshot = db.terbitkanWebsite(pengguna, peran);
-    tandaiTersimpan(db.getWebsiteDraft());
-    setTerbit(snapshot);
+    let snapshot: KonfigurasiSitus;
+    sedangSimpanLokalRef.current = true;
+    try {
+      db.simpanWebsiteDraft(draf, pengguna, peran);
+      snapshot = db.terbitkanWebsite(pengguna, peran);
+      tandaiTersimpan(db.getWebsiteDraft());
+      setTerbit(snapshot);
+    } finally {
+      sedangSimpanLokalRef.current = false;
+    }
     const hasil = await kirimSnapshot(snapshot);
     setPesan({
       nada: hasil.ok ? 'ok' : 'waspada',
@@ -315,11 +539,16 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   };
 
   const tahan = () => {
-    const tersisa = db.tahanWebsite(pengguna, peran);
-    setTerbit(tersisa);
-    tandaiTersimpan(db.getWebsiteDraft());
-    void kirimSnapshot(tersisa ?? { ...draf, isPublished: false });
-    setPesan({ nada: 'waspada', teks: 'Situs publik ditahan. Pengunjung melihat pesan non-aktif sampai penerbitan berikutnya.' });
+    sedangSimpanLokalRef.current = true;
+    try {
+      const tersisa = db.tahanWebsite(pengguna, peran);
+      setTerbit(tersisa);
+      tandaiTersimpan(db.getWebsiteDraft());
+      void kirimSnapshot(tersisa ?? { ...draf, isPublished: false });
+      setPesan({ nada: 'waspada', teks: 'Situs publik ditahan. Pengunjung melihat pesan non-aktif sampai penerbitan berikutnya.' });
+    } finally {
+      sedangSimpanLokalRef.current = false;
+    }
   };
 
   const unduh = () => {
@@ -440,9 +669,9 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
     <div className="space-y-6">
       <DeveloperNotes
         items={[
-          'Terbitkan hanya untuk peran PJT & Admin IT; tanpa AMS_ADMIN_TOKEN di environment server, perubahan TIDAK bisa dikirim ke server — pakai Unduh Snapshot JSON.',
-          'Live Preview memakai draf yang belum disimpan; pengunjung /web hanya melihat snapshot hasil Terbitkan.',
-          'Stok & harga pada kartu katalog publik memakai data benih (register lokal) sampai persistensi server dibangun — bukan FEFO gudang real time.'
+          'Simpan Draf dan Terbitkan disinkronkan real-time ke server & seluruh user melalui WebSocket + RBAC sesi aktif.',
+          'Live Preview memakai draf editor aktif; pengunjung /web langsung menerima pembaruan saat Terbitkan atau saat Product Catalog diperbarui.',
+          'Produk dari menu Commercial → Product Catalog otomatis muncul di Katalog Produk CMS Website untuk dipilih (Publish/Draft).'
         ]}
       />
       {/* ================= STATUS KONTEN ================= */}

@@ -30,6 +30,22 @@ import { ProdukWebsite } from '../../../../types';
 import LogoAplikasi from '../../../common/LogoAplikasi';
 import { Panel } from '../../../ui';
 
+function GambarProdukKatalog({ src, alt }: { src?: string; alt: string }) {
+  const [gagal, setGagal] = useState(false);
+  useEffect(() => {
+    setGagal(false);
+  }, [src]);
+  if (!src || gagal) {
+    return (
+      <div className="flex flex-col items-center justify-center text-slate-400">
+        <ImageOff className="w-7 h-7 mb-1" />
+        <span className="text-3xs">PT Anugrahmitra Selaras</span>
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} onError={() => setGagal(true)} className="w-full h-full object-contain p-[2mm]" />;
+}
+
 export interface CatalogSettings {
   judulKatalog: string;
   subjudulKatalog: string;
@@ -409,14 +425,7 @@ export default function InternalCatalogModule() {
                       {/* Kolom Kiri: Gambar Produk & Kepatuhan */}
                       <div className="min-h-0 flex flex-col gap-[2.5mm]">
                         <div className="flex-1 min-h-0 rounded-[2mm] border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center shadow-inner">
-                          {fotoUrl ? (
-                            <img src={fotoUrl} alt={p.nama} className="w-full h-full object-contain p-[2mm]" />
-                          ) : (
-                            <div className="flex flex-col items-center justify-center text-slate-400">
-                              <ImageOff className="w-7 h-7 mb-1" />
-                              <span className="text-3xs">PT Anugrahmitra Selaras</span>
-                            </div>
-                          )}
+                          <GambarProdukKatalog src={fotoUrl} alt={p.nama} />
                         </div>
 
                         <div className="shrink-0 bg-slate-50 rounded-[2mm] p-[2.5mm] border border-slate-200 text-3xs space-y-[1mm]">

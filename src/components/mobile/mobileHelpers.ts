@@ -48,15 +48,6 @@ const PERAN_SALES: ReadonlySet<UserRole> = new Set([
   'it_admin'
 ]);
 
-const PERAN_APPROVER: ReadonlySet<UserRole> = new Set([
-  'pjt',
-  'it_admin',
-  'qa_manager',
-  'manajer_produksi',
-  'kepala_gudang',
-  'sales_manager'
-]);
-
 export function getMobileCapabilities(sesi: SesiLogin | null | undefined): MobileCapabilities {
   if (!sesi) {
     return {
@@ -70,12 +61,13 @@ export function getMobileCapabilities(sesi: SesiLogin | null | undefined): Mobil
 
   const isSalesRole =
     PERAN_SALES.has(sesi.peran) || punyaIzin(sesi, 'sales-marketing', 'view');
-  const canApproveLeave =
-    PERAN_APPROVER.has(sesi.peran) || punyaIzin(sesi, 'hrd-pelatihan', 'approve');
-  const canViewAllEmployees =
-    sesi.peran === 'pjt' ||
-    sesi.peran === 'it_admin' ||
-    punyaIzin(sesi, 'hrd-pelatihan', 'update');
+  const canApproveLeave = ['developer_it_support', 'hrd_manager'].includes(sesi.peran);
+  const canViewAllEmployees = [
+    'developer_it_support',
+    'hrd_manager',
+    'payroll_manager',
+    'management'
+  ].includes(sesi.peran);
   const canManageOrders =
     PERAN_SALES.has(sesi.peran) || punyaIzin(sesi, 'sales-marketing', 'create');
 
@@ -88,50 +80,21 @@ export function getMobileCapabilities(sesi: SesiLogin | null | undefined): Mobil
   };
 }
 
-function normalisasiNama(teks: string): string {
-  return teks
-    .toLowerCase()
-    .replace(/\b(apt|dr|ir|s\.si|s\.t|s\.e|s\.farm|a\.md\.tem|s\.kom)\b/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 export function findKaryawanForSession(
   daftarKaryawan: KaryawanHRIS[],
   sesi: SesiLogin | null | undefined,
   overrideId?: string
 ): KaryawanHRIS | undefined {
-  if (daftarKaryawan.length === 0) return undefined;
-  if (overrideId) {
-    const manual = daftarKaryawan.find((k) => k.id === overrideId);
-    if (manual) return manual;
+  const capabilities = getMobileCapabilities(sesi);
+  if (capabilities.canViewAllEmployees) {
+    if (overrideId) {
+      const manual = daftarKaryawan.find((k) => k.id === overrideId);
+      if (manual) return manual;
+    }
+    return daftarKaryawan[0];
   }
-  if (!sesi) return daftarKaryawan[0];
-
-  const targetNama = normalisasiNama(sesi.namaLengkap || '');
-  const usernameLower = (sesi.namaPengguna || '').toLowerCase();
-
-  const exactNama = daftarKaryawan.find((k) => {
-    const normK = normalisasiNama(k.nama);
-    return targetNama.length > 2 && (normK.includes(targetNama) || targetNama.includes(normK));
-  });
-  if (exactNama) return exactNama;
-
-  const cocokUsername = daftarKaryawan.find((k) => {
-    const bagian = k.nama.toLowerCase().split(/\s+/);
-    return bagian.some((b) => b.length >= 4 && usernameLower.includes(b));
-  });
-  if (cocokUsername) return cocokUsername;
-
-  if (sesi.peran === 'sales_manager' || sesi.peran === 'sales_medrep') {
-    const salesEmp = daftarKaryawan.find((k) =>
-      k.divisi.toLowerCase().includes('sales')
-    );
-    if (salesEmp) return salesEmp;
-  }
-
-  return daftarKaryawan[0];
+  if (!sesi?.employeeId) return undefined;
+  return daftarKaryawan.find((k) => k.id === sesi.employeeId);
 }
 
 export function hitungJumlahHariCuti(tanggalMulai: string, tanggalSelesai: string): number {

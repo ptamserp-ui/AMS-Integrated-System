@@ -39,7 +39,7 @@ const toneHasilScan = (hasil: KejadianScanner['hasilValidasi']): Tone => {
 };
 
 export default function ScannerRfidTab({ currentRole, dariAcuan, onPerubahanData }: Props) {
-  const dbTick = useDbTick(['gudang_scanner', 'lokasi_bin', 'stok_gudang']);
+  const dbTick = useDbTick(['gudang_scanner', 'gudang_bin', 'stok_gudang']);
   const riwayat = useMemo<KejadianScanner[]>(() => {
     void dbTick;
     return db.getKejadianScanner();

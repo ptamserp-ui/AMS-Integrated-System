@@ -77,9 +77,9 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
   const logHariIni = useMemo(
     () =>
       absensiList.find(
-        (a) => a.tanggal === hariIni && (a.karyawanId === karyawanId || a.nama === namaKaryawan)
+        (a) => a.tanggal === hariIni && a.karyawanId === karyawanId
       ),
-    [absensiList, hariIni, karyawanId, namaKaryawan]
+    [absensiList, hariIni, karyawanId]
   );
 
   const shiftAktif = useMemo(() => {
@@ -96,9 +96,9 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
   );
 
   const slipTerbaru = useMemo(() => {
-    const milik = slipList.filter((s) => s.karyawanId === karyawanId || s.nama === namaKaryawan);
+    const milik = slipList.filter((s) => s.karyawanId === karyawanId);
     return milik[0] || (capabilities.canViewAllEmployees ? slipList[0] : null) || null;
-  }, [slipList, karyawanId, namaKaryawan, capabilities.canViewAllEmployees]);
+  }, [slipList, karyawanId, capabilities.canViewAllEmployees]);
 
   // Ringkasan Sales & CRM
   const kunjunganBelumCheckIn = useMemo(
@@ -227,22 +227,24 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
             </p>
           </button>
 
-          <button
-            type="button"
-            onClick={keSlipGaji}
-            className="text-left rounded-2xl border border-slate-200 bg-white p-4 shadow-xs hover:border-teal-300 transition cursor-pointer space-y-1.5"
-          >
-            <div className="flex items-center justify-between">
-              <ReceiptText className="w-5 h-5 text-sky-700" />
-              <ArrowRight className="w-4 h-4 text-slate-400" />
-            </div>
-            <p className="text-xs font-bold text-slate-900">Slip Gaji Digital</p>
-            <p className="text-2xs text-slate-600 tabular-nums">
-              {slipTerbaru
-                ? `${slipTerbaru.periode} · ${formatRupiah(slipTerbaru.takeHomePay)}`
-                : 'Lihat rincian payroll'}
-            </p>
-          </button>
+          {capabilities.canViewAllEmployees && (
+            <button
+              type="button"
+              onClick={keSlipGaji}
+              className="text-left rounded-2xl border border-slate-200 bg-white p-4 shadow-xs hover:border-teal-300 transition cursor-pointer space-y-1.5"
+            >
+              <div className="flex items-center justify-between">
+                <ReceiptText className="w-5 h-5 text-sky-700" />
+                <ArrowRight className="w-4 h-4 text-slate-400" />
+              </div>
+              <p className="text-xs font-bold text-slate-900">Slip Gaji Digital</p>
+              <p className="text-2xs text-slate-600 tabular-nums">
+                {slipTerbaru
+                  ? `${slipTerbaru.periode} · ${formatRupiah(slipTerbaru.takeHomePay)}`
+                  : 'Lihat rincian payroll'}
+              </p>
+            </button>
+          )}
         </div>
       </section>
 

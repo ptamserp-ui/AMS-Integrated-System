@@ -41,7 +41,7 @@ export default function CrmProspekModule({
   onBuatQuotation?: (pelanggan: PelangganB2B) => void;
 } = {}) {
   const dbTick = useDbTick([
-    'pelanggan_b2b',
+    'sales_pelanggan',
     'sales_prospek',
     'sales_teritorial',
     'sales_kunjungan',

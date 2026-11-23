@@ -125,12 +125,20 @@ export default defineConfig(() => {
       },
     },
     build: {
+      target: 'es2022',
+      cssCodeSplit: true,
       rollupOptions: {
         output: {
           manualChunks(id: string) {
             if (id.includes('node_modules')) {
               if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
                 return 'vendor-react';
+              }
+              if (id.includes('@firebase/firestore') || id.includes('firebase/firestore')) {
+                return 'vendor-firebase-firestore';
+              }
+              if (id.includes('@firebase/auth') || id.includes('firebase/auth')) {
+                return 'vendor-firebase-auth';
               }
               if (id.includes('/firebase/') || id.includes('/@firebase/')) {
                 return 'vendor-firebase';

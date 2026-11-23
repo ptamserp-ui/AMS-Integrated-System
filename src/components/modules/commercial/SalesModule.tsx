@@ -10,6 +10,7 @@ import {
   BookOpen
 } from 'lucide-react';
 import { PelangganB2B, UserRole } from '../../../types';
+import ErrorBoundary from '../../common/ErrorBoundary';
 
 const CrmProspekModule = lazy(() => import('./sales/CrmProspekModule'));
 const TenderKontrakModule = lazy(() => import('./sales/TenderKontrakModule'));
@@ -98,24 +99,26 @@ export default function SalesModule({
         })}
       </div>
 
-      <Suspense
-        fallback={
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
-            Memuat sub-modul Sales…
-          </div>
-        }
-      >
-        {activeTab === 'crm' && (
-          <CrmProspekModule onBuatQuotation={onBuatQuotationUntukPelanggan} />
-        )}
-        {activeTab === 'tender' && <TenderKontrakModule />}
-        {activeTab === 'sfa' && <SalesForceModule />}
-        {activeTab === 'order' && <SalesOrderModule />}
-        {activeTab === 'katalog-internal' && <InternalCatalogModule />}
-        {activeTab === 'kampanye' && <KampanyeMarketingModule />}
-        {activeTab === 'listmonk' && <ListmonkModule currentRole={currentRole} />}
-        {activeTab === 'analitik' && <AnalitikSalesModule />}
-      </Suspense>
+      <ErrorBoundary resetKey={activeTab} label="sub-modul Sales">
+        <Suspense
+          fallback={
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+              Memuat sub-modul Sales…
+            </div>
+          }
+        >
+          {activeTab === 'crm' && (
+            <CrmProspekModule onBuatQuotation={onBuatQuotationUntukPelanggan} />
+          )}
+          {activeTab === 'tender' && <TenderKontrakModule />}
+          {activeTab === 'sfa' && <SalesForceModule />}
+          {activeTab === 'order' && <SalesOrderModule />}
+          {activeTab === 'katalog-internal' && <InternalCatalogModule />}
+          {activeTab === 'kampanye' && <KampanyeMarketingModule />}
+          {activeTab === 'listmonk' && <ListmonkModule currentRole={currentRole} />}
+          {activeTab === 'analitik' && <AnalitikSalesModule />}
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

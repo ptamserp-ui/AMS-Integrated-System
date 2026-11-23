@@ -79,13 +79,13 @@ const toneGaransi = (label: string): Tone =>
 export default function StokFefoTab({ currentRole, dariAcuan, onPerubahanData }: Props) {
   const dbTick = useDbTick([
     'stok_gudang',
-    'lokasi_bin',
-    'unit_serial',
-    'garansi_instalasi',
-    'pelanggan_b2b',
+    'gudang_bin',
+    'sales_unit_serial',
+    'sales_garansi',
+    'sales_pelanggan',
     'penjualan',
     'gudang_pergerakan',
-    'konfigurasi_gudang'
+    'gudang_pengaturan'
   ]);
   const [subLayar, setSubLayar] = useState<'kartu' | 'ketelusuran'>('kartu');
   const stokList = useMemo<StokGudang[]>(() => {

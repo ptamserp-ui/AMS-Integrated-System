@@ -36,9 +36,9 @@ export default function OpnameCycleCountTab({ currentRole, dariAcuan, onPerubaha
   const dbTick = useDbTick([
     'gudang_opname',
     'gudang_pergerakan',
-    'gudang_fisik',
+    'gudang_unit',
     'stok_gudang',
-    'konfigurasi_gudang'
+    'gudang_pengaturan'
   ]);
   const opnameList = useMemo<OpnameStok[]>(() => {
     void dbTick;

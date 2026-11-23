@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
+import ErrorBoundary from '../../common/ErrorBoundary';
 import {
   Building2,
   Clock3,
@@ -80,21 +81,23 @@ export default function HRDModule() {
         })}
       </div>
 
-      <Suspense
-        fallback={
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
-            Memuat sub-modul HRIS…
-          </div>
-        }
-      >
-        {activeTab === 'core' && <CoreHRModule />}
-        {activeTab === 'attendance' && <TimeAttendanceModule />}
-        {activeTab === 'payroll' && <PayrollModule />}
-        {activeTab === 'recruitment' && <RecruitmentModule />}
-        {activeTab === 'learning' && <LearningModule />}
-        {activeTab === 'performance' && <PerformanceModule />}
-        {activeTab === 'hse' && <HSEModule />}
-      </Suspense>
+      <ErrorBoundary resetKey={activeTab} label="sub-modul HRIS">
+        <Suspense
+          fallback={
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+              Memuat sub-modul HRIS…
+            </div>
+          }
+        >
+          {activeTab === 'core' && <CoreHRModule />}
+          {activeTab === 'attendance' && <TimeAttendanceModule />}
+          {activeTab === 'payroll' && <PayrollModule />}
+          {activeTab === 'recruitment' && <RecruitmentModule />}
+          {activeTab === 'learning' && <LearningModule />}
+          {activeTab === 'performance' && <PerformanceModule />}
+          {activeTab === 'hse' && <HSEModule />}
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

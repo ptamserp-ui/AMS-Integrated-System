@@ -55,9 +55,9 @@ export const MobileAbsensiView: React.FC<MobileAbsensiViewProps> = ({
   const riwayatSaya = useMemo(
     () =>
       absensiList
-        .filter((a) => a.karyawanId === karyawanId || a.nama === namaKaryawan)
+        .filter((a) => a.karyawanId === karyawanId)
         .sort((a, b) => b.tanggal.localeCompare(a.tanggal)),
-    [absensiList, karyawanId, namaKaryawan]
+    [absensiList, karyawanId]
   );
 
   const logHariIni = riwayatSaya.find((a) => a.tanggal === hariIni);
@@ -94,6 +94,10 @@ export const MobileAbsensiView: React.FC<MobileAbsensiViewProps> = ({
 
   const lakukanClockIn = async () => {
     setUmpanBalik(null);
+    if (!karyawan) {
+      setUmpanBalik({ ok: false, teks: 'Akun belum ditautkan ke data karyawan HRIS. Hubungi admin untuk mengaktifkan self-service.' });
+      return;
+    }
     let posisi = gps;
     if (!posisi) {
       setMengambilGps(true);
@@ -158,6 +162,10 @@ export const MobileAbsensiView: React.FC<MobileAbsensiViewProps> = ({
   const lakukanClockOut = async () => {
     if (!logHariIni) return;
     setUmpanBalik(null);
+    if (!karyawan) {
+      setUmpanBalik({ ok: false, teks: 'Akun belum ditautkan ke data karyawan HRIS. Hubungi admin untuk mengaktifkan self-service.' });
+      return;
+    }
     let posisi = gps;
     if (!posisi) {
       setMengambilGps(true);

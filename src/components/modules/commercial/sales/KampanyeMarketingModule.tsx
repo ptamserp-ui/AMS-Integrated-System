@@ -26,7 +26,7 @@ const toneRebate = (status: ProgramRebate['statusPembayaran']): Tone =>
   status === 'Terbayar' ? 'emerald' : status === 'Terverifikasi' ? 'blue' : 'amber';
 
 export default function KampanyeMarketingModule() {
-  const dbTick = useDbTick(['sales_kampanye', 'sales_unit_demo', 'sales_rebate', 'pelanggan_b2b']);
+  const dbTick = useDbTick(['sales_kampanye', 'sales_unit_demo', 'sales_rebate', 'sales_pelanggan']);
   const kampanye = useMemo<KampanyeAlkes[]>(() => {
     void dbTick;
     return db.getKampanye();

@@ -9,6 +9,7 @@ import Navbar, { ALL_TABS, DIVISION_ORDER, type NavId } from './components/layou
 import DivisionWorkspace from './components/layout/DivisionWorkspace';
 import { terapkanFaviconAplikasi, useIdentitasVisualAplikasi } from './components/common/LogoAplikasi';
 import InitialLoadingScreen from './components/common/InitialLoadingScreen';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import type { SalesTab } from './components/modules/commercial/SalesModule';
 import type { ITSubTabId } from './components/modules/supporting/ITModule';
 import type { GudangTabId } from './components/modules/operations/gudang/ui';
@@ -135,7 +136,7 @@ export default function App() {
       setStatusPemuatan('Memverifikasi token sesi & hak akses pengguna (RBAC)...');
       const segar = await ambilSesiServer();
       if (segar) {
-        db.prepareSessionSync(segar.userId);
+        db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
         setStatusPemuatan('Menyinkronkan state database real-time...');
         await db.syncFromServer(false);
       } else {
@@ -169,6 +170,10 @@ export default function App() {
     if (!sesi?.token) return;
     const unsubRbac = db.subscribeRbacUpdated(() => {
       void ambilSesiServer().then((segar) => {
+        if (segar) {
+          db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
+          void db.syncFromServer(false);
+        }
         setSesi(segar);
       });
     });
@@ -176,7 +181,7 @@ export default function App() {
   }, [sesi?.token]);
 
   const tanganiMasuk = async (sesiBaru: SesiLogin) => {
-    db.prepareSessionSync(sesiBaru.userId);
+    db.prepareSessionSync(sesiBaru.userId, `${sesiBaru.peran}:${JSON.stringify(sesiBaru.permissions)}`);
     if (!sesiBaru.isHiddenDeveloper) {
       db.logAudit(
         'Autentikasi & Akses',
@@ -258,6 +263,18 @@ function Dasbor({
   const [quotationPelangganAwal, setQuotationPelangganAwal] = useState<PelangganB2B | null>(null);
   const [remoteModuleVersion, setRemoteModuleVersion] = useState(0);
   const [pendingRemoteSync, setPendingRemoteSync] = useState(false);
+  const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(() => {
+    const st = db.getConnectionStatus();
+    return st.syncState === 'error' ? st.lastSyncError : null;
+  });
+
+  useEffect(() => {
+    const unsubConn = db.subscribe('connection_status', () => {
+      const st = db.getConnectionStatus();
+      setSyncErrorMsg(st.syncState === 'error' ? st.lastSyncError : null);
+    });
+    return unsubConn;
+  }, []);
 
   useEffect(() => {
     setPendingRemoteSync(false);
@@ -265,7 +282,7 @@ function Dasbor({
 
   useEffect(() => {
     const unsub = db.subscribeRemoteUpdate((keys, reason) => {
-      if (reason === 'hydrate' || reason === 'hydrate-public') return;
+      if (reason === 'hydrate-public') return;
       // Modul yang sudah mengelola state sinkronisasinya sendiri tidak perlu remount penuh
       if (activeTab === 'website' || activeTab === 'it-traceability') return;
 
@@ -346,6 +363,36 @@ function Dasbor({
         }}
       />
 
+      {syncErrorMsg && (
+        <div role="alert" className="no-print bg-rose-50 border-b border-rose-200 px-3 sm:px-5 py-2">
+          <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-rose-900 font-medium">
+              Sinkronisasi server ditolak/gagal ({syncErrorMsg}). Periksa koneksi dan coba sinkronkan ulang.
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  void db.syncNow();
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Sinkronkan Ulang
+              </button>
+              <button
+                type="button"
+                onClick={() => db.clearLastSyncError()}
+                className="text-rose-700 hover:text-rose-900 p-1 rounded-lg cursor-pointer"
+                title="Tutup peringatan"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {pendingRemoteSync && (
         <div className="no-print bg-blue-50 border-b border-blue-200 px-3 sm:px-5 py-2">
           <div className="max-w-[1440px] mx-auto flex items-center justify-between gap-3">
@@ -389,6 +436,7 @@ function Dasbor({
             )}
           </div>
         ) : (
+          <ErrorBoundary resetKey={`${activeTab}-${remoteModuleVersion}`} label="modul ini">
           <Suspense fallback={<PemuatModul />}>
           <div key={`${activeTab}-${remoteModuleVersion}`}>
             {activeDivision && (
@@ -474,6 +522,7 @@ function Dasbor({
             )}
           </div>
           </Suspense>
+          </ErrorBoundary>
         )}
       </main>
 

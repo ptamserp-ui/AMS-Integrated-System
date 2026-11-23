@@ -247,7 +247,7 @@ export async function unduhDokumenInternalPdfA4(
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.1);
   doc.setTextColor(accentR, accentG, accentB);
-  doc.text('METADATA PENGENDALIAN DOKUMEN', marginX + 4, y + 4.5);
+  doc.text('DOKUMEN INTERNAL', marginX + 4, y + 4.5);
 
   const metaRows: [string, string][] = [
     ['No. Dokumen', dokumen.nomorDokumen],

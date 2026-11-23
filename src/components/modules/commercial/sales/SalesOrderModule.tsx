@@ -79,9 +79,9 @@ type OpsiProdukSO = Pick<ProdukWebsite, 'id' | 'nama' | 'tipeModel' | 'nomorIzin
 export default function SalesOrderModule() {
   const dbTick = useDbTick([
     'penjualan',
-    'pelanggan_b2b',
+    'sales_pelanggan',
     'sales_skema_harga',
-    'sales_kontrak_harga',
+    'sales_kontrak',
     'izin_edar',
     'stok_gudang',
     'product_catalog',

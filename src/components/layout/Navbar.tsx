@@ -377,6 +377,10 @@ export default function Navbar({
             toneClass = 'bg-amber-50 text-amber-900 border-amber-300';
             iconClass = 'text-amber-600';
             label = pendingCount > 0 ? `Offline (${pendingCount} Antre)` : 'Offline (Lokal)';
+          } else if (syncState === 'error') {
+            toneClass = 'bg-rose-50 text-rose-900 border-rose-300';
+            iconClass = 'text-rose-600';
+            label = pendingCount > 0 ? `Gagal Sync (${pendingCount})` : 'Gagal Sync Server';
           } else if (syncState === 'syncing') {
             toneClass = 'bg-blue-50 text-blue-900 border-blue-300';
             iconClass = 'text-blue-600 animate-pulse';
@@ -396,13 +400,15 @@ export default function Navbar({
           }
 
           return (
-            <div
-              title={connStatus.statusLabel}
-              className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all ${toneClass}`}
+            <button
+              type="button"
+              onClick={() => void db.syncNow()}
+              title={`${connStatus.statusLabel} (klik untuk sinkronisasi manual sekarang)`}
+              className={`hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${toneClass}`}
             >
               <CloudCheck className={`w-3.5 h-3.5 ${iconClass}`} />
               <span className="text-xs">{label}</span>
-            </div>
+            </button>
           );
         })()}
 

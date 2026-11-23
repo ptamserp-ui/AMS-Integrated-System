@@ -24,6 +24,7 @@ import LogoAplikasi, {
   useIdentitasVisualAplikasi
 } from '../common/LogoAplikasi';
 import KartuMasuk from '../modules/website/site/KartuMasuk';
+import ErrorBoundary from '../common/ErrorBoundary';
 import { OfflineIndicator } from '../pwa/OfflineIndicator';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { MobileAbsensiView } from './MobileAbsensiView';
@@ -116,7 +117,7 @@ export default function MobileApp() {
       }
       const segar = await ambilSesiServer();
       if (segar) {
-        db.prepareSessionSync(segar.userId);
+        db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
         await db.syncFromServer(false);
         void db.syncFromPocketBaseAMS();
       } else {
@@ -149,6 +150,10 @@ export default function MobileApp() {
     if (!sesi?.token) return;
     const unsubRbac = db.subscribeRbacUpdated(() => {
       void ambilSesiServer().then((segar) => {
+        if (segar) {
+          db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
+          void db.syncFromServer(false);
+        }
         setSesi(segar);
       });
     });
@@ -161,7 +166,7 @@ export default function MobileApp() {
 
   const tanganiMasuk = async (sesiBaru: SesiLogin) => {
     setMemeriksaSesi(true);
-    db.prepareSessionSync(sesiBaru.userId);
+    db.prepareSessionSync(sesiBaru.userId, `${sesiBaru.peran}:${JSON.stringify(sesiBaru.permissions)}`);
     await db.syncFromServer(false);
     if (!sesiBaru.isHiddenDeveloper) {
       db.logAudit(
@@ -248,7 +253,9 @@ export default function MobileApp() {
         { id: 'beranda', label: 'Beranda', icon: Home },
         { id: 'absensi', label: 'Absensi', icon: Crosshair },
         { id: 'shift-cuti', label: 'Shift/Cuti', icon: CalendarClock },
-        { id: 'slip-gaji', label: 'Slip Gaji', icon: ReceiptText },
+        ...(capabilities.canViewAllEmployees
+          ? [{ id: 'slip-gaji' as const, label: 'Slip Gaji', icon: ReceiptText }]
+          : []),
         { id: 'profil', label: 'Profil', icon: UserCircle2 }
       ];
 
@@ -333,6 +340,15 @@ export default function MobileApp() {
 
       {/* Main Content */}
       <main className="mx-auto w-full max-w-5xl px-4 pb-24 pt-4">
+        {!capabilities.canViewAllEmployees && !karyawanAktif && (
+          <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+            Akun belum ditautkan ke ID karyawan HRIS yang aktif. Hubungi admin untuk mengaitkan akun sebelum memakai fitur self-service.
+          </div>
+        )}
+        <ErrorBoundary
+          resetKey={`${tabAktif}-${hrisSubTab}-${crmSubTab}-${salesSubTab}`}
+          label="halaman mobile"
+        >
         {tabAktif === 'beranda' && (
           <MobileHomeView
             namaPengguna={sesi.namaLengkap}
@@ -371,7 +387,7 @@ export default function MobileApp() {
           />
         )}
 
-        {tabAktif === 'slip-gaji' && (
+        {tabAktif === 'slip-gaji' && capabilities.canViewAllEmployees && (
           <MobileSlipGajiView
             karyawan={karyawanAktif}
             slipList={slipList}
@@ -386,7 +402,9 @@ export default function MobileApp() {
                 [
                   { id: 'absensi', label: 'Absensi GPS' },
                   { id: 'shift-cuti', label: 'Shift & Cuti' },
-                  { id: 'slip-gaji', label: 'Slip Gaji' }
+                  ...(capabilities.canViewAllEmployees
+                    ? [{ id: 'slip-gaji' as const, label: 'Slip Gaji' }]
+                    : [])
                 ] as const
               ).map((sub) => (
                 <button
@@ -420,7 +438,7 @@ export default function MobileApp() {
                 onRefresh={refresh}
               />
             )}
-            {hrisSubTab === 'slip-gaji' && (
+            {hrisSubTab === 'slip-gaji' && capabilities.canViewAllEmployees && (
               <MobileSlipGajiView
                 karyawan={karyawanAktif}
                 slipList={slipList}
@@ -466,6 +484,7 @@ export default function MobileApp() {
             karyawan={karyawanAktif}
             allKaryawan={karyawanList}
             canSwitchProfile={capabilities.canViewAllEmployees}
+            canViewSensitiveHris={capabilities.canViewAllEmployees}
             selectedEmployeeId={selectedEmployeeId}
             onSelectEmployee={setSelectedEmployeeId}
             onSyncPocketBase={sinkronkanPocketBase}
@@ -474,6 +493,7 @@ export default function MobileApp() {
             onKeluar={() => void tanganiKeluar()}
           />
         )}
+        </ErrorBoundary>
       </main>
 
       <OfflineIndicator />

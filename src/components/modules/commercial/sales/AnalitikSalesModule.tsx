@@ -82,7 +82,7 @@ export default function AnalitikSalesModule() {
     'sales_riwayat_bulanan',
     'penjualan',
     'sales_teritorial',
-    'pelanggan_b2b',
+    'sales_pelanggan',
     'sales_prospek',
     'sales_kunjungan',
     'stok_gudang',

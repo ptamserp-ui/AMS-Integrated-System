@@ -61,7 +61,7 @@ export default function KarantinaRecallTab({ currentRole, dariAcuan, onPerubahan
     'produk_kembalian',
     'stok_gudang',
     'gudang_surat_jalan',
-    'unit_serial'
+    'sales_unit_serial'
   ]);
   const recallList = useMemo<PenarikanProduk[]>(() => {
     void dbTick;

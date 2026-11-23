@@ -313,6 +313,39 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
       permissions: {
         'hrd-pelatihan': ['view']
       }
+    },
+    {
+      id: 'hrd_manager',
+      name: 'HRD',
+      description: 'Pengelolaan data karyawan dan operasional HRIS.',
+      isSystem: true,
+      updatedAt: now,
+      permissions: {
+        overview: ['view'],
+        'hrd-pelatihan': ['view', 'create', 'update', 'delete', 'approve', 'export']
+      }
+    },
+    {
+      id: 'payroll_manager',
+      name: 'Payroll',
+      description: 'Akses data karyawan dan pengelolaan slip gaji serta lembur.',
+      isSystem: true,
+      updatedAt: now,
+      permissions: {
+        overview: ['view'],
+        'hrd-pelatihan': ['view', 'create', 'update', 'export']
+      }
+    },
+    {
+      id: 'management',
+      name: 'Manajemen',
+      description: 'Akses baca dan ekspor data karyawan untuk pengawasan manajemen.',
+      isSystem: true,
+      updatedAt: now,
+      permissions: {
+        overview: ['view', 'export'],
+        'hrd-pelatihan': ['view', 'export']
+      }
     }
   ];
 
@@ -1568,6 +1601,7 @@ export class ServerRbacStore {
       password: string;
       fullName: string;
       email?: string;
+      employeeId?: string;
       roleId: string;
       department?: string;
       isActive?: boolean;
@@ -1590,6 +1624,16 @@ export class ServerRbacStore {
     if (!this.state.roles.some((r) => r.id === roleId)) {
       return { ok: false, status: 400, message: 'Peran RBAC tidak ditemukan.' };
     }
+    const employeeId = String(input.employeeId || '').trim() || undefined;
+    if (employeeId && employeeId.length > 128) {
+      return { ok: false, status: 400, message: 'ID karyawan HRIS maksimal 128 karakter.' };
+    }
+    if (['karyawan', 'sales_medrep', 'sales_manager'].includes(roleId) && !employeeId) {
+      return { ok: false, status: 400, message: 'Peran self-service wajib ditautkan ke ID karyawan HRIS.' };
+    }
+    if (employeeId && this.state.users.some((u) => u.employeeId === employeeId)) {
+      return { ok: false, status: 409, message: 'ID karyawan HRIS sudah ditautkan ke akun lain.' };
+    }
     if (this.state.users.some((u) => u.username.toLowerCase() === username)) {
       return { ok: false, status: 409, message: `Username "${username}" sudah digunakan.` };
     }
@@ -1603,6 +1647,7 @@ export class ServerRbacStore {
       username,
       fullName,
       email,
+      ...(employeeId ? { employeeId } : {}),
       roleId,
       department: String(input.department || 'Umum').trim(),
       isActive: input.isActive !== false,
@@ -1649,6 +1694,7 @@ export class ServerRbacStore {
     input: {
       fullName?: string;
       email?: string;
+      employeeId?: string;
       roleId?: string;
       department?: string;
       isActive?: boolean;
@@ -1665,6 +1711,20 @@ export class ServerRbacStore {
     const nextRoleId = typeof input.roleId === 'string' ? input.roleId.trim() : user.roleId;
     if (!this.state.roles.some((r) => r.id === nextRoleId)) {
       return { ok: false, status: 400, message: 'Peran RBAC tidak valid.' };
+    }
+    const nextEmployeeId =
+      typeof input.employeeId === 'string' ? input.employeeId.trim() || undefined : user.employeeId;
+    if (nextEmployeeId && nextEmployeeId.length > 128) {
+      return { ok: false, status: 400, message: 'ID karyawan HRIS maksimal 128 karakter.' };
+    }
+    if (['karyawan', 'sales_medrep', 'sales_manager'].includes(nextRoleId) && !nextEmployeeId) {
+      return { ok: false, status: 400, message: 'Peran self-service wajib ditautkan ke ID karyawan HRIS.' };
+    }
+    if (
+      nextEmployeeId &&
+      this.state.users.some((u) => u.id !== userId && u.employeeId === nextEmployeeId)
+    ) {
+      return { ok: false, status: 409, message: 'ID karyawan HRIS sudah ditautkan ke akun lain.' };
     }
 
     const nextActive = typeof input.isActive === 'boolean' ? input.isActive : user.isActive;
@@ -1708,6 +1768,7 @@ export class ServerRbacStore {
       ...user,
       fullName: typeof input.fullName === 'string' && input.fullName.trim() ? input.fullName.trim() : user.fullName,
       email: nextEmail,
+      employeeId: nextEmployeeId,
       department: typeof input.department === 'string' && input.department.trim() ? input.department.trim() : user.department,
       roleId: nextRoleId,
       isActive: nextActive,
@@ -1832,6 +1893,7 @@ export class ServerRbacStore {
             username: incomingUser.username.toLowerCase(),
             fullName: incomingUser.fullName,
             email: incomingUser.email || '',
+            ...(incomingUser.employeeId ? { employeeId: incomingUser.employeeId } : {}),
             roleId: incomingUser.roleId,
             department: incomingUser.department || 'Umum',
             isActive: incomingUser.isActive !== false,
@@ -1850,6 +1912,7 @@ export class ServerRbacStore {
               username: incomingUser.username.toLowerCase(),
               fullName: incomingUser.fullName,
               email: incomingUser.email || this.state.users[idx].email,
+              ...(incomingUser.employeeId ? { employeeId: incomingUser.employeeId } : {}),
               roleId: incomingUser.roleId,
               department: incomingUser.department || this.state.users[idx].department,
               isActive: incomingUser.isActive !== false,

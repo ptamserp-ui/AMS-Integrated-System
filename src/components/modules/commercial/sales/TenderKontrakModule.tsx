@@ -32,7 +32,7 @@ const toneKontrak = (status: KontrakHarga['statusKontrak']): Tone =>
   status === 'Aktif' ? 'emerald' : status === 'Dibatalkan' ? 'rose' : 'slate';
 
 export default function TenderKontrakModule() {
-  const dbTick = useDbTick(['tender', 'sales_kontrak_harga', 'pelanggan_b2b', 'izin_edar']);
+  const dbTick = useDbTick(['sales_tender', 'sales_kontrak', 'sales_pelanggan', 'izin_edar']);
   const tender = useMemo<TenderAlkes[]>(() => {
     void dbTick;
     return db.getTender();

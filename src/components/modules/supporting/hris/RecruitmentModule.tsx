@@ -37,7 +37,7 @@ const toneLisensi = (status: 'Terverifikasi' | 'Menunggu' | 'Tidak Valid'): Tone
   status === 'Terverifikasi' ? 'emerald' : status === 'Menunggu' ? 'amber' : 'rose';
 
 export default function RecruitmentModule() {
-  const dbTick = useDbTick(['hris_kandidat_ats']);
+  const dbTick = useDbTick(['hris_ats']);
   const kandidat = useMemo<KandidatATS[]>(() => {
     void dbTick;
     return db.getKandidatATS();

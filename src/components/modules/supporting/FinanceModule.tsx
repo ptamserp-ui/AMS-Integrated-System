@@ -1,5 +1,6 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
+import ErrorBoundary from '../../common/ErrorBoundary';
 import type { UserRole } from '../../../types';
 import { TANGGAL_ACUAN_BENIH, buatTanggalAcuan } from '../operations/gudang/ui';
 
@@ -102,48 +103,50 @@ export default function FinanceModule({ currentRole }: { currentRole?: UserRole 
         })}
       </div>
 
-      <Suspense
-        fallback={
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
-            Memuat sub-modul Keuangan…
-          </div>
-        }
-      >
-        {activeTab === 'faktur' && (
-          <FakturTab
-            identitas={identitas}
-            dariAcuan={dariAcuan}
-            bukaForm={bukaFormFaktur}
-            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-          />
-        )}
-        {activeTab === 'dasbor' && (
-          <DasborTab dariAcuan={dariAcuan} identitas={identitas} onPilihTab={setActiveTab} />
-        )}
-        {activeTab === 'jurnal' && (
-          <JurnalTab
-            identitas={identitas}
-            dariAcuan={dariAcuan}
-            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-          />
-        )}
-        {activeTab === 'laporan' && <LaporanTab dariAcuan={dariAcuan} />}
-        {activeTab === 'persediaan' && (
-          <PersediaanTab
-            identitas={identitas}
-            dariAcuan={dariAcuan}
-            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-          />
-        )}
-        {activeTab === 'pajak' && <PajakTab identitas={identitas} dariAcuan={dariAcuan} />}
-        {activeTab === 'periode' && (
-          <PeriodeTab
-            identitas={identitas}
-            dariAcuan={dariAcuan}
-            onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
-          />
-        )}
-      </Suspense>
+      <ErrorBoundary resetKey={activeTab} label="sub-modul Keuangan">
+        <Suspense
+          fallback={
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
+              Memuat sub-modul Keuangan…
+            </div>
+          }
+        >
+          {activeTab === 'faktur' && (
+            <FakturTab
+              identitas={identitas}
+              dariAcuan={dariAcuan}
+              bukaForm={bukaFormFaktur}
+              onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+            />
+          )}
+          {activeTab === 'dasbor' && (
+            <DasborTab dariAcuan={dariAcuan} identitas={identitas} onPilihTab={setActiveTab} />
+          )}
+          {activeTab === 'jurnal' && (
+            <JurnalTab
+              identitas={identitas}
+              dariAcuan={dariAcuan}
+              onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+            />
+          )}
+          {activeTab === 'laporan' && <LaporanTab dariAcuan={dariAcuan} />}
+          {activeTab === 'persediaan' && (
+            <PersediaanTab
+              identitas={identitas}
+              dariAcuan={dariAcuan}
+              onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+            />
+          )}
+          {activeTab === 'pajak' && <PajakTab identitas={identitas} dariAcuan={dariAcuan} />}
+          {activeTab === 'periode' && (
+            <PeriodeTab
+              identitas={identitas}
+              dariAcuan={dariAcuan}
+              onPerubahanData={() => setRefreshTrigger((n) => n + 1)}
+            />
+          )}
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

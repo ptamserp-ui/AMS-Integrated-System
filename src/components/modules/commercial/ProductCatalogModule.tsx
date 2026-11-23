@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Plus, Search, Tag, Trash2, Upload, X } from 'lucide-react';
 import type { ProdukKatalog, UserRole, VarianSkuProduk } from '../../../types';
 import { db } from '../../../services/pocketbase';
@@ -67,6 +67,17 @@ function formatStok(varian: VarianSkuProduk): string {
   return `${stok} unit bebas`;
 }
 
+function FotoThumbnailProduk({ src }: { src?: string }) {
+  const [gagal, setGagal] = useState(false);
+  useEffect(() => {
+    setGagal(false);
+  }, [src]);
+  if (!src || gagal) {
+    return <Tag className="h-5 w-5 text-slate-300" />;
+  }
+  return <img src={src} alt="" loading="lazy" onError={() => setGagal(true)} className="h-full w-full object-cover" />;
+}
+
 export default function ProductCatalogModule({
   currentRole,
   sesi
@@ -85,19 +96,39 @@ export default function ProductCatalogModule({
   const [cari, setCari] = useState('');
   const [filterPeruntukan, setFilterPeruntukan] = useState('Semua');
   const [peruntukanBaru, setPeruntukanBaru] = useState('');
-  const [pesan, setPesan] = useState('');
+  const [pesan, setPesan] = useState<{ nada: 'ok' | 'galat'; teks: string } | null>(null);
+  const loadedSnapshotRef = useRef<{ id: string; json: string } | null>(null);
 
   useEffect(() => {
-    if (bisaUbah) db.inisialisasiProdukKatalog();
-  }, [bisaUbah]);
+    if (!bisaUbah) return;
+    if (!db.hasProdukKatalogTersimpan() && db.getConnectionStatus().hasCompletedServerHydration) {
+      db.inisialisasiProdukKatalog();
+    } else if (!db.getConnectionStatus().isServerSyncActive) {
+      db.inisialisasiProdukKatalog();
+    }
+  }, [bisaUbah, tick]);
 
   useEffect(() => {
     if (!pilihanId) {
       setDraf(null);
+      loadedSnapshotRef.current = null;
       return;
     }
     const dipilih = daftar.find((produk) => produk.id === pilihanId);
-    if (dipilih) setDraf(dipilih);
+    if (!dipilih) return;
+    const dipilihJson = JSON.stringify(dipilih);
+    setDraf((cur) => {
+      if (!cur || cur.id !== pilihanId) {
+        loadedSnapshotRef.current = { id: pilihanId, json: dipilihJson };
+        return dipilih;
+      }
+      const curJson = JSON.stringify(cur);
+      if (loadedSnapshotRef.current?.id === pilihanId && curJson === loadedSnapshotRef.current.json) {
+        loadedSnapshotRef.current = { id: pilihanId, json: dipilihJson };
+        return dipilih;
+      }
+      return cur;
+    });
   }, [daftar, pilihanId]);
 
   const peruntukanTersedia = useMemo(
@@ -125,16 +156,16 @@ export default function ProductCatalogModule({
   const simpan = () => {
     if (!draf) return;
     if (!draf.nama.trim()) {
-      setPesan('Isi nama produk sebelum menyimpan.');
+      setPesan({ nada: 'galat', teks: 'Isi Nama produk sebelum menyimpan.' });
       return;
     }
     if (draf.varianSku.length === 0 || draf.varianSku.some((varian) => !varian.kodeSKU.trim())) {
-      setPesan('Setiap varian SKU harus memiliki kode SKU.');
+      setPesan({ nada: 'galat', teks: 'Setiap varian SKU wajib memiliki Kode SKU (isi di bagian Varian SKU di bawah).' });
       return;
     }
     const kodeSku = draf.varianSku.map((varian) => varian.kodeSKU.trim().toLowerCase());
     if (new Set(kodeSku).size !== kodeSku.length) {
-      setPesan('Kode SKU pada satu produk tidak boleh duplikat.');
+      setPesan({ nada: 'galat', teks: 'Kode SKU pada satu produk tidak boleh duplikat.' });
       return;
     }
     const skuLain = daftar
@@ -142,13 +173,38 @@ export default function ProductCatalogModule({
       .flatMap((produk) => produk.varianSku.map((varian) => varian.kodeSKU.trim().toLowerCase()))
       .filter(Boolean);
     if (kodeSku.some((kode) => skuLain.includes(kode))) {
-      setPesan('Kode SKU sudah digunakan pada produk lain.');
+      setPesan({ nada: 'galat', teks: 'Kode SKU sudah digunakan pada produk lain.' });
       return;
     }
-    const tersimpan = { ...draf, dikunci: true };
-    const terbaru = [...daftar.filter((produk) => produk.id !== draf.id), tersimpan];
+    const varianUtama = draf.varianSku[0];
+    const tersimpan = normalisasiProdukKatalog({
+      ...draf,
+      dikunci: true,
+      kodeSKU: varianUtama?.kodeSKU?.trim() || draf.kodeSKU,
+      tipeModel: draf.tipeModel.trim() || varianUtama?.tipeModel?.trim() || '',
+      nomorIzinEdar: varianUtama?.nomorIzinEdar?.trim() ?? draf.nomorIzinEdar,
+      statusIzinEdar: varianUtama?.statusIzinEdar?.trim() || draf.statusIzinEdar,
+      hargaTayang: varianUtama?.hargaTayang?.trim() || undefined,
+      referensiHarga: varianUtama?.referensiHarga?.trim() || undefined,
+      satuan: varianUtama?.satuan?.trim() || draf.satuan || undefined,
+      zonaSuhu: varianUtama?.zonaSuhu?.trim() || draf.zonaSuhu || undefined,
+      dokumenUrl: varianUtama?.dokumenUrl?.trim() || draf.dokumenUrl || undefined,
+      tautanLkpp: varianUtama?.tautanLkpp?.trim() || draf.tautanLkpp || undefined,
+      tkdn: varianUtama?.tkdn?.trim() || draf.tkdn || undefined,
+      produsen: draf.produsen.trim() || varianUtama?.produsen?.trim() || '',
+      negaraAsal: draf.negaraAsal.trim() || varianUtama?.negaraAsal?.trim() || '',
+      imageUrl: draf.imageUrls?.[0] || draf.imageUrl || varianUtama?.imageUrl
+    });
+    const sudahAda = daftar.some((produk) => produk.id === tersimpan.id);
+    const terbaru = sudahAda
+      ? daftar.map((produk) => (produk.id === tersimpan.id ? tersimpan : produk))
+      : [tersimpan, ...daftar];
     db.simpanProdukKatalog(terbaru);
-    setPesan('Master produk dan SKU berhasil disimpan.');
+    loadedSnapshotRef.current = { id: tersimpan.id, json: JSON.stringify(tersimpan) };
+    setPesan({
+      nada: 'ok',
+      teks: 'Master produk dan SKU berhasil disimpan ke server dan otomatis muncul di CMS Website → Katalog Produk untuk dipilih & dipublish.'
+    });
     setDraf(tersimpan);
     setPilihanId(tersimpan.id);
   };
@@ -164,11 +220,11 @@ export default function ProductCatalogModule({
       .filter((produk) => !ada.has(produk.sumberId) && !ada.has(produk.nomorIzinEdar.trim().toUpperCase()))
       .map(normalisasiProdukKatalog);
     if (tambahan.length === 0) {
-      setPesan('Tidak ada produk register izin edar baru untuk diimpor.');
+      setPesan({ nada: 'galat', teks: 'Tidak ada produk register izin edar baru untuk diimpor.' });
       return;
     }
-    db.simpanProdukKatalog([...daftar, ...tambahan]);
-    setPesan(`${tambahan.length} produk baru diimpor dari register izin edar.`);
+    db.simpanProdukKatalog([...tambahan, ...daftar]);
+    setPesan({ nada: 'ok', teks: `${tambahan.length} produk baru diimpor dari register izin edar & otomatis tersedia di CMS Website → Katalog Produk.` });
   };
 
   const hapusProduk = () => {
@@ -176,7 +232,8 @@ export default function ProductCatalogModule({
     db.simpanProdukKatalog(daftar.filter((produk) => produk.id !== draf.id));
     setPilihanId(null);
     setDraf(null);
-    setPesan('Produk dan seluruh SKU turunannya telah dihapus dari master.');
+    loadedSnapshotRef.current = null;
+    setPesan({ nada: 'ok', teks: 'Produk dan seluruh SKU turunannya telah dihapus dari master & diselaraskan ke CMS Website.' });
   };
 
   const tambahPeruntukan = () => {
@@ -201,16 +258,27 @@ export default function ProductCatalogModule({
             className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">
             <Upload className="h-4 w-4" /> Impor dari Register
           </button>
-          <button type="button" onClick={() => { const baru = produkBaru(); setDraf(baru); setPilihanId(baru.id); setPesan(''); }}
+          <button type="button" onClick={() => { const baru = produkBaru(); loadedSnapshotRef.current = null; setDraf(baru); setPilihanId(baru.id); setPesan(null); }}
             disabled={!bisaUbah}
-            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50 cursor-pointer">
             <Plus className="h-4 w-4" /> Produk Baru
           </button>
         </div>
       </header>
 
       {!bisaUbah && <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800">Akses baca-saja. Hubungi Sales Manager atau PJT untuk mengubah master produk.</p>}
-      {pesan && <div role="status" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">{pesan}</div>}
+      {pesan && (
+        <div
+          role="status"
+          className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+            pesan.nada === 'galat'
+              ? 'border-rose-200 bg-rose-50 text-rose-800'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+          }`}
+        >
+          {pesan.teks}
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.8fr)]">
         <section className="h-fit overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -231,12 +299,10 @@ export default function ProductCatalogModule({
             {produkTampil.map((produk) => {
               const fotoUtama = selesaikanGambar(produk.imageUrls?.[0] ?? produk.imageUrl);
               return (
-                <button key={produk.id} type="button" onClick={() => { setPilihanId(produk.id); setPesan(''); }}
+                <button key={produk.id} type="button" onClick={() => { setPilihanId(produk.id); setPesan(null); }}
                   className={`flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 ${pilihanId === produk.id ? 'bg-blue-50' : ''}`}>
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                    {fotoUtama
-                      ? <img src={fotoUtama} alt="" loading="lazy" className="h-full w-full object-cover" />
-                      : <Tag className="h-5 w-5 text-slate-300" />}
+                    <FotoThumbnailProduk src={fotoUtama} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-xs font-bold text-slate-900">{produk.nama || '(tanpa nama)'}</span>
@@ -275,8 +341,8 @@ export default function ProductCatalogModule({
                     petunjuk="Unggah beberapa foto sekaligus atau tambahkan URL. Foto pertama menjadi foto utama; urutan dapat diubah."
                   />
                 </div>
-                <label className="text-xs font-semibold text-slate-700">Nama produk
-                  <input value={draf.nama} onChange={(e) => perbaruiDraf({ nama: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <label className="text-xs font-semibold text-slate-700">Nama produk <span className="text-rose-600">*</span>
+                  <input value={draf.nama} onChange={(e) => perbaruiDraf({ nama: e.target.value })} placeholder="Contoh: Patient Monitor Seri Z9" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                 </label>
                 <label className="text-xs font-semibold text-slate-700">Tipe / model utama
                   <input value={draf.tipeModel} onChange={(e) => perbaruiDraf({ tipeModel: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -371,8 +437,10 @@ export default function ProductCatalogModule({
                         ['dokumenUrl', 'Dokumen produk (URL)'],
                         ['tautanLkpp', 'Tautan e-Katalog LKPP']
                       ] as const).map(([field, label]) => (
-                        <label key={field} className="text-2xs font-semibold text-slate-600">{label}
+                        <label key={field} className="text-2xs font-semibold text-slate-600">
+                          {label}{field === 'kodeSKU' && <span className="ml-0.5 text-rose-600">*</span>}
                           <input value={varian[field] ?? ''} onChange={(e) => perbaruiVarian(varian.id, { [field]: e.target.value })}
+                            placeholder={field === 'kodeSKU' ? 'Wajib diisi, contoh: AMS-PM-01' : undefined}
                             className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-xs" />
                         </label>
                       ))}
@@ -382,9 +450,23 @@ export default function ProductCatalogModule({
               </section>
             </fieldset>
 
-            <div className="flex justify-end border-t border-slate-200 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+              <div className="min-w-0 flex-1">
+                {pesan && (
+                  <p
+                    role="status"
+                    className={`rounded-lg border px-3 py-2 text-xs font-medium ${
+                      pesan.nada === 'galat'
+                        ? 'border-rose-200 bg-rose-50 text-rose-800'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                    }`}
+                  >
+                    {pesan.teks}
+                  </p>
+                )}
+              </div>
               <button type="button" onClick={simpan} disabled={!bisaUbah}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50 cursor-pointer shrink-0">
                 <Check className="h-4 w-4" /> Simpan Produk
               </button>
             </div>

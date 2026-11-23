@@ -3,7 +3,15 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getFirebaseBootstrapAdmins, ServerRbacStore } from '../../server/rbacStore';
-import { ServerDataSyncStore, canWriteSyncKey } from '../../server/dataSyncStore';
+import {
+  ServerDataSyncStore,
+  canReadSyncKey,
+  canWriteSyncKey,
+  filterSyncValueForRole,
+  mergeSelfServiceSyncValue,
+  mergeCatalogIntoDraftConfig,
+  mergeCatalogIntoPublishedSnapshot
+} from '../../server/dataSyncStore';
 
 const createdDirs: string[] = [];
 
@@ -59,7 +67,7 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     expect(dev.ok).toBe(true);
     if (!dev.ok) return;
     const created = rbac.createUser(
-      { username: 'staf.test', password: 'Password123!', fullName: 'Staf Test', roleId: 'sales_medrep' },
+      { username: 'staf.test', password: 'Password123!', fullName: 'Staf Test', roleId: 'sales_medrep', employeeId: 'EMP-TEST' },
       dev.user.username, dev.role.id, '127.0.0.1'
     );
     expect(created.ok).toBe(true);
@@ -93,7 +101,7 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     expect(dev.ok).toBe(true);
     if (!dev.ok) return;
     const create = (username: string, email: string) => rbac.createUser(
-      { username, email, password: 'Password123!', fullName: username, roleId: 'sales_medrep' },
+      { username, email, password: 'Password123!', fullName: username, roleId: 'sales_medrep', employeeId: `EMP-${username}` },
       dev.user.username, dev.role.id, '127.0.0.1'
     );
     expect(create('staf.satu', 'tester@example.test').ok).toBe(true);
@@ -215,6 +223,143 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     expect(migrated.qc_officer?.permissions['gudang-mutasi']).toEqual(['view']);
   });
 
+  it('membatasi snapshot HRIS berdasarkan peran dan menautkan self-service ke ID karyawan', () => {
+    const rbac = new ServerRbacStore(createTempDataDir());
+    const roles = Object.fromEntries(rbac.listRoles().map((role) => [role.id, role]));
+    const entries = [
+      {
+        id: 'EMP-01',
+        nama: 'Pegawai Satu',
+        gajiPokok: 10,
+        tanggalLahir: '1990-01-01',
+        statusRekamMedis: 'Fit to Work'
+      },
+      {
+        id: 'EMP-02',
+        nama: 'Pegawai Dua',
+        gajiPokok: 20,
+        tanggalLahir: '1991-01-01',
+        statusRekamMedis: 'Perlu Evaluasi'
+      }
+    ];
+
+    expect(canReadSyncKey(roles.it_admin!, 'hris_karyawan')).toBe(false);
+    expect(canReadSyncKey(roles.hrd_manager!, 'hris_karyawan')).toBe(true);
+    expect(canReadSyncKey(roles.payroll_manager!, 'hris_slip_gaji')).toBe(true);
+    expect(canReadSyncKey(roles.management!, 'hris_mcu')).toBe(true);
+    expect(canReadSyncKey(roles.pjt!, 'pelatihan')).toBe(false);
+    expect(canReadSyncKey(roles.pjt!, 'sertifikasi_pegawai')).toBe(false);
+    expect(canReadSyncKey(roles.hrd_manager!, 'sertifikasi_pegawai')).toBe(true);
+    expect(canReadSyncKey(roles.karyawan!, 'hris_karyawan')).toBe(false);
+    expect(canReadSyncKey(roles.karyawan!, 'hris_karyawan', 'EMP-01')).toBe(true);
+    expect(canReadSyncKey(roles.karyawan!, 'hris_slip_gaji', 'EMP-01')).toBe(false);
+    expect(canReadSyncKey(roles.karyawan!, 'hris_lembur', 'EMP-01')).toBe(false);
+    expect(canReadSyncKey(roles.karyawan!, 'hris_mcu', 'EMP-01')).toBe(false);
+    expect(filterSyncValueForRole(roles.karyawan!, 'hris_karyawan', entries, 'EMP-01')).toEqual([
+      { id: 'EMP-01', nama: 'Pegawai Satu' }
+    ]);
+    expect(filterSyncValueForRole(roles.hrd_manager!, 'hris_karyawan', entries)).toEqual(entries);
+  });
+
+  it('mewajibkan tautan unik akun self-service ke satu ID karyawan', () => {
+    const rbac = new ServerRbacStore(createTempDataDir());
+    const noLink = rbac.createUser(
+      { username: 'staf.hris', password: 'Password123', fullName: 'Staf HRIS', roleId: 'karyawan' },
+      'dev',
+      'developer_it_support',
+      '127.0.0.1'
+    );
+    expect(noLink).toMatchObject({ ok: false, status: 400 });
+
+    const linked = rbac.createUser(
+      {
+        username: 'staf.hris',
+        password: 'Password123',
+        fullName: 'Staf HRIS',
+        roleId: 'karyawan',
+        employeeId: 'EMP-01'
+      },
+      'dev',
+      'developer_it_support',
+      '127.0.0.1'
+    );
+    expect(linked.ok).toBe(true);
+
+    const duplicateLink = rbac.createUser(
+      {
+        username: 'staf.hris2',
+        password: 'Password123',
+        fullName: 'Staf HRIS Dua',
+        roleId: 'sales_medrep',
+        employeeId: 'EMP-01'
+      },
+      'dev',
+      'developer_it_support',
+      '127.0.0.1'
+    );
+    expect(duplicateLink).toMatchObject({ ok: false, status: 409 });
+  });
+
+  it('menyimpan perubahan tautan karyawan tanpa mengorbankan validasi dan persistensi akun', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const created = rbac.createUser(
+      { username: 'staf.link', password: 'Password123', fullName: 'Staf Link', roleId: 'qc_officer' },
+      'dev', 'developer_it_support', '127.0.0.1'
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    const update = (input: { roleId?: string; employeeId?: string }) => rbac.updateUser(
+      created.user.id, input, 'dev-id', 'dev', 'developer_it_support', '127.0.0.1'
+    );
+    expect(update({ roleId: 'karyawan', employeeId: 'EMP-01' })).toMatchObject({
+      ok: true, user: { employeeId: 'EMP-01', email: '' }
+    });
+    expect(new ServerRbacStore(dataDir).listUsers()[0].employeeId).toBe('EMP-01');
+    expect(update({ employeeId: '' })).toMatchObject({ ok: false, status: 400 });
+    expect(rbac.listUsers()[0].employeeId).toBe('EMP-01');
+    expect(update({ roleId: 'qc_officer', employeeId: '' })).toMatchObject({ ok: true });
+    expect(new ServerRbacStore(dataDir).listUsers()[0].employeeId).toBeUndefined();
+  });
+
+  it('membatasi pengiriman self-service pada record sendiri dan mempertahankan status cuti server', () => {
+    const current = [
+      { id: 'CUTI-1', karyawanId: 'EMP-01', status: 'Menunggu', tanggalPengajuan: '2026-11-01' },
+      { id: 'CUTI-2', karyawanId: 'EMP-02', status: 'Disetujui', tanggalPengajuan: '2026-11-02' }
+    ];
+    const updated = mergeSelfServiceSyncValue(
+      'hris_cuti',
+      current,
+      [{ id: 'CUTI-1', karyawanId: 'EMP-01', status: 'Disetujui', disetujuiOleh: 'Pemohon' }],
+      'EMP-01',
+      'Pegawai Satu'
+    );
+
+    expect(updated.ok).toBe(true);
+    if (updated.ok) {
+      expect(updated.value).toEqual([
+        current[1],
+        {
+          id: 'CUTI-1',
+          karyawanId: 'EMP-01',
+          status: 'Menunggu',
+          disetujuiOleh: undefined,
+          tanggalPengajuan: '2026-11-01',
+          namaKaryawan: 'Pegawai Satu'
+        }
+      ]);
+    }
+    expect(
+      mergeSelfServiceSyncValue(
+        'hris_cuti',
+        current,
+        [{ id: 'CUTI-3', karyawanId: 'EMP-02', status: 'Menunggu' }],
+        'EMP-01'
+      )
+    ).toMatchObject({ ok: false });
+  });
+
   it('akun & peran baru yang diinput admin langsung persisten dan bisa dipakai login dari IP internet lain', () => {
     const dataDir = createTempDataDir();
     const rbac = new ServerRbacStore(dataDir);
@@ -325,7 +470,8 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
           username: 'beta.persist',
           password: 'BetaPassword123!',
           fullName: 'Beta Tester',
-          roleId: 'sales_medrep'
+          roleId: 'sales_medrep',
+          employeeId: 'EMP-TEST'
         },
         dev.user.username,
         dev.role.id,
@@ -347,7 +493,7 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     expect(dev.ok).toBe(true);
     if (!dev.ok) return;
     const staff = rbac.createUser(
-      { username: 'staf.logout', password: 'StaffPassword123!', fullName: 'Staff Logout', roleId: 'sales_medrep' },
+      { username: 'staf.logout', password: 'StaffPassword123!', fullName: 'Staff Logout', roleId: 'sales_medrep', employeeId: 'EMP-LOGOUT' },
       dev.user.username, dev.role.id, '127.0.0.1'
     );
     expect(staff.ok).toBe(true);
@@ -397,6 +543,7 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
         password: 'SandiAwal123',
         fullName: 'Andi Sales',
         roleId: 'sales_medrep',
+        employeeId: 'EMP-SALES',
         isActive: true
       },
       dev.user.username,
@@ -569,5 +716,176 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     // Bisa login ulang menggunakan kata sandi baru
     const loginBaru = rbac.authenticate('dev.admin', 'SandiBaruKuat2026!', '127.0.0.1', 'Vitest');
     expect(loginBaru.ok).toBe(true);
+  });
+
+  it('audit_internal_iso dapat ditulis oleh QA maupun QC dan tidak oleh peran non-mutu', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const roles = Object.fromEntries(rbac.listRoles().map((r) => [r.id, r]));
+
+    expect(canWriteSyncKey(roles.qa_manager!, 'audit_internal_iso')).toBe(true);
+    expect(canWriteSyncKey(roles.qc_officer!, 'audit_internal_iso')).toBe(true);
+    expect(canWriteSyncKey(roles.sales_medrep!, 'audit_internal_iso')).toBe(false);
+  });
+
+  it('perubahan product_catalog di server otomatis menyelaraskan website_draft dan website_published tanpa menerbitkan produk baru secara paksa', () => {
+    const produkLama = {
+      id: 'katalog-1',
+      nama: 'Patient Monitor X1',
+      tipeModel: 'PM-X1',
+      nomorIzinEdar: 'AKL 20501234567',
+      produsen: 'PT Anugrahmitra Selaras',
+      kategori: 'Elektromedik Non Radiasi',
+      isActive: true
+    };
+    const katalogBaru = [
+      {
+        id: 'katalog-1',
+        nama: 'Patient Monitor X1 Pro',
+        kategori: 'Elektromedik Non Radiasi',
+        kelompokUsaha: 'Elektromedik',
+        peruntukan: ['ICU'],
+        produsen: 'PT Anugrahmitra Selaras',
+        deskripsi: 'Monitor ICU 12 parameter',
+        spesifikasi: 'ECG, SpO2, NIBP',
+        satuan: 'Unit',
+        dikunci: true,
+        varianSku: [
+          {
+            id: 'var-1',
+            kodeSKU: 'SKU-PM-X1',
+            tipeModel: 'PM-X1-PRO',
+            nomorIzinEdar: 'AKL 20501234567',
+            hargaTayang: 'Rp 85.000.000',
+            satuan: 'Unit'
+          }
+        ]
+      },
+      {
+        id: 'katalog-2',
+        nama: 'Infusion Pump S5',
+        kategori: 'Elektromedik Non Radiasi',
+        kelompokUsaha: 'Elektromedik',
+        peruntukan: ['IGD'],
+        produsen: 'PT Anugrahmitra Selaras',
+        deskripsi: 'Infusion pump presisi',
+        spesifikasi: '0.1 - 1200 mL/h',
+        satuan: 'Unit',
+        dikunci: true,
+        varianSku: [
+          {
+            id: 'var-2',
+            kodeSKU: 'SKU-INF-S5',
+            tipeModel: 'INF-S5',
+            nomorIzinEdar: 'AKL 20509998887',
+            hargaTayang: 'Rp 22.000.000',
+            satuan: 'Unit'
+          }
+        ]
+      }
+    ];
+
+    const draftMerged = mergeCatalogIntoDraftConfig(
+      { isPublished: false, produk: { item: [produkLama] } },
+      katalogBaru,
+      'commercial.user'
+    ) as { lastModifiedBy?: string; produk: { item: Array<{ id: string; nama: string; isActive: boolean }> } } | null;
+
+    expect(draftMerged).not.toBeNull();
+    expect(draftMerged?.lastModifiedBy).toBe('commercial.user');
+    expect(draftMerged?.produk.item.map((x) => [x.id, x.nama, x.isActive])).toEqual([
+      ['katalog-1', 'Patient Monitor X1 Pro', true],
+      ['katalog-2', 'Infusion Pump S5', false]
+    ]);
+
+    const publishedMerged = mergeCatalogIntoPublishedSnapshot(
+      { isPublished: true, produk: { item: [produkLama] } },
+      katalogBaru,
+      'commercial.user'
+    ) as { isPublished?: boolean; produk: { item: Array<{ id: string; nama: string; isActive: boolean }> } } | null;
+
+    expect(publishedMerged).not.toBeNull();
+    expect(publishedMerged?.isPublished).toBe(true);
+    expect(publishedMerged?.produk.item.find((x) => x.id === 'katalog-2')?.isActive).toBe(false);
+    expect(
+      mergeCatalogIntoPublishedSnapshot({ isPublished: false, produk: { item: [produkLama] } }, katalogBaru)
+    ).toBeNull();
+
+    // Snapshot warisan (produk-NIE-*) tanpa padanan product_catalog tidak boleh ditimpa menjadi 0 produk aktif
+    expect(
+      mergeCatalogIntoPublishedSnapshot(
+        {
+          isPublished: true,
+          produk: {
+            item: [
+              { id: 'produk-NIE-001', nama: 'Alkes Lama', isActive: true },
+              { id: 'produk-NIE-002', nama: 'Alkes Lama 2', isActive: true }
+            ]
+          }
+        },
+        katalogBaru,
+        'commercial.user'
+      )
+    ).toBeNull();
+  });
+
+  it('seluruh langganan useDbTick dan db.subscribe pada komponen cocok dengan kunci penyimpanan aktual di pocketbase.ts', () => {
+    const rootDir = path.resolve(__dirname, '../..');
+    const pbSource = fs.readFileSync(path.join(rootDir, 'src/services/pocketbase.ts'), 'utf8');
+    const pbKeys = new Set<string>();
+    const pbKeyRegex =
+      /this\.(?:get|set)(?:Collection|Json|SettingJson)\(\s*'([^']+)'|notifyListeners\(\s*'([^']+)'/g;
+    let m: RegExpExecArray | null;
+    while ((m = pbKeyRegex.exec(pbSource))) {
+      pbKeys.add(m[1] || m[2]);
+    }
+
+    const virtualKeys = new Set([
+      'all',
+      'connection_status',
+      'audit_trail',
+      'rbac_activity',
+      'sistem_data_manifest',
+      'dokumen_internal_v1',
+      'dokumen_internal_identitas_v1',
+      'quotation_riwayat_v1',
+      'quotation_identitas_v1',
+      'catalog_settings_v1',
+      'website_media_v1'
+    ]);
+
+    const walk = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const full = path.join(dir, entry.name);
+        return entry.isDirectory() ? walk(full) : [full];
+      });
+
+    const files = walk(path.join(rootDir, 'src/components')).filter(
+      (f) => f.endsWith('.tsx') || f.endsWith('.ts')
+    );
+
+    const mismatches: string[] = [];
+    for (const file of files) {
+      const content = fs.readFileSync(file, 'utf8');
+      const rel = path.relative(rootDir, file);
+      const hookRegex = /useDbTick\(\[([^\]]*)\]\)/g;
+      while ((m = hookRegex.exec(content))) {
+        const keyRegex = /'([^']+)'/g;
+        let km: RegExpExecArray | null;
+        while ((km = keyRegex.exec(m[1]))) {
+          if (!pbKeys.has(km[1]) && !virtualKeys.has(km[1])) {
+            mismatches.push(`${rel} useDbTick('${km[1]}')`);
+          }
+        }
+      }
+      const subRegex = /db\.subscribe\(\s*'([^']+)'/g;
+      while ((m = subRegex.exec(content))) {
+        if (!pbKeys.has(m[1]) && !virtualKeys.has(m[1])) {
+          mismatches.push(`${rel} db.subscribe('${m[1]}')`);
+        }
+      }
+    }
+
+    expect(mismatches).toEqual([]);
   });
 });

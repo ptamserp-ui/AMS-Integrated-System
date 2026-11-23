@@ -48,12 +48,12 @@ export default function OptimasiStokTab({
   onPerubahanData
 }: Props) {
   const dbTick = useDbTick([
-    'gudang_ambang_stok',
+    'gudang_ambang',
     'stok_gudang',
     'purchase_order',
     'pemasok',
-    'gudang_fisik',
-    'konfigurasi_gudang'
+    'gudang_unit',
+    'gudang_pengaturan'
   ]);
   const ambangList = useMemo<AmbangStok[]>(() => {
     void dbTick;

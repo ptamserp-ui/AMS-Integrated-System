@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 export default function RegulatoryModule() {
-  const dbTick = useDbTick(['izin_edar', 'sertifikat_perusahaan']);
+  const dbTick = useDbTick(['izin_edar', 'sertifikat']);
   const [activeTab, setActiveTab] = useState<'nie' | 'sertifikat' | 'validasi'>('nie');
   const izinList = useMemo<IzinEdarAlkes[]>(() => { void dbTick; return db.getIzinEdar(); }, [dbTick]);
   const sertifikatList = useMemo<SertifikatPerusahaan[]>(() => { void dbTick; return db.getSertifikat(); }, [dbTick]);

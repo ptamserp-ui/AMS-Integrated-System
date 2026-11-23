@@ -79,6 +79,7 @@ export default function RbacManagementTab({
     username: '',
     fullName: '',
     email: '',
+    employeeId: '',
     department: '',
     roleId: 'qa_manager',
     password: '',
@@ -199,6 +200,7 @@ export default function RbacManagementTab({
       username: '',
       fullName: '',
       email: '',
+      employeeId: '',
       department: '',
       roleId: roles.find((r) => r.id === 'qa_manager')?.id || roles[0]?.id || 'qa_manager',
       password: '',
@@ -214,6 +216,7 @@ export default function RbacManagementTab({
       username: u.username,
       fullName: u.fullName,
       email: u.email,
+      employeeId: u.employeeId || '',
       department: u.department,
       roleId: u.roleId,
       password: '',
@@ -233,6 +236,7 @@ export default function RbacManagementTab({
       ? {
           fullName: userForm.fullName,
           email: userForm.email,
+          employeeId: userForm.employeeId.trim(),
           department: userForm.department,
           roleId: userForm.roleId,
           isActive: userForm.isActive,
@@ -242,6 +246,7 @@ export default function RbacManagementTab({
           username: cleanUsername,
           fullName: userForm.fullName,
           email: userForm.email,
+          employeeId: userForm.employeeId.trim(),
           department: userForm.department,
           roleId: userForm.roleId,
           password: userForm.password,
@@ -963,6 +968,19 @@ export default function RbacManagementTab({
                     className="w-full px-3 py-2 rounded-xl border border-slate-300"
                   />
                 </div>
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">ID Karyawan HRIS</label>
+                <input
+                  required={['karyawan', 'sales_medrep', 'sales_manager'].includes(userForm.roleId)}
+                  value={userForm.employeeId}
+                  onChange={(e) => setUserForm((p) => ({ ...p, employeeId: e.target.value.trim() }))}
+                  placeholder="ID harus cocok dengan data HRIS"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Self-service HRIS hanya aktif setelah admin menautkan akun ke ID karyawan yang ada.
+                </p>
               </div>
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Peran RBAC</label>

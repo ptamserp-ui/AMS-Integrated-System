@@ -11,6 +11,7 @@ import {
   terapkanFaviconAplikasi
 } from '../../../../utils/websitePrimitives';
 import PublicWebsite from './PublicWebsite';
+import ErrorBoundary from '../../../common/ErrorBoundary';
 
 export type StatusTayangPublik = 'tayang' | 'belum' | 'tahan';
 type Status = 'memuat' | StatusTayangPublik;
@@ -111,7 +112,7 @@ export async function tentukanKontenTayang(): Promise<{
 
   const terpilih =
     dariServer && lokalRingan
-      ? capWaktuSnapshot(lokalRingan) >= capWaktuSnapshot(dariServer)
+      ? capWaktuSnapshot(lokalRingan) > capWaktuSnapshot(dariServer)
         ? lokalRingan
         : dariServer
       : dariServer ?? lokalRingan;
@@ -196,8 +197,18 @@ export default function PublicWebsiteApp() {
     const padaMediaBerubah = () => {
       muatKonten();
     };
+    const padaFokus = () => {
+      muatKonten();
+    };
+    const padaVisibilitas = () => {
+      if (document.visibilityState === 'visible') {
+        muatKonten();
+      }
+    };
     window.addEventListener('ams:media-uploaded', padaMediaBerubah);
     window.addEventListener('ams:media-deleted', padaMediaBerubah);
+    window.addEventListener('focus', padaFokus);
+    document.addEventListener('visibilitychange', padaVisibilitas);
 
     const pasangWsPublikRingan = () => {
       if (batal || typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
@@ -290,6 +301,8 @@ export default function PublicWebsiteApp() {
       batal = true;
       window.removeEventListener('ams:media-uploaded', padaMediaBerubah);
       window.removeEventListener('ams:media-deleted', padaMediaBerubah);
+      window.removeEventListener('focus', padaFokus);
+      document.removeEventListener('visibilitychange', padaVisibilitas);
       berhentiTerbit?.();
       if (publicReconnectTimer) clearTimeout(publicReconnectTimer);
       if (publicWs) {
@@ -320,7 +333,11 @@ export default function PublicWebsiteApp() {
         </div>
       );
     }
-    return <PublicWebsite konfigurasi={drafPratinjauSinkron} pratinjau />;
+    return (
+      <ErrorBoundary label="pratinjau situs publik">
+        <PublicWebsite konfigurasi={drafPratinjauSinkron} pratinjau />
+      </ErrorBoundary>
+    );
   }
 
   if (isi.status === 'memuat') {
@@ -336,12 +353,14 @@ export default function PublicWebsiteApp() {
 
   if (isi.status === 'tayang' && konfigurasiTayangSinkron) {
     return (
-      <PublicWebsite
-        konfigurasi={konfigurasiTayangSinkron}
-        padaMasuk={() => {
-          window.location.href = '/?masuk=1';
-        }}
-      />
+      <ErrorBoundary label="situs publik">
+        <PublicWebsite
+          konfigurasi={konfigurasiTayangSinkron}
+          padaMasuk={() => {
+            window.location.href = '/?masuk=1';
+          }}
+        />
+      </ErrorBoundary>
     );
   }
 

@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
+import ErrorBoundary from '../../common/ErrorBoundary';
 import {
   Boxes,
   Bug,
@@ -179,6 +180,7 @@ export default function WarehouseModule({
       </div>
 
       {/* Isi Sub-Modul Aktif */}
+      <ErrorBoundary resetKey={activeTab} label="sub-modul Gudang">
       <Suspense
         fallback={
           <div className="bg-white border border-slate-200 rounded-2xl p-6 text-xs text-slate-500">
@@ -280,6 +282,7 @@ export default function WarehouseModule({
 
         {activeTab === 'master-data' && <MasterDataErpTab dariAcuan={dariAcuan} />}
       </Suspense>
+      </ErrorBoundary>
     </div>
   );
 }

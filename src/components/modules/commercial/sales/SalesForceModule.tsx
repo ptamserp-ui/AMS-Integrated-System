@@ -43,7 +43,7 @@ export default function SalesForceModule() {
     'sales_kunjungan',
     'sales_pra_order',
     'sales_pengetahuan_produk',
-    'pelanggan_b2b',
+    'sales_pelanggan',
     'izin_edar',
     'stok_gudang'
   ]);

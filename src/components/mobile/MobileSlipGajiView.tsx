@@ -16,15 +16,12 @@ export const MobileSlipGajiView: React.FC<MobileSlipGajiViewProps> = ({
 }) => {
   const [slipDipilih, setSlipDipilih] = useState<SlipGaji | null>(null);
   const karyawanId = karyawan?.id || '';
-  const namaKaryawan = karyawan?.nama || '';
 
   const slipTampil = useMemo(() => {
-    const milikSaya = slipList.filter(
-      (s) => s.karyawanId === karyawanId || s.nama === namaKaryawan
-    );
+    const milikSaya = slipList.filter((s) => s.karyawanId === karyawanId);
     if (milikSaya.length > 0 && !canViewAllEmployees) return milikSaya;
     return canViewAllEmployees ? slipList : milikSaya;
-  }, [slipList, karyawanId, namaKaryawan, canViewAllEmployees]);
+  }, [slipList, karyawanId, canViewAllEmployees]);
 
   const slipTerbaru = slipTampil[0] || null;
 

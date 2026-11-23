@@ -27,7 +27,17 @@ export function resolveFirebaseBootstrapAdmins(configured: string[], configuredO
 
 export function isAiStudioPreviewHost(hostname?: string): boolean {
   if (!hostname) return false;
-  return /^ais-(?:dev|pre)-[^.]+\.[^.]+\.run\.app$/i.test(hostname.trim());
+  const cleaned = hostname.trim().toLowerCase();
+  return (
+    /^ais-(?:dev|pre)-[^.]+\.[^.]+\.run\.app$/i.test(cleaned) ||
+    /^(?:[^.]+\.)?ai\.studio$/i.test(cleaned)
+  );
+}
+
+function isPlaceholderClientValue(value: string): boolean {
+  const cleaned = value.trim().replace(/^["']|["']$/g, '');
+  if (!cleaned) return true;
+  return /^(?:GANTI_|YOUR_|MY_|PLACEHOLDER|<[^>]+>)/i.test(cleaned);
 }
 
 export function resolveFirebaseClientConfig(
@@ -74,7 +84,7 @@ export function resolveFirebaseClientConfig(
     ['VITE_FIREBASE_EXPECTED_PROJECT_ID', env.VITE_FIREBASE_EXPECTED_PROJECT_ID || '']
   ];
   const missing = requiredEnvValues
-    .filter(([, value]) => !value.trim() || value.trim().startsWith('GANTI_'))
+    .filter(([, value]) => isPlaceholderClientValue(value))
     .map(([key]) => key);
 
   if (missing.length > 0) {

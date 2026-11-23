@@ -18,6 +18,7 @@ export interface SesiLogin {
   namaLengkap: string;
   email: string;
   departemen: string;
+  employeeId?: string;
   peran: UserRole;
   namaPeran: string;
   permissions: RolePermissionMatrix;
@@ -43,6 +44,7 @@ function petakanPayloadKeSesi(payload: AuthResponsePayload, tokenSebelumnya?: st
     namaLengkap: payload.user.fullName,
     email: payload.user.email,
     departemen: payload.user.department,
+    employeeId: payload.user.employeeId,
     peran: payload.user.roleId as UserRole,
     namaPeran: payload.role?.name || payload.user.roleName || payload.user.roleId,
     permissions: payload.permissions || payload.role?.permissions || {},
@@ -360,6 +362,33 @@ export async function keluarDariServer(): Promise<{ ok: boolean; pesan?: string 
   const lokal = bacaSesi();
   let serverBerhasil = false;
   let firebaseBerhasil = false;
+  let sinkronBerhasil = true;
+  if (lokal?.token) {
+    try {
+      const [{ db }, { flushPendingMediaUploads }] = await Promise.all([
+        import('../services/pocketbase'),
+        import('./mediaUpload')
+      ]);
+      const results = await Promise.allSettled([
+        db.flushPendingSync(),
+        flushPendingMediaUploads()
+      ]);
+      for (const result of results) {
+        if (result.status === 'rejected') {
+          sinkronBerhasil = false;
+          console.warn('Sinkronisasi tertunda gagal sebelum keluar:', result.reason);
+        }
+      }
+      if (results[0].status === 'fulfilled' && results[0].value.remaining > 0) {
+        sinkronBerhasil = false;
+        console.warn('Masih ada perubahan yang belum tersinkron sebelum keluar.');
+      }
+      db.resetSessionSyncState();
+    } catch (error) {
+      sinkronBerhasil = false;
+      console.error('Gagal menyiapkan sinkronisasi sebelum keluar:', error);
+    }
+  }
   try {
     const headers = new Headers();
     if (lokal?.token) {
@@ -383,9 +412,11 @@ export async function keluarDariServer(): Promise<{ ok: boolean; pesan?: string 
   } finally {
     akhiriSesi();
   }
-  if (!serverBerhasil || !firebaseBerhasil) {
+  if (!serverBerhasil || !firebaseBerhasil || !sinkronBerhasil) {
     const bagian = [!serverBerhasil && 'server AMS', !firebaseBerhasil && 'Firebase'].filter(Boolean).join(' dan ');
-    return { ok: false, pesan: `Sesi lokal telah dihapus, tetapi logout dari ${bagian} belum dipastikan. Periksa koneksi dan hubungi administrator.` };
+    const peringatanLogout = bagian ? `Logout dari ${bagian} belum dipastikan. ` : '';
+    const peringatanSinkron = !sinkronBerhasil ? 'Penyelesaian sinkronisasi sebelum keluar belum dipastikan. ' : '';
+    return { ok: false, pesan: `Sesi lokal telah dihapus. ${peringatanLogout}${peringatanSinkron}Periksa koneksi dan hubungi administrator.` };
   }
   return { ok: true };
 }

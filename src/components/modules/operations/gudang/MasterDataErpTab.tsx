@@ -50,7 +50,7 @@ interface BarisMitra {
 }
 
 export default function MasterDataErpTab({ dariAcuan }: Props) {
-  const dbTick = useDbTick(['izin_edar', 'gudang_fisik', 'lokasi_bin', 'pemasok', 'sales_pelanggan']);
+  const dbTick = useDbTick(['izin_edar', 'gudang_unit', 'gudang_bin', 'pemasok', 'sales_pelanggan']);
   const izinList = useMemo<IzinEdarAlkes[]>(() => {
     void dbTick;
     return db.getIzinEdar();

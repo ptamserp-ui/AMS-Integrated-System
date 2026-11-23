@@ -174,19 +174,19 @@ export const BAGIAN_WEBSITE: BagianDefinisi[] = [
   },
   {
     kunci: 'solusi',
-    label: 'Solusi per Kategori',
-    petunjuk: 'Kartu solusi per kelompok produk; jumlahnya dihitung dari register izin edar.',
+    label: 'Kategori Produk',
+    petunjuk: 'Kartu kategori produk; jumlahnya dihitung dari register izin edar.',
     ikon: Sparkles,
     dinamis: true,
     medan: [
-      { kind: 'teks', key: 'judul', label: 'Judul solusi' },
+      { kind: 'teks', key: 'judul', label: 'Judul kategori produk' },
       { kind: 'textarea', key: 'deskripsi', label: 'Deskripsi', rows: 3 },
       { kind: 'teks', key: 'kategoriKey', label: 'Kunci kategori (filter katalog)' },
       { kind: 'angka', key: 'jumlahProduk', label: 'Jumlah produk' },
-      { kind: 'gambar', key: 'imageUrl', label: 'Gambar solusi (Rekomendasi: 800 × 600 px)' }
+      { kind: 'gambar', key: 'imageUrl', label: 'Gambar kategori produk (Rekomendasi: 800 × 600 px)' }
     ],
     judulItem: (i) => String(i.judul || i.id),
-    pabrik: (n) => ({ id: idBaru('solusi'), isActive: true, judul: `Solusi ${n}`, deskripsi: '', kategoriKey: '', jumlahProduk: 0 })
+    pabrik: (n) => ({ id: idBaru('solusi'), isActive: true, judul: `Kategori Produk ${n}`, deskripsi: '', kategoriKey: '', jumlahProduk: 0 })
   },
   {
     kunci: 'statistik',
@@ -446,7 +446,8 @@ export const OBJEK_WEBSITE: ObjekDefinisi[] = [
     medan: [
       { kind: 'teks', key: 'nama', label: 'Nama perusahaan' },
       { kind: 'teks', key: 'tagline', label: 'Tagline' },
-      { kind: 'gambar', key: 'logoUrl', label: 'Logo (PNG transparan, 400 × 150 px)' },
+      { kind: 'gambar', key: 'logoUrl', label: 'Logo Header (PNG transparan, 400 × 150 px)' },
+      { kind: 'gambar', key: 'footerLogoUrl', label: 'Logo Footer (PNG transparan, 400 × 150 px)' },
       { kind: 'gambar', key: 'faviconUrl', label: 'Favicon (64 × 64 px)' },
       { kind: 'teks', key: 'judulSitus', label: 'Judul tab browser' },
       { kind: 'textarea', key: 'metaDeskripsi', label: 'Meta description (150–160 karakter)', rows: 3 }

@@ -449,4 +449,32 @@ describe('Firebase Admin SDK & Named Firestore Database (Windows VPS)', () => {
     expect(res.source).toBe('FIRESTORE_DATABASE_ID');
     expect(res.matchesExpectedDatabaseId).toBe(true);
   });
+
+  it('mengenali APP_URL domain *.ai.studio sebagai runtime AI Studio dan menjaga konfigurasi bawaan', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ams-fb-admin-aistudio-domain-'));
+    tempDirs.push(dir);
+    fs.writeFileSync(
+      path.join(dir, 'firebase-applet-config.json'),
+      JSON.stringify({
+        projectId: 'sixth-cedar-f5v9p',
+        firestoreDatabaseId: DEFAULT_FIRESTORE_DATABASE_ID
+      }),
+      'utf8'
+    );
+
+    const resolved = resolveFirebaseAdminConfig({
+      rootDir: dir,
+      env: {
+        APP_URL: 'https://remediams.ai.studio',
+        VITE_DEPLOYMENT_ENV: 'staging',
+        VITE_FIREBASE_PROJECT_ID: 'ams-staging',
+        VITE_FIRESTORE_DATABASE_ID: '(default)',
+        FIREBASE_SERVICE_ACCOUNT_JSON: 'bukan-json-valid'
+      }
+    });
+
+    expect(resolved.projectId).toBe('sixth-cedar-f5v9p');
+    expect(resolved.databaseId).toBe(DEFAULT_FIRESTORE_DATABASE_ID);
+    expect(resolved.configError).not.toContain('bukan JSON');
+  });
 });

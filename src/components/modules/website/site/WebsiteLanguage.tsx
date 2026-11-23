@@ -190,6 +190,8 @@ const translations: Record<string, string> = {
   'Beranda': 'Home',
   'Katalog Produk': 'Product Catalog',
   'Solusi': 'Solutions',
+  'Kategori Produk': 'Product Categories',
+  'Semua Kategori Produk': 'All Product Categories',
   'Layanan': 'Services',
   'Sumber Daya': 'Resources',
   'Tentang Kami': 'About Us',

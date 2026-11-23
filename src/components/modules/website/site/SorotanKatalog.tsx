@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ArrowRight, BadgeCheck, PackageSearch, Search, ShieldCheck } from 'lucide-react';
 import type { HalamanWebsite, KonfigurasiSitus } from '../../../../types';
 import { fotoProdukSitus, selesaikanGambar } from '../../../../utils/websitePrimitives';
@@ -20,6 +21,10 @@ export function SorotanKatalog({
   const gambarProduk = produkUnggulan ? selesaikanGambar(fotoProdukSitus(produkUnggulan)[0]) : undefined;
   const bannerHero = hero.banner?.find((banner) => banner.isActive && banner.imageUrl);
   const gambarUtama = gambarProduk || selesaikanGambar(bannerHero?.imageUrl ?? hero.gambarUrl);
+  const [gagalGambar, setGagalGambar] = useState(false);
+  useEffect(() => {
+    setGagalGambar(false);
+  }, [gambarUtama]);
   const kategori = Array.from(
     new Set(cfg.produk.item.filter((produk) => produk.isActive).map((produk) => produk.kategori).filter(Boolean))
   ).slice(0, 4);
@@ -68,8 +73,14 @@ export function SorotanKatalog({
 
         <div className="katalog-visual">
           <div className="katalog-visual-card">
-            {gambarUtama ? (
-              <img src={gambarUtama} alt={produkUnggulan?.nama || hero.judul} loading="eager" decoding="async" />
+            {gambarUtama && !gagalGambar ? (
+              <img
+                src={gambarUtama}
+                alt={produkUnggulan?.nama || hero.judul}
+                loading="eager"
+                decoding="async"
+                onError={() => setGagalGambar(true)}
+              />
             ) : (
               <div className="katalog-visual-fallback">
                 <PackageSearch className="w-16 h-16" />

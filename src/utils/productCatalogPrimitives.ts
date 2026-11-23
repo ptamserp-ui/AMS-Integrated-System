@@ -58,9 +58,29 @@ export function normalisasiProdukKatalog(produk: ProdukWebsite): ProdukKatalog {
     ...varian,
     ...pisahkanHargaTayang(varian.hargaTayang, varian.referensiHarga)
   }));
+  const varianUtama = varianSku[0];
+  const statusDefaultInduk =
+    !produk.statusIzinEdar ||
+    produk.statusIzinEdar === 'Verifikasi Register RA' ||
+    produk.statusIzinEdar === 'Belum diverifikasi — referensi daftar harga';
   return {
     ...produk,
     ...hargaProduk,
+    kodeSKU: produk.kodeSKU || varianUtama?.kodeSKU || undefined,
+    tipeModel: produk.tipeModel || varianUtama?.tipeModel || '',
+    nomorIzinEdar: produk.nomorIzinEdar || varianUtama?.nomorIzinEdar || '',
+    statusIzinEdar:
+      statusDefaultInduk && varianUtama?.statusIzinEdar
+        ? varianUtama.statusIzinEdar
+        : produk.statusIzinEdar || varianUtama?.statusIzinEdar || '',
+    hargaTayang: hargaProduk.hargaTayang || varianUtama?.hargaTayang || undefined,
+    referensiHarga: hargaProduk.referensiHarga ?? teksReferensiHarga(varianUtama?.referensiHarga, 'id'),
+    satuan: produk.satuan || varianUtama?.satuan || undefined,
+    zonaSuhu: produk.zonaSuhu || varianUtama?.zonaSuhu || undefined,
+    dokumenUrl: produk.dokumenUrl || varianUtama?.dokumenUrl || undefined,
+    tautanLkpp: produk.tautanLkpp || varianUtama?.tautanLkpp || undefined,
+    tkdn: produk.tkdn || varianUtama?.tkdn || undefined,
+    imageUrl: produk.imageUrl || produk.imageUrls?.[0] || varianUtama?.imageUrl || undefined,
     peruntukan: Array.isArray(produk.peruntukan) ? produk.peruntukan : [],
     varianSku
   };

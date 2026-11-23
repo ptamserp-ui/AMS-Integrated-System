@@ -33,6 +33,7 @@ import {
   FileCode2,
   Gauge,
   Image as ImageIcon,
+  ImageOff,
   Layers,
   Mail,
   MailCheck,
@@ -47,6 +48,22 @@ import {
   Users
 } from 'lucide-react';
 import { Badge, BarCapaian, Modal, Panel, Stat, chipFilter, formatPersen, formatTanggal, inputClass, labelClass, tombolBahaya, tombolPrimer, tombolSekunder, type Tone } from '../../../ui';
+
+function GambarMediaListmonk({ src, alt }: { src: string; alt: string }) {
+  const [gagal, setGagal] = useState(false);
+  useEffect(() => {
+    setGagal(false);
+  }, [src]);
+  if (!src || gagal) {
+    return (
+      <div className="w-full h-24 flex flex-col items-center justify-center gap-1 bg-slate-100 text-slate-400">
+        <ImageOff className="w-5 h-5" />
+        <span className="text-3xs">Pratinjau tidak tersedia</span>
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} onError={() => setGagal(true)} className="w-full h-24 object-cover" loading="lazy" />;
+}
 
 type Tampilan = 'dashboard' | 'subscribers' | 'lists' | 'campaigns' | 'templates' | 'media' | 'tx' | 'settings';
 
@@ -87,12 +104,12 @@ function formatDurasi(detik: number) {
 export default function ListmonkModule({ currentRole }: { currentRole: UserRole }) {
   const dbTick = useDbTick([
     'surat_daftar',
-    'surat_pelanggan',
+    'surat_subscriber',
     'surat_kampanye',
     'surat_templat',
     'surat_media',
-    'surat_transaksional',
-    'surat_konfigurasi'
+    'surat_tx',
+    'surat_pengaturan'
   ]);
   const [tampilan, setTampilan] = useState<Tampilan>('dashboard');
   const [pesan, setPesan] = useState('');
@@ -1076,7 +1093,7 @@ export default function ListmonkModule({ currentRole }: { currentRole: UserRole 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             {media.map((m) => (
               <figure key={m.id} className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50">
-                <img src={m.url} alt={m.namaFile} className="w-full h-24 object-cover" loading="lazy" />
+                <GambarMediaListmonk src={m.url} alt={m.namaFile} />
                 <figcaption className="p-2">
                   <div className="text-2xs font-semibold text-slate-800 truncate">{m.namaFile}</div>
                   <div className="text-2xs text-slate-500 font-mono">{m.ukuranKB} KB</div>

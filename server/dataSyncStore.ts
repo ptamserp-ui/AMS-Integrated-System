@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import type { RbacResourceId, RoleDefinition } from '../src/types/index';
+import type { KonfigurasiSitus, ProdukKatalog, RbacResourceId, RoleDefinition } from '../src/types/index';
+import { normalisasiProdukKatalog, produkKatalogUntukWebsite } from '../src/utils/productCatalog';
 
 export interface SyncEntry {
   value: unknown;
@@ -79,15 +80,154 @@ export function mapSyncKeyToResource(key: string): RbacResourceId {
   return 'overview';
 }
 
+const HRIS_ALL_RECORDS_ROLE_IDS = new Set(['developer_it_support', 'hrd_manager', 'payroll_manager', 'management']);
+const HRIS_PERSONAL_SYNC_KEYS = new Set(['pelatihan', 'pelatihan_personil', 'sertifikasi_pegawai']);
+const isHrisPersonalSyncKey = (key: string) => key.startsWith('hris_') || HRIS_PERSONAL_SYNC_KEYS.has(key);
+const HRIS_SELF_SERVICE_ROLE_KEYS: Record<string, ReadonlySet<string>> = {
+  karyawan: new Set([
+    'hris_karyawan',
+    'hris_absensi',
+    'hris_cuti',
+    'hris_skill_matrix',
+    'hris_kpi',
+    'hris_umpan_balik_360',
+    'hris_apd',
+    'hris_mutasi'
+  ]),
+  sales_medrep: new Set(['hris_karyawan', 'hris_absensi', 'hris_cuti']),
+  sales_manager: new Set(['hris_karyawan', 'hris_absensi', 'hris_cuti'])
+};
+const HRIS_SELF_SERVICE_WRITE_ROLES = new Set(['karyawan', 'sales_medrep', 'sales_manager']);
+const HRIS_SELF_SERVICE_WRITE_KEYS = new Set(['hris_absensi', 'hris_cuti']);
+
+export function canReadSyncKey(role: RoleDefinition, key: string, employeeId?: string): boolean {
+  if (isLegacyRbacSyncKey(key)) return false;
+  if (PUBLIC_SYNC_KEYS.has(key)) return true;
+  if (role.id === 'developer_it_support') return true;
+  if (isHrisPersonalSyncKey(key)) {
+    if (HRIS_ALL_RECORDS_ROLE_IDS.has(role.id)) {
+      return role.permissions['hrd-pelatihan']?.includes('view') ?? false;
+    }
+    return Boolean(employeeId && HRIS_SELF_SERVICE_ROLE_KEYS[role.id]?.has(key));
+  }
+  const permissions = role.permissions[mapSyncKeyToResource(key)];
+  return Array.isArray(permissions) && permissions.includes('view');
+}
+
+export function filterSyncValueForRole(
+  role: RoleDefinition,
+  key: string,
+  value: unknown,
+  employeeId?: string
+): unknown {
+  if (!canReadSyncKey(role, key, employeeId)) return undefined;
+  if (!isHrisPersonalSyncKey(key) || HRIS_ALL_RECORDS_ROLE_IDS.has(role.id) || role.id === 'developer_it_support') {
+    return value;
+  }
+  if (!employeeId || !Array.isArray(value)) return [];
+  const personalRecords = value.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const record = item as { id?: unknown; karyawanId?: unknown };
+    return key === 'hris_karyawan' ? record.id === employeeId : record.karyawanId === employeeId;
+  });
+  if (key !== 'hris_karyawan') return personalRecords;
+  return personalRecords.map((item) => {
+    const {
+      gajiPokok: _gajiPokok,
+      tanggalLahir: _tanggalLahir,
+      statusRekamMedis: _statusRekamMedis,
+      ...profile
+    } = item as Record<string, unknown>;
+    return profile;
+  });
+}
+
+export function mergeSelfServiceSyncValue(
+  key: string,
+  currentValue: unknown,
+  requestedValue: unknown,
+  employeeId: string,
+  employeeName?: string
+): { ok: true; value: unknown[] } | { ok: false; message: string } {
+  if (!HRIS_SELF_SERVICE_WRITE_KEYS.has(key)) {
+    return { ok: false, message: 'Akun ini hanya dapat mengirim absensi dan pengajuan cuti miliknya sendiri.' };
+  }
+  if (!Array.isArray(requestedValue)) {
+    return { ok: false, message: 'Data self-service harus berbentuk daftar record.' };
+  }
+
+  const existing = Array.isArray(currentValue) ? currentValue : [];
+  const otherEmployees = existing.filter(
+    (item) => !item || typeof item !== 'object' || (item as { karyawanId?: unknown }).karyawanId !== employeeId
+  );
+  const ownById = new Map<string, Record<string, unknown>>();
+  for (const item of existing) {
+    if (!item || typeof item !== 'object') continue;
+    const record = { ...(item as Record<string, unknown>) };
+    if (record.karyawanId === employeeId && typeof record.id === 'string') ownById.set(record.id, record);
+  }
+
+  const submittedById = new Map<string, Record<string, unknown>>();
+  for (const item of requestedValue) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return { ok: false, message: 'Record self-service tidak valid.' };
+    }
+    const record = item as Record<string, unknown>;
+    if (record.karyawanId !== employeeId || typeof record.id !== 'string' || !record.id) {
+      return { ok: false, message: 'Record self-service harus terikat pada ID karyawan akun yang sedang masuk.' };
+    }
+    if (submittedById.has(record.id)) {
+      return { ok: false, message: 'Daftar self-service berisi ID record duplikat.' };
+    }
+    const previous = ownById.get(record.id);
+    if (key === 'hris_cuti' && previous) {
+      record.status = previous.status;
+      record.disetujuiOleh = previous.disetujuiOleh;
+      record.tanggalPengajuan = previous.tanggalPengajuan;
+    } else if (key === 'hris_cuti') {
+      record.status = 'Menunggu';
+      delete record.disetujuiOleh;
+    }
+    if (employeeName) {
+      if (key === 'hris_absensi') record.nama = employeeName;
+      if (key === 'hris_cuti') record.namaKaryawan = employeeName;
+    }
+    submittedById.set(record.id, record);
+  }
+
+  const mergedOwn = [...ownById.entries()].map(([id, record]) => submittedById.get(id) || record);
+  const existingIds = new Set(ownById.keys());
+  for (const [id, record] of submittedById) {
+    if (!existingIds.has(id)) mergedOwn.push(record);
+  }
+  return { ok: true, value: [...otherEmployees, ...mergedOwn] };
+}
+
 export function canWriteSyncKey(role: RoleDefinition, key: string): boolean {
   if (isLegacyRbacSyncKey(key)) return false;
   // Log audit operasional dicatat otomatis saat user sah beraktivitas di modulnya
   if (key === 'audit_trail') return true;
   // Self-service mobile HRIS: absensi GPS & pengajuan cuti pribadi oleh karyawan/sales aktif
-  if (key === 'hris_absensi' || key === 'hris_cuti') return true;
+  if (HRIS_SELF_SERVICE_WRITE_KEYS.has(key)) {
+    if (HRIS_SELF_SERVICE_WRITE_ROLES.has(role.id)) return true;
+    if (role.id === 'developer_it_support') return true;
+    const permissions = role.permissions['hrd-pelatihan'] || [];
+    return role.id === 'hrd_manager' &&
+      permissions.some((action) => action === 'create' || action === 'update' || action === 'approve');
+  }
 
   // Manifest asal data (dummy vs user) diperbarui otomatis saat user sah menulis koleksi
   if (key === 'sistem_data_manifest') return true;
+
+  // Audit Internal ISO 13485 dijalankan dan disimpan bersama oleh QA maupun QC
+  if (key === 'audit_internal_iso') {
+    const qaPerms = role.permissions['qa-mutu'] || [];
+    const qcPerms = role.permissions['qc-inspeksi'] || [];
+    return (
+      ['create', 'update', 'approve'].some((a) => qaPerms.includes(a as never)) ||
+      ['create', 'update', 'approve'].some((a) => qcPerms.includes(a as never))
+    );
+  }
 
   const resource = mapSyncKeyToResource(key);
   const perms = role.permissions[resource];
@@ -95,6 +235,10 @@ export function canWriteSyncKey(role: RoleDefinition, key: string): boolean {
 
   if (key === 'website_published') {
     return perms.includes('publish');
+  }
+  if (role.id === 'payroll_manager' && key.startsWith('hris_')) {
+    return ['hris_slip_gaji', 'hris_lembur'].includes(key) &&
+      (perms.includes('create') || perms.includes('update'));
   }
   return perms.includes('create') || perms.includes('update') || perms.includes('publish');
 }
@@ -149,37 +293,67 @@ export function containsMediaReference(value: unknown, mediaId: string): boolean
   return false;
 }
 
-export function mergeCatalogIntoPublishedSnapshot(
-  snapshot: Record<string, unknown>,
-  catalogValue: unknown
+function mergeCatalogIntoWebsiteConfig(
+  cfg: Record<string, unknown>,
+  catalogValue: unknown,
+  actorUsername?: string
 ): Record<string, unknown> | null {
-  if (!snapshot || typeof snapshot !== 'object' || snapshot.isPublished !== true) return null;
+  if (!cfg || typeof cfg !== 'object') return null;
   if (!Array.isArray(catalogValue)) return null;
-  const produkSection = snapshot.produk as { item?: Array<Record<string, unknown>> } | undefined;
+  const produkSection = cfg.produk as KonfigurasiSitus['produk'] | undefined;
   if (!produkSection || !Array.isArray(produkSection.item)) return null;
 
-  const statusMap = new Map<string, boolean>();
-  for (const item of produkSection.item) {
-    if (item && typeof item.id === 'string') {
-      statusMap.set(item.id, Boolean(item.isActive));
-    }
-  }
+  const normalizedCatalog = catalogValue
+    .filter((p): p is ProdukKatalog => Boolean(p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string'))
+    .map((p) => normalisasiProdukKatalog(p));
 
-  const nextItems = catalogValue
-    .filter((p): p is Record<string, unknown> => Boolean(p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string'))
-    .map((p) => ({
-      ...p,
-      isActive: statusMap.get(String(p.id)) ?? false
-    }));
+  const nextItems = produkKatalogUntukWebsite(normalizedCatalog, produkSection.item);
 
   return {
-    ...snapshot,
+    ...cfg,
     lastModifiedAt: Date.now(),
+    ...(actorUsername ? { lastModifiedBy: actorUsername } : {}),
     produk: {
       ...produkSection,
       item: nextItems
     }
   };
+}
+
+export function mergeCatalogIntoPublishedSnapshot(
+  snapshot: Record<string, unknown>,
+  catalogValue: unknown,
+  actorUsername?: string
+): Record<string, unknown> | null {
+  if (!snapshot || typeof snapshot !== 'object' || snapshot.isPublished !== true) return null;
+  if (!Array.isArray(catalogValue)) return null;
+  const produkSection = snapshot.produk as KonfigurasiSitus['produk'] | undefined;
+  if (!produkSection || !Array.isArray(produkSection.item)) return null;
+
+  const catalogIds = new Set(
+    catalogValue
+      .filter((p): p is { id: string } => Boolean(p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string'))
+      .map((p) => p.id)
+  );
+  const hasActiveSnapshotItems = produkSection.item.some((item) => item.isActive);
+  const isCatalogBackedSnapshot =
+    produkSection.item.length === 0 ||
+    produkSection.item.some((item) => item.id.startsWith('ams-daftar-harga-v6-')) ||
+    produkSection.item.some((item) => catalogIds.has(item.id));
+  if (hasActiveSnapshotItems && !isCatalogBackedSnapshot) {
+    return null;
+  }
+
+  return mergeCatalogIntoWebsiteConfig(snapshot, catalogValue, actorUsername);
+}
+
+export function mergeCatalogIntoDraftConfig(
+  draft: Record<string, unknown>,
+  catalogValue: unknown,
+  actorUsername?: string
+): Record<string, unknown> | null {
+  if (!draft || typeof draft !== 'object') return null;
+  return mergeCatalogIntoWebsiteConfig(draft, catalogValue, actorUsername);
 }
 
 export class ServerDataSyncStore {

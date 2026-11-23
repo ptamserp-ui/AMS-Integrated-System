@@ -19,7 +19,7 @@ const HALAMAN: HalamanWebsite[] = ['beranda', 'produk', 'solusi', 'layanan', 'su
 const LABEL_HALAMAN: Record<HalamanWebsite, string> = {
   beranda: 'Beranda',
   produk: 'Produk',
-  solusi: 'Solusi',
+  solusi: 'Kategori Produk',
   layanan: 'Layanan',
   'sumber-daya': 'Sumber Daya',
   tentang: 'Tentang Kami',
@@ -227,11 +227,21 @@ function MedanGambar({
   const [sedangOlah, setSedangOlah] = useState(false);
   const [statusUnggah, setStatusUnggah] = useState<'server' | 'antrean' | ''>('');
   const [gagal, setGagal] = useState('');
+  const [gagalPratinjau, setGagalPratinjau] = useState(false);
   const rujukan = String(nilai ?? '');
   const pratinjau = selesaikanGambar(rujukan || undefined);
 
+  useEffect(() => {
+    setGagalPratinjau(false);
+  }, [pratinjau]);
+
   const kunciLower = (keyMedan ?? '').toLowerCase();
   const labelLower = (label ?? '').toLowerCase();
+  const adalahLogoIdentitas =
+    kunciLower === 'logourl' ||
+    kunciLower === 'footerlogourl' ||
+    kunciLower.endsWith('.logourl') ||
+    kunciLower.endsWith('.footerlogourl');
 
   let kelasKotak = 'w-full aspect-[3/2]'; // Default sesuai rekomendasi 1200×800 (hero, galeri, profil)
   if (kunciLower.includes('favicon') || labelLower.includes('favicon')) {
@@ -242,8 +252,8 @@ function MedanGambar({
     kelasKotak = 'w-32 sm:w-36 aspect-square'; // Produk 1000×1000
   } else if (labelLower.includes('banner')) {
     kelasKotak = 'w-full aspect-[16/9]'; // Banner slide 1600×900
-  } else if (labelLower.includes('solusi')) {
-    kelasKotak = 'w-full aspect-[4/3]'; // Solusi 800×600
+  } else if (labelLower.includes('solusi') || labelLower.includes('kategori produk')) {
+    kelasKotak = 'w-full aspect-[4/3]'; // Kategori Produk 800×600
   } else if (labelLower.includes('artikel') || labelLower.includes('sampul')) {
     kelasKotak = 'w-full aspect-[1200/630]'; // Sampul artikel 1200×630
   }
@@ -280,10 +290,23 @@ function MedanGambar({
   return (
     <div className="space-y-2.5">
       {/* Kotak Pratinjau Foto proporsional sesuai jenis gambar */}
-      <div className={`relative ${kelasKotak} rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center overflow-hidden group hover:border-emerald-500 transition-colors shadow-inner`}>
-        {pratinjau ? (
+      <div
+        className={`relative ${kelasKotak} flex flex-col items-center justify-center overflow-hidden group transition-colors ${
+          adalahLogoIdentitas && pratinjau && !gagalPratinjau
+            ? 'border-0 bg-transparent shadow-none'
+            : 'rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 hover:border-emerald-500 shadow-inner'
+        }`}
+      >
+        {pratinjau && !gagalPratinjau ? (
           <>
-            <img src={pratinjau} alt="Pratinjau gambar" className="w-full h-full object-contain p-1.5 bg-slate-900/5" />
+            <img
+              src={pratinjau}
+              alt="Pratinjau gambar"
+              onError={() => setGagalPratinjau(true)}
+              className={`w-full h-full object-contain ${
+                adalahLogoIdentitas ? 'border-0 bg-transparent p-0' : 'p-1.5 bg-slate-900/5'
+              }`}
+            />
             <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
               <label className="px-3 py-1.5 bg-white text-slate-800 rounded-lg text-2xs font-bold shadow-md hover:bg-slate-100 cursor-pointer">
                 {sedangOlah ? '…' : 'Ganti'}
@@ -366,6 +389,21 @@ function MedanGambar({
   );
 }
 
+function PratinjauThumbnailGaleri({ src, alt }: { src?: string; alt: string }) {
+  const [gagal, setGagal] = useState(false);
+  useEffect(() => {
+    setGagal(false);
+  }, [src]);
+  if (!src || gagal) {
+    return (
+      <div className="w-full h-full flex items-center justify-center">
+        <ImageOff className="w-5 h-5 text-slate-400" />
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} onError={() => setGagal(true)} className="w-full h-full object-contain p-1" />;
+}
+
 export function MedanGambarBanyak({
   nilai,
   onChange,
@@ -437,13 +475,7 @@ export function MedanGambarBanyak({
             return (
               <div key={`${indeks}-${rujukan}`} className="space-y-1.5">
                 <div className="relative aspect-square rounded-lg border border-slate-200 bg-slate-50 overflow-hidden">
-                  {pratinjau ? (
-                    <img src={pratinjau} alt={`Foto ${indeks + 1}`} className="w-full h-full object-contain p-1" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <ImageOff className="w-5 h-5 text-slate-400" />
-                    </div>
-                  )}
+                  <PratinjauThumbnailGaleri src={pratinjau} alt={`Foto ${indeks + 1}`} />
                   {indeks === 0 && (
                     <span className="absolute left-1 top-1 rounded bg-slate-900/75 text-white text-3xs px-1.5 py-0.5">
                       Utama

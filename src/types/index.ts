@@ -33,7 +33,10 @@ export type UserRole =
   | 'karyawan'
   | 'auditor_internal'
   | 'it_admin'
-  | 'developer_it_support';
+  | 'developer_it_support'
+  | 'hrd_manager'
+  | 'payroll_manager'
+  | 'management';
 
 // 1. Regulatory Affairs (RA & PJT)
 export interface IzinEdarAlkes {
@@ -1623,6 +1626,7 @@ export interface IdentitasSitus {
   nama: string;
   tagline: string;
   logoUrl?: string;
+  footerLogoUrl?: string;
   faviconUrl?: string;
   judulSitus: string;
   metaDeskripsi: string;
@@ -1993,6 +1997,7 @@ export interface ServerUserPublic {
   username: string;
   fullName: string;
   email: string;
+  employeeId?: string;
   roleId: string;
   roleName: string;
   department: string;
@@ -2008,6 +2013,7 @@ export interface ServerUserRecord {
   username: string;
   fullName: string;
   email: string;
+  employeeId?: string;
   roleId: string;
   department: string;
   isActive: boolean;
@@ -2097,6 +2103,7 @@ export type TipeFieldDinamis =
   | 'number'
   | 'date'
   | 'select'
+  | 'select_or_text'
   | 'boolean'
   | 'currency';
 

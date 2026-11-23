@@ -63,7 +63,7 @@ export const SEKSI_BERANDA_LABEL: Record<KunciSeksiSitus, string> = {
   hero: 'Hero utama',
   slide: 'Banner / Slider',
   kepercayaan: 'Legalitas & Sertifikat',
-  solusi: 'Solusi per Kategori',
+  solusi: 'Kategori Produk',
   konsultasi: 'Konsultasi CTA',
   statistik: 'Capaian Terukur',
   produk: 'Katalog Produk',

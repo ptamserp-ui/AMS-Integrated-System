@@ -16,7 +16,8 @@ export const KOLEKSI_OPERASIONAL_SITUS_LIST = [
   'sales_rebate',
   'izin_edar',
   'penarikan_produk',
-  'sales_pengetahuan_produk'
+  'sales_pengetahuan_produk',
+  'product_catalog'
 ] as const;
 
 /** Kunci kategori izin edar untuk tautan filter katalog produk. */

@@ -55,7 +55,7 @@ export default function FakturTab({
   bukaForm: number;
   onPerubahanData: () => void;
 }) {
-  const dbTick = useDbTick(['transaksi_keuangan', 'keuangan_jurnal', 'keuangan_pajak', 'gudang_surat_jalan', 'stok_gudang', 'penarikan_produk', 'izin_edar', 'sales_pelanggan_b2b']);
+  const dbTick = useDbTick(['transaksi', 'keuangan_jurnal', 'keuangan_tetapan_pajak', 'gudang_surat_jalan', 'stok_gudang', 'penarikan_produk', 'izin_edar', 'sales_pelanggan']);
   const transaksiList = useMemo<TransaksiKeuangan[]>(() => { void dbTick; return db.getTransaksi(); }, [dbTick]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);

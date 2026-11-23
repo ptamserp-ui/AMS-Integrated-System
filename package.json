@@ -16,6 +16,7 @@
     "preview": "vite preview",
     "clean": "node -e \"for (const p of ['dist', 'server.js']) require('fs').rmSync(p, { recursive: true, force: true });\"",
     "lint": "tsc --noEmit",
+    "lint:rules": "eslint firestore.rules",
     "test": "vitest run",
     "cek:benih": "tsx scripts/cek-benih-gudang.ts",
     "cek:fefo": "tsx scripts/cek-jalur-fefo.ts",
@@ -25,7 +26,8 @@
     "auth:hash": "tsx scripts/bootstrap-dev.ts --hash-only",
     "auth:reset-dev": "tsx scripts/bootstrap-dev.ts --request-reset",
     "cek:ereport": "tsx scripts/cek-ereport-gudang.ts",
-    "verifikasi": "npm run lint && npm run test && npm run cek:semua && npm run build"
+    "deploy:check": "tsx scripts/release-check.ts",
+    "verifikasi": "npm run lint && npm run lint:rules && npm run test && npm run cek:semua && npm run build"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",

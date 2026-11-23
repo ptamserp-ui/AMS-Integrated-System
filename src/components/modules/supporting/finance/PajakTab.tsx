@@ -36,7 +36,7 @@ export default function PajakTab({ identitas, dariAcuan }: { identitas: Identita
   const isoAcuan = dariAcuan.toISOString().slice(0, 10);
   const [pesan, setPesan] = useState<{ tipe: 'sukses' | 'galat'; teks: string } | null>(null);
 
-  const dbTick = useDbTick(['keuangan_jurnal', 'keuangan_periode', 'transaksi_keuangan', 'keuangan_pajak']);
+  const dbTick = useDbTick(['keuangan_jurnal', 'keuangan_periode', 'transaksi', 'keuangan_tetapan_pajak']);
   const jurnal = useMemo(() => { void dbTick; return db.getJurnalKeuangan(); }, [dbTick]);
   const periode = useMemo(() => { void dbTick; return db.getPeriodeBuku(); }, [dbTick]);
   const transaksi = useMemo(() => { void dbTick; return db.getTransaksi(); }, [dbTick]);

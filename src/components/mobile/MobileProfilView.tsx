@@ -22,6 +22,7 @@ interface MobileProfilViewProps {
   karyawan: KaryawanHRIS | undefined;
   allKaryawan: KaryawanHRIS[];
   canSwitchProfile: boolean;
+  canViewSensitiveHris: boolean;
   selectedEmployeeId?: string;
   onSelectEmployee: (id: string) => void;
   onSyncPocketBase: () => Promise<void>;
@@ -35,6 +36,7 @@ export const MobileProfilView: React.FC<MobileProfilViewProps> = ({
   karyawan,
   allKaryawan,
   canSwitchProfile,
+  canViewSensitiveHris,
   selectedEmployeeId,
   onSelectEmployee,
   onSyncPocketBase,
@@ -133,20 +135,22 @@ export const MobileProfilView: React.FC<MobileProfilViewProps> = ({
               {karyawan?.tanggalBergabung ? formatTanggal(karyawan.tanggalBergabung) : '-'}
             </p>
           </div>
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
-            <p className="text-2xs font-bold uppercase tracking-wider text-slate-400">
-              Rekam Medis (MCU)
-            </p>
-            <p
-              className={`font-bold mt-1 ${
-                karyawan?.statusRekamMedis === 'Fit to Work'
-                  ? 'text-emerald-700'
-                  : 'text-amber-700'
-              }`}
-            >
-              {karyawan?.statusRekamMedis || 'Terverifikasi'}
-            </p>
-          </div>
+          {canViewSensitiveHris && (
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+              <p className="text-2xs font-bold uppercase tracking-wider text-slate-400">
+                Rekam Medis (MCU)
+              </p>
+              <p
+                className={`font-bold mt-1 ${
+                  karyawan?.statusRekamMedis === 'Fit to Work'
+                    ? 'text-emerald-700'
+                    : 'text-amber-700'
+                }`}
+              >
+                {karyawan?.statusRekamMedis || '-'}
+              </p>
+            </div>
+          )}
         </div>
       </section>
 

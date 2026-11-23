@@ -130,6 +130,7 @@ import {
 import {
   normalisasiProdukKatalog,
   perluMigrasiProdukBawaanCms,
+  produkKatalogUntukWebsite,
   siapkanKatalogProduk
 } from '../utils/productCatalog';
 import {
@@ -277,7 +278,8 @@ export const KOLEKSI_OPERASIONAL_SITUS = [
   'sales_rebate',
   'izin_edar',
   'penarikan_produk',
-  'sales_pengetahuan_produk'
+  'sales_pengetahuan_produk',
+  'product_catalog'
 ] as const;
 
 export type KunciKoleksiOperasionalSitus = (typeof KOLEKSI_OPERASIONAL_SITUS)[number];
@@ -328,6 +330,8 @@ class AMSDatabaseManager {
   private syncRetryCounts: Map<string, number> = new Map();
   private syncStateStatus: StatusSinkronisasi = 'idle';
   private lastSyncError: string | null = null;
+  private lastRejectedKey: string | null = null;
+  private initialServerHydrationDone: boolean = false;
   private isOnlineBrowser: boolean =
     typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
   private activeDbDriver: 'firebase' | 'pocketbase' = 'firebase';
@@ -430,6 +434,15 @@ class AMSDatabaseManager {
         if (changed.length > 0) {
           this.firebaseSyncedAt = new Date().toISOString();
           this.emitRemoteUpdate(changed, 'firebase-firestore');
+        }
+      },
+      onEntriesRemoved: (removedKeys) => {
+        for (const key of removedKeys) {
+          if (isLegacyRbacSyncKey(key) || this.pendingSyncKeys.has(key)) continue;
+          this.applyRemoteDelete(key, 'firebase-firestore');
+        }
+        if (removedKeys.length > 0) {
+          this.firebaseSyncedAt = new Date().toISOString();
         }
       },
       onRbacChanged: () => {
@@ -665,6 +678,9 @@ class AMSDatabaseManager {
       this.connectionStatusText = this.lastSyncError
         ? `${this.pendingSyncKeys.size} Perubahan Tertunda (${this.lastSyncError})`
         : `${this.pendingSyncKeys.size} Perubahan Menunggu Sinkronisasi`;
+    } else if (this.lastSyncError) {
+      this.syncStateStatus = 'error';
+      this.connectionStatusText = `Sinkronisasi Ditolak/Gagal: ${this.lastSyncError}`;
     } else if (this.activeDbDriver === 'firebase' && this.firebaseUserInfo) {
       this.syncStateStatus = 'idle';
       this.connectionStatusText = `Firebase Firestore Aktif (${this.firebaseUserInfo.email})`;
@@ -685,6 +701,29 @@ class AMSDatabaseManager {
       this.connectionStatusText = 'Penyimpanan Lokal Aktif (Offline-First)';
     }
     this.notifyLocal('connection_status');
+  }
+
+  public hasCompletedServerHydration(): boolean {
+    return this.initialServerHydrationDone;
+  }
+
+  public clearLastSyncError(): void {
+    this.lastSyncError = null;
+    this.lastRejectedKey = null;
+    this.updateConnectionStatusLabel();
+  }
+
+  private userCanWriteWebsite(): boolean {
+    try {
+      if (typeof localStorage === 'undefined') return false;
+      const raw = localStorage.getItem(KUNCI_SESI_AUTH);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as { permissions?: { website?: string[] } } | null;
+      const perms = parsed?.permissions?.website;
+      return Array.isArray(perms) && (perms.includes('create') || perms.includes('update') || perms.includes('publish'));
+    } catch {
+      return false;
+    }
   }
 
   private async checkPBConnection() {
@@ -717,6 +756,7 @@ class AMSDatabaseManager {
       isPocketBaseServerReachable: this.isOnlinePocketBase,
       isRealtimeSyncConnected: this.wsConnected,
       isServerSyncActive: Boolean(this.getAuthTokenFromStorage()) && this.isOnlineBrowser,
+      hasCompletedServerHydration: this.initialServerHydrationDone,
       activeDbDriver: this.activeDbDriver,
       firebaseConnected: Boolean(this.firebaseUserInfo),
       firebaseEmail: this.firebaseUserInfo?.email || null,
@@ -734,6 +774,7 @@ class AMSDatabaseManager {
       pendingKeys: Array.from(this.pendingSyncKeys),
       syncState: this.syncStateStatus,
       lastSyncError: this.lastSyncError,
+      lastRejectedKey: this.lastRejectedKey,
       pocketbaseUrl: PB_URL
     };
   }
@@ -948,12 +989,15 @@ class AMSDatabaseManager {
           if (res.status === 400 || res.status === 403) {
             const errPayload = (await res.json().catch(() => null)) as { pesan?: string } | null;
             this.lastSyncError = errPayload?.pesan || `HTTP ${res.status}`;
+            this.lastRejectedKey = key;
             if (this.latestSyncOp.get(key) === op) {
               this.latestSyncOp.delete(key);
               this.pendingSyncKeys.delete(key);
               this.syncRetryCounts.delete(key);
               this.simpanAntreanSyncPersisten();
             }
+            this.updateConnectionStatusLabel();
+            void this.syncFromServer(false);
             continue;
           }
 
@@ -975,6 +1019,7 @@ class AMSDatabaseManager {
           }
           this.lastSyncedAt = new Date().toISOString();
           this.lastSyncError = null;
+          this.lastRejectedKey = null;
 
           // Cerminkan juga ke Firebase Firestore bila mode pengembangan aktif & terautentikasi
           if (this.activeDbDriver === 'firebase' && authFirebase.currentUser?.emailVerified) {
@@ -1135,13 +1180,17 @@ class AMSDatabaseManager {
     };
   }
 
-  public prepareSessionSync(userId?: string | null): void {
+  public prepareSessionSync(userId?: string | null, accessScope = ''): void {
     this.serverVersions = {};
+    this.initialServerHydrationDone = false;
+    this.lastSyncError = null;
+    this.lastRejectedKey = null;
     if (typeof localStorage === 'undefined') return;
     try {
+      const syncIdentity = userId ? `${userId}:${accessScope}` : '';
       const prevUserId = localStorage.getItem(KUNCI_LAST_SYNC_USER);
       if (userId) {
-        if (prevUserId && prevUserId !== userId) {
+        if (prevUserId && prevUserId !== syncIdentity) {
           this.pendingSyncKeys.clear();
           this.latestSyncOp.clear();
           for (const timer of this.syncRetryTimers.values()) {
@@ -1162,12 +1211,20 @@ class AMSDatabaseManager {
             this.isApplyingRemote = false;
           }
         }
-        localStorage.setItem(KUNCI_LAST_SYNC_USER, userId);
+        localStorage.setItem(KUNCI_LAST_SYNC_USER, syncIdentity);
       }
     } catch {
       /* abaikan error storage */
     }
     this.updateConnectionStatusLabel();
+  }
+
+  public resetSessionSyncState(): void {
+    this.initialServerHydrationDone = false;
+    this.serverVersions = {};
+    this.lastSyncError = null;
+    this.lastRejectedKey = null;
+    this.disconnectRealtimeSync();
   }
 
   private applyRemoteEntry(
@@ -1272,9 +1329,19 @@ class AMSDatabaseManager {
     }
     try {
       const hasKnown = deltaOnly && Object.keys(this.serverVersions).length > 0;
-      const url = hasKnown
-        ? `/api/sync/state?versions=${encodeURIComponent(JSON.stringify(this.serverVersions))}`
-        : '/api/sync/state';
+      const knownKeys = new Set(Object.keys(this.serverVersions));
+      if (typeof localStorage !== 'undefined') {
+        for (let i = 0; i < localStorage.length; i++) {
+          const storageKey = localStorage.key(i);
+          if (storageKey?.startsWith(STORAGE_PREFIX)) {
+            knownKeys.add(storageKey.slice(STORAGE_PREFIX.length));
+          }
+        }
+      }
+      const query = new URLSearchParams();
+      if (hasKnown) query.set('versions', JSON.stringify(this.serverVersions));
+      query.set('known', JSON.stringify([...knownKeys]));
+      const url = `/api/sync/state?${query.toString()}`;
       const res = await fetch(url, {
         method: 'GET',
         credentials: 'include',
@@ -1289,12 +1356,31 @@ class AMSDatabaseManager {
       const data = (await res.json()) as {
         revision?: number;
         entries?: Record<string, { value: unknown; version: number }>;
+        allowedKeys?: string[];
       };
       if (typeof data.revision === 'number') {
         this.serverRevision = Math.max(this.serverRevision, data.revision);
       }
       const changed: string[] = [];
       const remoteEntries = data.entries || {};
+      if (Array.isArray(data.allowedKeys)) {
+        const allowed = new Set(data.allowedKeys);
+        let queueChanged = false;
+        for (const key of knownKeys) {
+          if (allowed.has(key)) continue;
+          this.pendingSyncKeys.delete(key);
+          this.latestSyncOp.delete(key);
+          const retryTimer = this.syncRetryTimers.get(key);
+          if (retryTimer) clearTimeout(retryTimer);
+          this.syncRetryTimers.delete(key);
+          this.syncRetryCounts.delete(key);
+          delete this.serverVersions[key];
+          queueChanged = true;
+          if (this.applyRemoteDelete(key, 'permission-revoked')) changed.push(key);
+        }
+        if (queueChanged) this.simpanAntreanSyncPersisten();
+      }
+      const prevKnownKeys = Object.keys(this.serverVersions);
       const remoteManifest = remoteEntries[KUNCI_MANIFEST_DATA]?.value as Partial<ManifestAsalData> | undefined;
       const remotePurged = Boolean(remoteManifest?.dummyDihapus);
 
@@ -1320,6 +1406,21 @@ class AMSDatabaseManager {
           changed.push(key);
         }
       }
+
+      if (!deltaOnly) {
+        this.initialServerHydrationDone = true;
+        for (const prevKey of prevKnownKeys) {
+          if (
+            !Object.prototype.hasOwnProperty.call(remoteEntries, prevKey) &&
+            !this.pendingSyncKeys.has(prevKey)
+          ) {
+            if (this.applyRemoteDelete(prevKey, 'hydrate')) {
+              changed.push(prevKey);
+            }
+          }
+        }
+      }
+
       this.lastSyncedAt = new Date().toISOString();
       if (changed.length > 0) {
         this.emitRemoteUpdate(changed, deltaOnly ? 'delta' : 'hydrate');
@@ -4189,7 +4290,7 @@ class AMSDatabaseManager {
       skemaHarga: this.getSkemaHarga(),
       rebate: this.getProgramRebate(),
       garansi: this.getGaransiInstalasi(),
-      produkKatalog: this.getJson<ProdukKatalog[]>('product_catalog')?.map(normalisasiProdukKatalog) ?? undefined
+      produkKatalog: this.getProdukKatalog()
     };
   }
 
@@ -4203,7 +4304,8 @@ class AMSDatabaseManager {
       skemaHarga: this.getSkemaHarga(),
       kontrakHarga: this.getKontrakHarga(),
       pengetahuanProduk: this.getPengetahuanProduk(),
-      rebate: this.getProgramRebate()
+      rebate: this.getProgramRebate(),
+      produkKatalog: this.hasProdukKatalogTersimpan() ? this.getProdukKatalog() : undefined
     };
   }
 
@@ -4217,9 +4319,12 @@ class AMSDatabaseManager {
   }
 
   public inisialisasiProdukKatalog(): ProdukKatalog[] {
+    const daftar = this.getProdukKatalog();
+    if (this.getAuthTokenFromStorage() && !this.initialServerHydrationDone) {
+      return daftar;
+    }
     if (this.hasProdukKatalogTersimpan()) {
       const tersimpan = this.getJson<ProdukKatalog[]>('product_catalog') ?? [];
-      const daftar = this.getProdukKatalog();
       const perluGantiDummy = perluMigrasiProdukBawaanCms(tersimpan);
       if (perluGantiDummy) {
         this.setCollection('product_catalog', daftar);
@@ -4227,28 +4332,66 @@ class AMSDatabaseManager {
       }
       return daftar;
     }
-    const daftar = this.getProdukKatalog();
     this.setCollection('product_catalog', daftar);
     this.logAudit('Commercial — Product Catalog', 'Inisialisasi 114 produk rujukan daftar harga AMS V6', 'PRODUCT-CATALOG');
     return daftar;
   }
 
   public simpanProdukKatalog(daftar: ProdukKatalog[]): void {
-    this.setCollection('product_catalog', daftar);
-    this.logAudit('Commercial — Product Catalog', 'Pembaruan master produk dan SKU', daftar[0]?.id ?? 'PRODUCT-CATALOG');
+    const normal = daftar.map(normalisasiProdukKatalog);
+    this.setCollection('product_catalog', normal);
+    // Perbarui cache draf lokal agar UI CMS Website langsung menampilkan item terbaru tanpa memicu 403 bila user tak berhak menulis kunci website_draft;
+    // server juga otomatis menyelaraskan & menyiarkan website_draft + website_published dari product_catalog.
+    const drafWebsite = this.getJson<KonfigurasiSitus>('website_draft');
+    if (drafWebsite && !this.isApplyingRemote) {
+      const drafDiperbarui: KonfigurasiSitus = {
+        ...drafWebsite,
+        produk: {
+          ...drafWebsite.produk,
+          item: produkKatalogUntukWebsite(normal, drafWebsite.produk.item)
+        },
+        lastModifiedAt: Date.now()
+      };
+      this.isApplyingRemote = true;
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(STORAGE_PREFIX + 'website_draft', JSON.stringify(drafDiperbarui));
+        }
+        this.notify('website_draft');
+      } finally {
+        this.isApplyingRemote = false;
+      }
+    }
+    this.logAudit('Commercial — Product Catalog', 'Pembaruan master produk dan SKU', normal[0]?.id ?? 'PRODUCT-CATALOG');
   }
 
   public getWebsiteDraft(): KonfigurasiSitus {
     const tersimpan = this.getJson<KonfigurasiSitus>('website_draft');
     const versiTersimpan = this.getJson<number>('website_content_v');
-    if (tersimpan && versiTersimpan === VERSI_KONTEN_WEBSITE) return tersimpan;
+    if (tersimpan && versiTersimpan === VERSI_KONTEN_WEBSITE) {
+      return {
+        ...tersimpan,
+        produk: {
+          ...tersimpan.produk,
+          item: produkKatalogUntukWebsite(this.getProdukKatalog(), tersimpan.produk.item)
+        }
+      };
+    }
     const awal = bangunKontenDefault(this.getSumberKontenWebsite());
     const hasil = tersimpan ? padukanKonten(tersimpan, awal) : awal;
     if (this.migrasiDraftAktif) return hasil;
+    const bolehTulisKeServer =
+      !this.getAuthTokenFromStorage() ||
+      (this.initialServerHydrationDone && this.userCanWriteWebsite());
     this.migrasiDraftAktif = true;
     try {
-      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
-      this.setJson('website_draft', hasil);
+      if (bolehTulisKeServer) {
+        this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
+        this.setJson('website_draft', hasil);
+      } else if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_PREFIX + 'website_content_v', JSON.stringify(VERSI_KONTEN_WEBSITE));
+        localStorage.setItem(STORAGE_PREFIX + 'website_draft', JSON.stringify(hasil));
+      }
     } finally {
       this.migrasiDraftAktif = false;
     }
@@ -4267,6 +4410,9 @@ class AMSDatabaseManager {
       lastModifiedAt: Date.now(),
       lastModifiedBy: pengguna
     };
+    if (this.getJson<number>('website_content_v') !== VERSI_KONTEN_WEBSITE) {
+      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
+    }
     this.setJson('website_draft', baru);
     this.logAudit(
       'Website — Konten Situs Publik',
@@ -4284,6 +4430,9 @@ class AMSDatabaseManager {
     const baru = sinkronkanKonten(lama, this.getSumberKontenWebsite());
     baru.lastModifiedAt = Date.now();
     baru.lastModifiedBy = pengguna;
+    if (this.getJson<number>('website_content_v') !== VERSI_KONTEN_WEBSITE) {
+      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
+    }
     this.setJson('website_draft', baru);
     this.logAudit(
       'Website — Konten Situs Publik',
@@ -4305,6 +4454,9 @@ class AMSDatabaseManager {
       isPublished: true,
       lastPublishedAt: Date.now()
     };
+    if (this.getJson<number>('website_content_v') !== VERSI_KONTEN_WEBSITE) {
+      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
+    }
     this.setJson('website_published', snapshot);
     this.setJson('website_draft', { ...draf, isPublished: true, lastPublishedAt: snapshot.lastPublishedAt });
     this.logAudit(

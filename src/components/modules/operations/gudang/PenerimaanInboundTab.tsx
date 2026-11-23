@@ -51,11 +51,11 @@ export default function PenerimaanInboundTab({
   onPerubahanData
 }: Props) {
   const dbTick = useDbTick([
-    'gudang_terima_barang',
+    'gudang_penerimaan',
     'purchase_order',
-    'lokasi_bin',
-    'gudang_fisik',
-    'aturan_simpan',
+    'gudang_bin',
+    'gudang_unit',
+    'gudang_aturan_simpan',
     'stok_gudang'
   ]);
   const terimaList = useMemo<TerimaBarang[]>(() => {

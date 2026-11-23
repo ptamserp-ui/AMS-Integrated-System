@@ -13,13 +13,15 @@ import { canWriteSyncKey } from '../../server/dataSyncStore';
 function buatSesiUji(
   peran: SesiLogin['peran'],
   permissions: RoleDefinition['permissions'],
-  namaLengkap = 'Pegawai Lapangan'
+  namaLengkap = 'Pegawai Lapangan',
+  employeeId?: string
 ): SesiLogin {
   return {
     userId: `USR-${peran}`,
     namaPengguna: `user.${peran}`,
     namaLengkap,
     email: `${peran}@ams.co.id`,
+    employeeId,
     peran,
     namaPeran: peran,
     departemen: 'Operasional',
@@ -58,7 +60,7 @@ describe('Mobile App — Kontrol Akses Berbasis Peran (Karyawan vs Sales)', () =
     expect(cap.canViewAllEmployees).toBe(false);
   });
 
-  it('sales_manager dapat mengakses CRM, mengelola order, dan menyetujui pengajuan cuti', () => {
+  it('sales_manager dapat mengakses CRM tetapi tidak menyetujui pengajuan cuti', () => {
     const sesiManager = buatSesiUji('sales_manager', {
       overview: ['view'],
       'sales-marketing': ['view', 'create', 'update', 'approve'],
@@ -68,10 +70,10 @@ describe('Mobile App — Kontrol Akses Berbasis Peran (Karyawan vs Sales)', () =
 
     expect(cap.isSales).toBe(true);
     expect(cap.canManageOrders).toBe(true);
-    expect(cap.canApproveLeave).toBe(true);
+    expect(cap.canApproveLeave).toBe(false);
   });
 
-  it('pjt mendapat seluruh kapabilitas mobile termasuk switch pratinjau profil karyawan', () => {
+  it('PJT tidak otomatis mendapat akses ke seluruh profil karyawan', () => {
     const sesiPjt = buatSesiUji('pjt', {
       overview: ['view', 'create', 'update', 'delete', 'approve', 'export', 'publish'],
       'hrd-pelatihan': ['view', 'create', 'update', 'approve'],
@@ -81,8 +83,15 @@ describe('Mobile App — Kontrol Akses Berbasis Peran (Karyawan vs Sales)', () =
 
     expect(cap.isSales).toBe(true);
     expect(cap.canManageOrders).toBe(true);
-    expect(cap.canApproveLeave).toBe(true);
-    expect(cap.canViewAllEmployees).toBe(true);
+    expect(cap.canApproveLeave).toBe(false);
+    expect(cap.canViewAllEmployees).toBe(false);
+  });
+
+  it('HRD, Payroll, Manajemen, dan Developer dapat beralih ke profil karyawan sesuai kebijakan', () => {
+    for (const role of ['hrd_manager', 'payroll_manager', 'management', 'developer_it_support'] as const) {
+      const sesi = buatSesiUji(role, { 'hrd-pelatihan': ['view'] });
+      expect(getMobileCapabilities(sesi).canViewAllEmployees).toBe(true);
+    }
   });
 });
 
@@ -127,12 +136,19 @@ describe('Mobile App — Utilitas HRIS, Cuti & Server Self-Service Sync', () => 
     expect(hitungJumlahHariCuti('', '2026-11-16')).toBe(0);
   });
 
-  it('findKaryawanForSession mencocokkan nama lengkap sesi dengan master KaryawanHRIS', () => {
+  it('findKaryawanForSession hanya memilih ID karyawan yang ditautkan secara eksplisit', () => {
     const target = INITIAL_KARYAWAN_HRIS[0];
-    const sesi = buatSesiUji('karyawan', { 'hrd-pelatihan': ['view'] }, target.nama);
+    const sesi = buatSesiUji('karyawan', { 'hrd-pelatihan': ['view'] }, target.nama, target.id);
+    const developer = buatSesiUji('developer_it_support', {});
     const ditemukan = findKaryawanForSession(INITIAL_KARYAWAN_HRIS, sesi);
+    const tanpaTautan = findKaryawanForSession(
+      INITIAL_KARYAWAN_HRIS,
+      buatSesiUji('karyawan', { 'hrd-pelatihan': ['view'] }, target.nama)
+    );
 
     expect(ditemukan?.id).toBe(target.id);
+    expect(tanpaTautan).toBeUndefined();
+    expect(findKaryawanForSession(INITIAL_KARYAWAN_HRIS, developer)?.id).toBe(target.id);
   });
 
   it('canWriteSyncKey mengizinkan self-service absensi & cuti untuk karyawan namun memblokir modul terlarang', () => {

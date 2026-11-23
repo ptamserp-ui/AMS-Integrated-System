@@ -272,6 +272,12 @@ VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com`,
     };
   }, []);
 
+  useEffect(() => {
+    void dbTick;
+    setAuditList(db.getAuditTrail());
+    setConnStatus(db.getConnectionStatus());
+  }, [dbTick]);
+
   const handleCopy = (text: string, section: string) => {
     navigator.clipboard.writeText(text);
     setCopiedSection(section);

@@ -323,7 +323,7 @@ export function EditorTataLetak({ cfg, onGanti }: PropsEditorTataLetak) {
         ))}
       </ol>
       <p className="text-2xs text-slate-500 mt-2">
-        Halaman lain (Katalog, Solusi, Layanan, Sumber Daya, Tentang, Kontak) memakai susunan baku modul.
+        Halaman lain (Produk, Kategori Produk, Layanan, Sumber Daya, Tentang Kami, Kontak) memakai susunan baku modul.
       </p>
     </div>
   );

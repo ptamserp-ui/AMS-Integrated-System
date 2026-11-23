@@ -26,7 +26,7 @@ import {
   type Unsubscribe
 } from 'firebase/firestore';
 import defaultFirebaseConfig from '../../firebase-applet-config.json';
-import { resolveFirebaseBootstrapAdmins, resolveFirebaseClientConfig } from './firebaseConfig';
+import { resolveFirebaseBootstrapAdmins, resolveFirebaseClientConfig, type FirebaseClientConfig } from './firebaseConfig';
 import type { RoleDefinition, ServerUserRecord } from '../types';
 
 export enum OperationType {
@@ -61,9 +61,28 @@ const BOOTSTRAPPED_ADMIN_EMAILS = resolveFirebaseBootstrapAdmins(
 );
 const MAX_DOC_BYTES = 920_000;
 
-const firebaseConfig = resolveFirebaseClientConfig(import.meta.env, defaultFirebaseConfig, {
-  hostname: typeof window !== 'undefined' ? window.location.hostname : undefined
-});
+let firebaseConfigError: string | null = null;
+const firebaseConfig: FirebaseClientConfig = (() => {
+  try {
+    return resolveFirebaseClientConfig(import.meta.env, defaultFirebaseConfig, {
+      hostname: typeof window !== 'undefined' ? window.location.hostname : undefined
+    });
+  } catch (err) {
+    firebaseConfigError = err instanceof Error ? err.message : String(err);
+    if (typeof console !== 'undefined') {
+      console.error(
+        '[Firebase Config] Konfigurasi environment tidak valid:',
+        firebaseConfigError
+      );
+    }
+    throw err;
+  }
+})();
+
+export function getFirebaseConfigError(): string | null {
+  return firebaseConfigError;
+}
+
 const existingApps = getApps();
 const app = existingApps.length > 0 ? existingApps[0] : initializeApp(firebaseConfig);
 
@@ -443,6 +462,7 @@ export async function pushRbacSnapshotToFirestore(
           username: cleanUsername,
           fullName: u.fullName.slice(0, 120),
           email: (u.email || '').slice(0, 160),
+          employeeId: (u.employeeId || '').slice(0, 128),
           roleId: u.roleId.slice(0, 64),
           department: (u.department || 'Umum').slice(0, 120),
           isActive: u.isActive !== false,
@@ -457,6 +477,7 @@ export async function pushRbacSnapshotToFirestore(
           username: cleanUsername,
           fullName: u.fullName.slice(0, 120),
           email: (u.email || '').slice(0, 160),
+          employeeId: (u.employeeId || '').slice(0, 128),
           roleId: u.roleId.slice(0, 64),
           department: (u.department || 'Umum').slice(0, 120),
           isActive: u.isActive !== false,
@@ -660,6 +681,7 @@ export async function pullAllCloudStateFromFirestore(): Promise<CloudPulledState
           username: d.username,
           fullName: typeof d.fullName === 'string' ? d.fullName : d.username,
           email: typeof d.email === 'string' ? d.email : '',
+          employeeId: typeof d.employeeId === 'string' ? d.employeeId : undefined,
           roleId: d.roleId,
           department: typeof d.department === 'string' ? d.department : 'Umum',
           isActive: d.isActive !== false,
@@ -703,6 +725,7 @@ export async function pullAllCloudStateFromFirestore(): Promise<CloudPulledState
 
 export function attachFirestoreRealtimeSync(callbacks: {
   onEntriesChanged: (entries: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }>) => void;
+  onEntriesRemoved?: (keys: string[]) => void;
   onRbacChanged: () => void;
 }): Unsubscribe | null {
   const user = authFirebase.currentUser;
@@ -722,6 +745,7 @@ export function attachFirestoreRealtimeSync(callbacks: {
     entriesQuery,
     (snapshot) => {
       const updates: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }> = {};
+      const removed: string[] = [];
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'added' || change.type === 'modified') {
           const d = change.doc.data() as {
@@ -740,10 +764,17 @@ export function attachFirestoreRealtimeSync(callbacks: {
               updatedBy: d.updatedBy || 'firebase-sync'
             };
           }
+        } else if (change.type === 'removed') {
+          const d = change.doc.data() as { key?: string } | undefined;
+          const k = d?.key || change.doc.id;
+          if (k) removed.push(k);
         }
       });
       if (Object.keys(updates).length > 0) {
         callbacks.onEntriesChanged(updates);
+      }
+      if (removed.length > 0 && callbacks.onEntriesRemoved) {
+        callbacks.onEntriesRemoved(removed);
       }
     },
     (error) => {

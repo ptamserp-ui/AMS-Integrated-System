@@ -60,6 +60,9 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
   useEffect(() => {
     let batal = false;
     let berhentiTerbit: (() => void) | undefined;
+    let publicWs: WebSocket | null = null;
+    let publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let diketahuiRevision = 0;
 
     const muat = () => {
       tentukanKontenTayang().then(({ konfigurasi: isi, status: st }) => {
@@ -81,6 +84,75 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
 
     muat();
 
+    const padaFokus = () => muat();
+    const padaVisibilitas = () => {
+      if (document.visibilityState === 'visible') muat();
+    };
+    window.addEventListener('ams:media-uploaded', padaFokus);
+    window.addEventListener('ams:media-deleted', padaFokus);
+    window.addEventListener('focus', padaFokus);
+    document.addEventListener('visibilitychange', padaVisibilitas);
+
+    const pasangWsPublikRingan = () => {
+      if (batal || typeof window === 'undefined' || typeof WebSocket === 'undefined') return;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/sync/ws`;
+      try {
+        const ws = new WebSocket(wsUrl);
+        publicWs = ws;
+        ws.onmessage = (ev: MessageEvent) => {
+          if (batal) return;
+          try {
+            const msg = JSON.parse(String(ev.data)) as {
+              type?: string;
+              key?: string;
+              revision?: number;
+              entries?: Record<string, { value?: unknown }>;
+            };
+            if (!msg?.type) return;
+            if (msg.type === 'sync:hello' && typeof msg.revision === 'number') {
+              if (diketahuiRevision > 0 && msg.revision > diketahuiRevision) {
+                muat();
+              }
+              diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
+              return;
+            }
+            if (typeof msg.revision === 'number') {
+              diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
+            }
+            if (
+              (msg.type === 'sync:update' && msg.key === 'website_published') ||
+              (msg.type === 'sync:batch-update' && msg.entries?.website_published) ||
+              msg.type === 'media:uploaded' ||
+              msg.type === 'media:deleted'
+            ) {
+              muat();
+            }
+          } catch {
+            /* abaikan pesan tidak dikenal */
+          }
+        };
+        ws.onclose = () => {
+          if (publicWs === ws) publicWs = null;
+          if (!batal && !publicReconnectTimer) {
+            publicReconnectTimer = setTimeout(() => {
+              publicReconnectTimer = null;
+              pasangWsPublikRingan();
+            }, 4000);
+          }
+        };
+        ws.onerror = () => {
+          try {
+            ws.close();
+          } catch {
+            /* abaikan */
+          }
+        };
+      } catch {
+        /* fallback tetap aman */
+      }
+    };
+
     if (punyaDataOperasionalLokal()) {
       void import('../../../../services/pocketbase').then(async ({ db }) => {
         if (batal) return;
@@ -90,11 +162,25 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
         db.connectRealtimeSync(null);
         berhentiTerbit = db.subscribeKoleksi(['website_published'], muat);
       });
+    } else {
+      pasangWsPublikRingan();
     }
 
     return () => {
       batal = true;
+      window.removeEventListener('ams:media-uploaded', padaFokus);
+      window.removeEventListener('ams:media-deleted', padaFokus);
+      window.removeEventListener('focus', padaFokus);
+      document.removeEventListener('visibilitychange', padaVisibilitas);
       berhentiTerbit?.();
+      if (publicReconnectTimer) clearTimeout(publicReconnectTimer);
+      if (publicWs) {
+        try {
+          publicWs.close();
+        } catch {
+          /* abaikan */
+        }
+      }
     };
   }, []);
 

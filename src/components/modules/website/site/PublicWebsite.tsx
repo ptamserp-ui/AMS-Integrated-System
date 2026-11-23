@@ -47,7 +47,7 @@ const DAFTAR_HALAMAN: HalamanWebsite[] = [
 const LABEL_HALAMAN: Record<HalamanWebsite, string> = {
   beranda: 'Beranda',
   produk: 'Katalog Produk',
-  solusi: 'Solusi',
+  solusi: 'Kategori Produk',
   layanan: 'Layanan',
   'sumber-daya': 'Sumber Daya',
   tentang: 'Tentang Kami',
@@ -418,6 +418,18 @@ export default function PublicWebsite({
   );
 
   const menu = konfigurasiTampil.menu.filter((m) => m.isActive);
+  const logoHeaderSrc = selesaikanGambar(konfigurasiTampil.identitas.logoUrl);
+  const logoFooterSrc = selesaikanGambar(konfigurasiTampil.identitas.footerLogoUrl);
+  const [gagalLogoHeader, setGagalLogoHeader] = useState(false);
+  const [gagalLogoFooter, setGagalLogoFooter] = useState(false);
+
+  useEffect(() => {
+    setGagalLogoHeader(false);
+  }, [logoHeaderSrc]);
+
+  useEffect(() => {
+    setGagalLogoFooter(false);
+  }, [logoFooterSrc]);
 
   return (
     <WebsiteLanguageProvider language={bahasaTampil}>
@@ -435,11 +447,12 @@ export default function PublicWebsite({
         <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6">
           <div className="flex items-center gap-4 py-3">
             <button type="button" onClick={() => ke('beranda')} className="flex items-center gap-3 cursor-pointer">
-              {selesaikanGambar(konfigurasiTampil.identitas.logoUrl) ? (
+              {logoHeaderSrc && !gagalLogoHeader ? (
                 <img
-                  src={selesaikanGambar(konfigurasiTampil.identitas.logoUrl)}
+                  src={logoHeaderSrc}
                   alt={konfigurasiTampil.identitas.nama}
-                  className="h-10 w-auto object-contain"
+                  onError={() => setGagalLogoHeader(true)}
+                  className="h-10 w-auto object-contain border-0 outline-none shadow-none bg-transparent"
                 />
               ) : (
                 <span className="w-10 h-10 rounded-xl bg-[var(--brand)] text-white flex items-center justify-center text-base font-bold">
@@ -676,6 +689,16 @@ export default function PublicWebsite({
         <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 py-12">
           <div className="grid lg:grid-cols-[1.3fr_repeat(3,0.9fr)] gap-8">
             <div>
+              {logoFooterSrc && !gagalLogoFooter && (
+                <div className="mb-3 border-0 bg-transparent p-0">
+                  <img
+                    src={logoFooterSrc}
+                    alt={konfigurasiTampil.identitas.nama}
+                    onError={() => setGagalLogoFooter(true)}
+                    className="h-12 sm:h-[56px] w-auto max-w-[200px] object-contain border-0 outline-none shadow-none bg-transparent"
+                  />
+                </div>
+              )}
               <p className="text-base font-bold text-white">{konfigurasiTampil.identitas.nama}</p>
               <p className="text-xs text-slate-400 mt-1">{konfigurasiTampil.identitas.tagline}</p>
               <div className="mt-4 space-y-2 text-xs text-slate-400">

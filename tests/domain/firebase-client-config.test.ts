@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveFirebaseBootstrapAdmins, resolveFirebaseClientConfig, type FirebaseClientConfig } from '../../src/services/firebaseConfig';
 
 const productionConfig: FirebaseClientConfig = {
@@ -59,6 +59,23 @@ describe('resolveFirebaseClientConfig', () => {
         productionConfig
       )
     ).toThrow('VITE_FIREBASE_API_KEY');
+  });
+
+  it('does not initialize the bundled Firebase project when staging configuration is invalid', async () => {
+    for (const [key, value] of Object.entries({
+      ...stagingEnv,
+      VITE_FIREBASE_PROJECT_ID: 'wrong-project'
+    })) {
+      vi.stubEnv(key, value);
+    }
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(import('../../src/services/firebase')).rejects.toThrow('tidak sesuai target');
+    } finally {
+      errorLog.mockRestore();
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 
   it('uses the configured production project and rejects a project mismatch', () => {
@@ -128,5 +145,30 @@ describe('resolveFirebaseClientConfig', () => {
         hostname: 'staging-ams.perusahaan-anda.co.id'
       }).projectId
     ).toBe('staging-project');
+  });
+
+  it('preserves the provisioned AI Studio applet config on *.ai.studio custom preview/deployed hosts', () => {
+    expect(
+      resolveFirebaseClientConfig(
+        {
+          ...stagingEnv,
+          VITE_FIREBASE_API_KEY: 'YOUR_FIREBASE_API_KEY',
+          VITE_FIREBASE_PROJECT_ID: 'ams-staging',
+          VITE_FIREBASE_EXPECTED_PROJECT_ID: 'ams-integrated-staging'
+        },
+        productionConfig,
+        { hostname: 'remediams.ai.studio' }
+      )
+    ).toBe(productionConfig);
+  });
+
+  it('rejects generic placeholder values like YOUR_* on non-AI-Studio hosts', () => {
+    expect(() =>
+      resolveFirebaseClientConfig(
+        { ...stagingEnv, VITE_FIREBASE_API_KEY: 'YOUR_FIREBASE_API_KEY' },
+        productionConfig,
+        { hostname: 'staging.ams.internal' }
+      )
+    ).toThrow('VITE_FIREBASE_API_KEY');
   });
 });

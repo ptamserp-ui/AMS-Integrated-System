@@ -62,15 +62,17 @@ export const MobileShiftCutiView: React.FC<MobileShiftCutiViewProps> = ({
 
   const cutiTampil = useMemo(() => {
     if (canApproveLeave) return cutiList;
-    return cutiList.filter(
-      (c) => c.karyawanId === karyawanId || c.namaKaryawan === namaKaryawan
-    );
-  }, [cutiList, canApproveLeave, karyawanId, namaKaryawan]);
+    return cutiList.filter((c) => c.karyawanId === karyawanId);
+  }, [cutiList, canApproveLeave, karyawanId]);
 
   const jumlahHari = hitungJumlahHariCuti(tanggalMulai, tanggalSelesai);
 
   const kirimPengajuan = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!karyawan) {
+      setGalat('Akun belum ditautkan ke data karyawan HRIS. Hubungi admin untuk mengaktifkan self-service.');
+      return;
+    }
     if (jumlahHari <= 0) {
       setGalat('Tanggal selesai harus sama atau setelah tanggal mulai.');
       return;

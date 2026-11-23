@@ -27,7 +27,7 @@ const PILIHAN_SENSOR: { nama: string; zona: StokGudang['zonaSuhu'] }[] = [
 ];
 
 export default function RantaiDinginTab({ dariAcuan, onPerubahanData }: Props) {
-  const dbTick = useDbTick(['log_suhu', 'stok_gudang', 'capa', 'konfigurasi_gudang']);
+  const dbTick = useDbTick(['log_suhu', 'stok_gudang', 'capa', 'gudang_pengaturan']);
   const logSuhuList = useMemo<LogSuhu[]>(() => {
     void dbTick;
     return db.getLogSuhu();

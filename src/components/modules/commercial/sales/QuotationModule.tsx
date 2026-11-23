@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { db } from '../../../../services/pocketbase';
 import { PelangganB2B, ProdukWebsite, UserRole } from '../../../../types';
+import { bacaSesi } from '../../../../utils/autentikasi';
 import { gabungkanKatalogProduk, selesaikanGambar } from '../../../../utils/website';
 import { namaPengguna, peranPengguna } from '../../../layout/Navbar';
 import {
@@ -43,6 +44,25 @@ import {
 } from '../../../ui';
 
 const KUNCI_IDENTITAS_LEGACY = 'ams_quotation_company_profile';
+
+function GambarLogoQuotation({
+  src,
+  alt,
+  className,
+  fallback
+}: {
+  src?: string;
+  alt: string;
+  className: string;
+  fallback: React.ReactNode;
+}) {
+  const [gagal, setGagal] = useState(false);
+  useEffect(() => {
+    setGagal(false);
+  }, [src]);
+  if (!src || gagal) return <>{fallback}</>;
+  return <img src={src} alt={alt} onError={() => setGagal(true)} className={className} />;
+}
 const KUNCI_RIWAYAT_LEGACY = 'ams_quotation_history';
 const KUNCI_IDENTITAS_SYNC = 'quotation_identitas_v1';
 const KUNCI_RIWAYAT_SYNC = 'quotation_riwayat_v1';
@@ -78,7 +98,9 @@ function buatIdentitasDefault(role: UserRole): IdentitasPerusahaanQuotation {
       const legacy = localStorage.getItem(KUNCI_IDENTITAS_LEGACY);
       if (legacy) {
         tersimpan = JSON.parse(legacy) as IdentitasPerusahaanQuotation;
-        db.setSettingJson(KUNCI_IDENTITAS_SYNC, tersimpan);
+        if (!bacaSesi() || db.hasCompletedServerHydration()) {
+          db.setSettingJson(KUNCI_IDENTITAS_SYNC, tersimpan);
+        }
       }
     }
     if (tersimpan) {
@@ -144,7 +166,9 @@ function bacaRiwayatQuotation(): DokumenQuotation[] {
       if (legacy) {
         const parsed = JSON.parse(legacy);
         if (Array.isArray(parsed)) {
-          db.setSettingJson(KUNCI_RIWAYAT_SYNC, parsed);
+          if (!bacaSesi() || db.hasCompletedServerHydration()) {
+            db.setSettingJson(KUNCI_RIWAYAT_SYNC, parsed);
+          }
           return parsed;
         }
       }
@@ -163,7 +187,7 @@ export default function QuotationModule({
   pelangganAwal?: PelangganB2B | null;
 }) {
   const dbTick = useDbTick([
-    'pelanggan_b2b',
+    'sales_pelanggan',
     'sales_skema_harga',
     'izin_edar',
     'stok_gudang',
@@ -232,9 +256,12 @@ export default function QuotationModule({
 
   useEffect(() => {
     const lepas = db.subscribeKoleksi(
-      [KUNCI_RIWAYAT_SYNC, KUNCI_IDENTITAS_SYNC, 'website_draft', 'website_media_v1'],
+      [KUNCI_RIWAYAT_SYNC, KUNCI_IDENTITAS_SYNC, 'website_draft', 'website_media_v1', 'all'],
       (kunci) => {
-        if (kunci === KUNCI_RIWAYAT_SYNC) {
+        if (kunci === 'all') {
+          setRiwayat(bacaRiwayatQuotation());
+          setIdentitas(buatIdentitasDefault(currentRole));
+        } else if (kunci === KUNCI_RIWAYAT_SYNC) {
           setRiwayat(bacaRiwayatQuotation());
         } else {
           setIdentitas(buatIdentitasDefault(currentRole));
@@ -1126,11 +1153,12 @@ export default function QuotationModule({
                   {identitas.tampilkanLogo && (
                     <div className="flex items-center gap-3">
                       <div className="w-24 h-12 rounded-lg border border-slate-200 bg-white flex items-center justify-center overflow-hidden shrink-0">
-                        {logoPreviewUrl ? (
-                          <img src={logoPreviewUrl} alt="Logo" className="w-full h-full object-contain p-1" />
-                        ) : (
-                          <ImageIcon className="w-5 h-5 text-slate-300" />
-                        )}
+                        <GambarLogoQuotation
+                          src={logoPreviewUrl}
+                          alt="Logo"
+                          className="w-full h-full object-contain p-1"
+                          fallback={<ImageIcon className="w-5 h-5 text-slate-300" />}
+                        />
                       </div>
                       <input
                         type="text"
@@ -1425,10 +1453,11 @@ export default function QuotationModule({
                 >
                   <div className="flex items-start gap-3.5 min-w-0 flex-1">
                     {identitas.tampilkanLogo && logoPreviewUrl && (
-                      <img
+                      <GambarLogoQuotation
                         src={logoPreviewUrl}
                         alt={identitas.namaPerusahaan}
                         className="h-14 max-w-[130px] object-contain shrink-0"
+                        fallback={null}
                       />
                     )}
                     <div className="min-w-0">

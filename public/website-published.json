@@ -6,6 +6,7 @@
     "nama": "PT Anugrahmitra Selaras",
     "tagline": "REMEDI — Every Life Matters",
     "logoUrl": "/assets/aistudio/Logo_AMS_5ee808c6.png",
+    "footerLogoUrl": "/assets/aistudio/Logo_AMS_5ee808c6.png",
     "faviconUrl": "/assets/aistudio/Logo_AMS_5ee808c6.png",
     "judulSitus": "PT Anugrahmitra Selaras (REMEDI) — Produsen, Agen & Distributor Alat Kesehatan",
     "metaDeskripsi": "PT Anugrahmitra Selaras (REMEDI) berdiri sejak 1994: produsen, agen, dan distributor peralatan kesehatan, instrument set, serta barang habis pakai. Bersertifikat ISO 9001:2015, ISO 13485:2016, dan CDAKB Kementerian Kesehatan RI 2024-2029."
@@ -122,7 +123,7 @@
     {
       "id": "menu-solusi",
       "isActive": true,
-      "label": "Solusi",
+      "label": "Kategori Produk",
       "tipe": "link",
       "halaman": "solusi"
     },
@@ -264,7 +265,7 @@
       "eyebrow": "KATALOG",
       "judul": "Delapan Grup Katalog dari Disposable hingga X-Ray System",
       "subjudul": "Setiap grup dipecah kembali menjadi lini produk sesuai struktur katalog pada situs resmi perusahaan.",
-      "teksTautan": "Semua Solusi",
+      "teksTautan": "Semua Kategori Produk",
       "tautan": {
         "tipe": "halaman",
         "nilai": "solusi"
@@ -1560,7 +1561,7 @@
         {
           "id": "footer-solusi",
           "isActive": true,
-          "label": "Solusi",
+          "label": "Kategori Produk",
           "halaman": "solusi"
         },
         {

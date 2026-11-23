@@ -532,7 +532,7 @@ function bangunMenu(_sumber: Pick<SumberKontenWebsite, 'izinEdar'>): Konfigurasi
         }
       ]
     },
-    { id: 'menu-solusi', isActive: true, label: 'Solusi', tipe: 'link', halaman: 'solusi' },
+    { id: 'menu-solusi', isActive: true, label: 'Kategori Produk', tipe: 'link', halaman: 'solusi' },
     { id: 'menu-layanan', isActive: true, label: 'Layanan', tipe: 'link', halaman: 'layanan' },
     { id: 'menu-sumber', isActive: true, label: 'Sumber Daya', tipe: 'link', halaman: 'sumber-daya' },
     { id: 'menu-tentang', isActive: true, label: 'Tentang Kami', tipe: 'link', halaman: 'tentang' },
@@ -546,7 +546,9 @@ function bangunMenu(_sumber: Pick<SumberKontenWebsite, 'izinEdar'>): Konfigurasi
 
 export function bangunKontenDefault(sumber: SumberKontenWebsite): KonfigurasiSitus {
   const sekarang = Date.now();
-  const produk = gabungkanKatalogProduk(sumber);
+  const produk = sumber.produkKatalog
+    ? produkKatalogUntukWebsite(sumber.produkKatalog, [])
+    : gabungkanKatalogProduk(sumber);
   const solusi = KONTEN_RUJUKAN.solusi;
   const identitasRujukan = IDENTITAS_RUJUKAN;
 
@@ -559,6 +561,7 @@ export function bangunKontenDefault(sumber: SumberKontenWebsite): KonfigurasiSit
       nama: IDENTITAS_PERUSAHAAN.nama,
       tagline: `${identitasRujukan.merekDagang} — ${identitasRujukan.tagline}`,
       logoUrl: '/assets/aistudio/Logo_AMS_5ee808c6.png',
+      footerLogoUrl: '/assets/aistudio/Logo_AMS_5ee808c6.png',
       faviconUrl: '/assets/aistudio/Logo_AMS_5ee808c6.png',
       judulSitus: `${IDENTITAS_PERUSAHAAN.nama} (REMEDI) — Produsen, Agen & Distributor Alat Kesehatan`,
       metaDeskripsi:
@@ -624,7 +627,7 @@ export function bangunKontenDefault(sumber: SumberKontenWebsite): KonfigurasiSit
         judul: 'Delapan Grup Katalog dari Disposable hingga X-Ray System',
         subjudul:
           'Setiap grup dipecah kembali menjadi lini produk sesuai struktur katalog pada situs resmi perusahaan.',
-        teksTautan: 'Semua Solusi',
+        teksTautan: 'Semua Kategori Produk',
         tautan: { tipe: 'halaman', nilai: 'solusi' }
       },
       item: solusi
@@ -827,7 +830,7 @@ export function bangunKontenDefault(sumber: SumberKontenWebsite): KonfigurasiSit
         tautan: [
           { id: 'footer-beranda', isActive: true, label: 'Beranda', halaman: 'beranda' },
           { id: 'footer-produk', isActive: true, label: 'Produk', halaman: 'produk' },
-          { id: 'footer-solusi', isActive: true, label: 'Solusi', halaman: 'solusi' },
+          { id: 'footer-solusi', isActive: true, label: 'Kategori Produk', halaman: 'solusi' },
           { id: 'footer-layanan', isActive: true, label: 'Layanan', halaman: 'layanan' },
           { id: 'footer-kontak', isActive: true, label: 'Kontak', halaman: 'kontak' }
         ]
@@ -868,14 +871,15 @@ type KampanyeWebsiteItem = KonfigurasiSitus['kegiatan']['item'][number];
 
 const padukanItem = <T extends ItemWebsite>(lama: T[], baru: T[]): T[] => {
   const indeks = new Map(lama.map((item) => [item.id, item]));
+  const idsBaru = new Set(baru.map((item) => item.id));
   const tergabung = baru.map((item) => {
     const sebelumnya = indeks.get(item.id);
     if (!sebelumnya) return item;
     if (sebelumnya.dikunci) return sebelumnya;
     return { ...item, isActive: sebelumnya.isActive };
   });
-  // item buatan tangan (tanpa sumberId) tetap dipertahankan
-  const manual = lama.filter((item) => !item.sumberId);
+  // item buatan tangan (tanpa sumberId) tetap dipertahankan selama belum ada pada daftar baru
+  const manual = lama.filter((item) => !item.sumberId && !idsBaru.has(item.id));
   return [...tergabung, ...manual];
 };
 
@@ -1078,7 +1082,14 @@ export function selaraskanKontenOperasional(
   };
 
   const daftarKatalog = sumber.produkKatalog
-    ? produkKatalogUntukWebsite(sumber.produkKatalog, cfg.produk.item)
+    ? [
+        ...produkKatalogUntukWebsite(sumber.produkKatalog, cfg.produk.item),
+        ...cfg.produk.item.filter(
+          (item) =>
+            item.isActive &&
+            !sumber.produkKatalog!.some((katalog) => katalog.id === item.id)
+        )
+      ]
     : cfg.produk.item;
   const produkTerselaraskan = daftarKatalog.map(perbaruiItemProduk);
 
@@ -1124,15 +1135,30 @@ export function padukanKonten(lama: KonfigurasiSitus, baru: KonfigurasiSitus): K
     const seksiBaru = hasil[kunci];
     const seksiLama = (lama as unknown as Record<string, SeksiDaftar<ItemWebsite> | undefined>)[kunci];
     if (!seksiBaru || !Array.isArray(seksiBaru.item)) continue;
+    if (kunci === 'produk') {
+      const indeksLama = new Map((seksiLama?.item ?? []).map((item) => [item.id, item]));
+      hasil[kunci] = {
+        ...seksiBaru,
+        isActive: seksiLama?.isActive ?? seksiBaru.isActive,
+        item: seksiBaru.item.map((item) => {
+          const sebelumnya = indeksLama.get(item.id);
+          return sebelumnya ? { ...item, isActive: sebelumnya.isActive } : item;
+        })
+      };
+      continue;
+    }
     hasil[kunci] = { ...seksiBaru, item: padukanItem(seksiLama?.item ?? [], seksiBaru.item) };
   }
   const konf = hasil as unknown as KonfigurasiSitus;
   const logoLama = lama.identitas?.logoUrl;
+  const footerLogoLama = lama.identitas?.footerLogoUrl;
   const faviconLama = lama.identitas?.faviconUrl;
   const logoKustom = logoLama && logoLama !== '/site/logo-remedi-new-bw.png';
+  const footerLogoKustom = footerLogoLama && footerLogoLama !== '/site/logo-remedi-new-bw.png';
   konf.identitas = {
     ...konf.identitas,
     logoUrl: logoKustom ? logoLama : baru.identitas.logoUrl,
+    footerLogoUrl: footerLogoKustom ? footerLogoLama : baru.identitas.footerLogoUrl,
     faviconUrl: faviconLama || baru.identitas.faviconUrl
   };
   return konf;

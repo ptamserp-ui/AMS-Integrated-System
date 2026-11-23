@@ -56,7 +56,7 @@ const toneZonaCdakb = (zona: StatusZonaCdakb): Tone => {
 };
 
 export default function StrukturGudangTab({ onPerubahanData }: Props) {
-  const dbTick = useDbTick(['gudang_fisik', 'lokasi_bin', 'aturan_simpan', 'stok_gudang']);
+  const dbTick = useDbTick(['gudang_unit', 'gudang_bin', 'gudang_aturan_simpan', 'stok_gudang']);
   const gudangList = useMemo<GudangFisik[]>(() => {
     void dbTick;
     return db.getGudangFisik();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   ArrowRightCircle,
@@ -26,6 +26,25 @@ import {
   Trash2,
   XCircle
 } from 'lucide-react';
+
+function GambarLogoKopDokumen({
+  src,
+  alt,
+  className,
+  fallback
+}: {
+  src?: string;
+  alt: string;
+  className: string;
+  fallback: React.ReactNode;
+}) {
+  const [gagal, setGagal] = useState(false);
+  useEffect(() => {
+    setGagal(false);
+  }, [src]);
+  if (!src || gagal) return <>{fallback}</>;
+  return <img src={src} alt={alt} onError={() => setGagal(true)} className={className} />;
+}
 import { useDbTick } from '../../../hooks/useDbSync';
 import { db } from '../../../services/pocketbase';
 import type {
@@ -40,7 +59,7 @@ import type {
   StatusDokumenInternal,
   UserRole
 } from '../../../types';
-import type { SesiLogin } from '../../../utils/autentikasi';
+import { bacaSesi, type SesiLogin } from '../../../utils/autentikasi';
 import type { DokumenQuotation } from '../../../utils/quotationPdf';
 import {
   KATEGORI_DOKUMEN_META,
@@ -210,7 +229,7 @@ function bacaAtauInisialisasiDaftar(role: UserRole): DokumenInternal[] {
   const tersimpan = db.getSettingJson<DokumenInternal[]>(KUNCI_DOKUMEN_INTERNAL);
   const dasar = Array.isArray(tersimpan) && tersimpan.length > 0 ? tersimpan : buatContohDokumenInternalAwal();
   const { hasil, adaBaru } = gabungQuotationLegacy(dasar, role);
-  if (!Array.isArray(tersimpan) || tersimpan.length === 0 || adaBaru) {
+  if ((!Array.isArray(tersimpan) || tersimpan.length === 0 || adaBaru) && (!bacaSesi() || db.hasCompletedServerHydration())) {
     db.setSettingJson(KUNCI_DOKUMEN_INTERNAL, hasil);
   }
   return hasil;
@@ -232,7 +251,6 @@ export default function DokumenInternalModule({
     KUNCI_IDENTITAS_DOKUMEN_INTERNAL,
     'quotation_riwayat_v1',
     'quotation_identitas_v1',
-    'pelanggan_b2b',
     'sales_pelanggan',
     'sales_skema_harga',
     'sales_pengetahuan_produk',
@@ -254,6 +272,15 @@ export default function DokumenInternalModule({
   const [draf, setDraf] = useState<DokumenInternal>(
     () => bacaAtauInisialisasiDaftar(currentRole)[0]
   );
+  const drafDirtyRef = useRef(false);
+  const perbaruiDrafEdit = (updater: (prev: DokumenInternal) => DokumenInternal) => {
+    drafDirtyRef.current = true;
+    setDraf(updater);
+  };
+  const setDrafTersinkron = (doc: DokumenInternal) => {
+    drafDirtyRef.current = false;
+    setDraf(doc);
+  };
 
   const [subPanel, setSubPanel] = useState<
     'form' | 'items' | 'workflow' | 'daftar' | 'kop' | 'rbac'
@@ -281,13 +308,16 @@ export default function DokumenInternalModule({
     const segar = db.getSettingJson<DokumenInternal[]>(KUNCI_DOKUMEN_INTERNAL);
     if (Array.isArray(segar) && segar.length > 0) {
       const { hasil, adaBaru } = gabungQuotationLegacy(segar, currentRole);
-      if (adaBaru) {
+      if (adaBaru && (!bacaSesi() || db.hasCompletedServerHydration())) {
         db.setSettingJson(KUNCI_DOKUMEN_INTERNAL, hasil);
       }
       setDaftar(hasil);
       const cocok = hasil.find((item) => item.id === dokumenAktifId);
-      if (cocok && draf.status !== 'Draft') {
-        setDraf(cocok);
+      if (cocok && !drafDirtyRef.current) {
+        setDrafTersinkron(cocok);
+      } else if (!cocok && !drafDirtyRef.current && hasil[0]) {
+        setDokumenAktifId(hasil[0].id);
+        setDrafTersinkron(hasil[0]);
       }
     }
     setIdentitas(buatIdentitasDefault());
@@ -333,7 +363,7 @@ export default function DokumenInternalModule({
       LABEL_TINGKAT_PERAN[tingkatPeran]
     );
     setDokumenAktifId(baru.id);
-    setDraf(baru);
+    setDrafTersinkron(baru);
     setSubPanel('form');
     setPesanStatus({
       ok: true,
@@ -507,7 +537,7 @@ export default function DokumenInternalModule({
 
   const pilihDokumen = (doc: DokumenInternal) => {
     setDokumenAktifId(doc.id);
-    setDraf(doc);
+    setDrafTersinkron(doc);
     setPesanStatus(null);
   };
 
@@ -521,7 +551,7 @@ export default function DokumenInternalModule({
     const terbaru = [baru, ...daftar];
     simpanDaftarKeServer(terbaru, `Inisialisasi Draft ${baru.kodeFormIso}`, baru.nomorDokumen);
     setDokumenAktifId(baru.id);
-    setDraf(baru);
+    setDrafTersinkron(baru);
     setModalBuatTerbuka(false);
     setSubPanel('form');
     setPesanStatus({ ok: true, teks: `Draft baru ${baru.nomorDokumen} berhasil dibuat.` });
@@ -552,7 +582,7 @@ export default function DokumenInternalModule({
     const terbaru = [baru, ...daftar];
     simpanDaftarKeServer(terbaru, 'Inisialisasi Draft Quotation (QT)', baru.nomorDokumen);
     setDokumenAktifId(baru.id);
-    setDraf(baru);
+    setDrafTersinkron(baru);
     setSubPanel('form');
     setPesanStatus({ ok: true, teks: `Draft Quotation ${baru.nomorDokumen} siap dilengkapi.` });
   };
@@ -576,7 +606,7 @@ export default function DokumenInternalModule({
       turunan.nomorDokumen
     );
     setDokumenAktifId(turunan.id);
-    setDraf(turunan);
+    setDrafTersinkron(turunan);
     setSubPanel('form');
     setPesanStatus({
       ok: true,
@@ -649,7 +679,7 @@ export default function DokumenInternalModule({
     const terbaru = [salinan, ...daftar];
     simpanDaftarKeServer(terbaru, `Duplikasi Draft dari ${draf.nomorDokumen}`, salinan.nomorDokumen);
     setDokumenAktifId(salinan.id);
-    setDraf(salinan);
+    setDrafTersinkron(salinan);
     setSubPanel('form');
     setPesanStatus({ ok: true, teks: `Salinan draft dibuat dengan nomor ${salinan.nomorDokumen}.` });
   };
@@ -702,7 +732,7 @@ export default function DokumenInternalModule({
       ? daftar.map((item) => (item.id === tersimpan.id ? tersimpan : item))
       : [tersimpan, ...daftar];
     simpanDaftarKeServer(terbaru, 'Simpan perubahan Draft Dokumen Internal', tersimpan.nomorDokumen);
-    setDraf(tersimpan);
+    setDrafTersinkron(tersimpan);
     setPesanStatus({ ok: true, teks: `Draft ${tersimpan.nomorDokumen} berhasil disimpan.` });
   };
 
@@ -726,7 +756,7 @@ export default function DokumenInternalModule({
       `Workflow ${draf.status} → ${hasil.dokumen.status} (${aksi})`,
       hasil.dokumen.nomorDokumen
     );
-    setDraf(hasil.dokumen);
+    setDrafTersinkron(hasil.dokumen);
     setModalTolakTerbuka(false);
     setCatatanWorkflow('');
     setPesanStatus({
@@ -750,7 +780,7 @@ export default function DokumenInternalModule({
     simpanDaftarKeServer(terbaru, 'Hapus Draft Dokumen Internal', target.nomorDokumen);
     if (draf.id === id && terbaru[0]) {
       setDokumenAktifId(terbaru[0].id);
-      setDraf(terbaru[0]);
+      setDrafTersinkron(terbaru[0]);
     }
     setPesanStatus({ ok: true, teks: `Draft ${target.nomorDokumen} dihapus.` });
   };
@@ -772,7 +802,7 @@ export default function DokumenInternalModule({
       suhuPenyimpanan: opt.suhuPenyimpanan,
       kondisiFisik: 'Baik & Segel Utuh'
     };
-    setDraf((prev) => ({ ...prev, items: [...prev.items, baru] }));
+    perbaruiDrafEdit((prev) => ({ ...prev, items: [...prev.items, baru] }));
     setPesanStatus({
       ok: true,
       teks: `Item "${opt.namaProduk}" (${opt.nomorBatch}) ditambahkan${opt.hargaReferensi ? ` dengan harga ref. ${formatRupiah(opt.hargaReferensi)}` : ''}.`
@@ -796,18 +826,18 @@ export default function DokumenInternalModule({
       suhuPenyimpanan: adalahPoUmum ? '' : '15–25°C',
       kondisiFisik: adalahPoUmum ? '' : 'Baik'
     };
-    setDraf((prev) => ({ ...prev, items: [...prev.items, baru] }));
+    perbaruiDrafEdit((prev) => ({ ...prev, items: [...prev.items, baru] }));
   };
 
   const perbaruiItem = (itemId: string, patch: Partial<ItemAlkesDokumenInternal>) => {
-    setDraf((prev) => ({
+    perbaruiDrafEdit((prev) => ({
       ...prev,
       items: prev.items.map((it) => (it.id === itemId ? { ...it, ...patch } : it))
     }));
   };
 
   const hapusItem = (itemId: string) => {
-    setDraf((prev) => ({
+    perbaruiDrafEdit((prev) => ({
       ...prev,
       items: prev.items.filter((it) => it.id !== itemId)
     }));
@@ -819,21 +849,21 @@ export default function DokumenInternalModule({
       detail: '',
       harga: 0
     };
-    setDraf((prev) => ({
+    perbaruiDrafEdit((prev) => ({
       ...prev,
       detailHargaPoUmum: [...ambilDetailHargaPoUmum(prev), baru]
     }));
   };
 
   const perbaruiGroupPoUmum = (groupId: string, patch: Partial<DetailHargaPoUmum>) => {
-    setDraf((prev) => ({
+    perbaruiDrafEdit((prev) => ({
       ...prev,
       detailHargaPoUmum: ambilDetailHargaPoUmum(prev).map((g) => (g.id === groupId ? { ...g, ...patch } : g))
     }));
   };
 
   const hapusGroupPoUmum = (groupId: string) => {
-    setDraf((prev) => {
+    perbaruiDrafEdit((prev) => {
       const current = ambilDetailHargaPoUmum(prev);
       if (current.length <= 1) return prev;
       return {
@@ -892,7 +922,7 @@ export default function DokumenInternalModule({
     const val = draf.dataDinamis[field.key];
     const disabled = !aksiWorkflow.dapatEditKonten;
     const updateVal = (nextVal: string | number | boolean) =>
-      setDraf((prev) => ({
+      perbaruiDrafEdit((prev) => ({
         ...prev,
         dataDinamis: { ...prev.dataDinamis, [field.key]: nextVal }
       }));
@@ -925,7 +955,43 @@ export default function DokumenInternalModule({
               </option>
             ))}
           </select>
-        ) : field.type === 'boolean' ? (
+        ) : field.type === 'select_or_text' ? (() => {
+          const strVal = String(val ?? '');
+          const opsiList = field.options || [];
+          const cocokOpsi = opsiList.includes(strVal);
+          return (
+            <div className="space-y-1.5">
+              <select
+                disabled={disabled}
+                value={cocokOpsi ? strVal : '__MANUAL__'}
+                onChange={(e) => {
+                  const chosen = e.target.value;
+                  if (chosen === '__MANUAL__') {
+                    if (cocokOpsi) updateVal('');
+                  } else {
+                    updateVal(chosen);
+                  }
+                }}
+                className={`${inputClass} bg-white disabled:bg-slate-50`}
+              >
+                {opsiList.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {opt}
+                  </option>
+                ))}
+                <option value="__MANUAL__">Isi Manual…</option>
+              </select>
+              <input
+                type="text"
+                disabled={disabled}
+                value={strVal}
+                placeholder={field.placeholder || 'Atau ketik manual…'}
+                onChange={(e) => updateVal(e.target.value)}
+                className={`${inputClass} disabled:bg-slate-50`}
+              />
+            </div>
+          );
+        })() : field.type === 'boolean' ? (
           <label className="inline-flex items-center gap-2 text-xs text-slate-700 mt-1">
             <input
               type="checkbox"
@@ -1237,7 +1303,7 @@ export default function DokumenInternalModule({
                     <input
                       type="text"
                       value={draf.judul}
-                      onChange={(e) => setDraf((p) => ({ ...p, judul: e.target.value }))}
+                      onChange={(e) => perbaruiDrafEdit((p) => ({ ...p, judul: e.target.value }))}
                       className={inputClass}
                     />
                   </div>
@@ -1246,7 +1312,7 @@ export default function DokumenInternalModule({
                     <input
                       type="text"
                       value={draf.departemen}
-                      onChange={(e) => setDraf((p) => ({ ...p, departemen: e.target.value }))}
+                      onChange={(e) => perbaruiDrafEdit((p) => ({ ...p, departemen: e.target.value }))}
                       className={inputClass}
                     />
                   </div>
@@ -1255,7 +1321,7 @@ export default function DokumenInternalModule({
                     <input
                       type="date"
                       value={draf.tanggalDokumen}
-                      onChange={(e) => setDraf((p) => ({ ...p, tanggalDokumen: e.target.value }))}
+                      onChange={(e) => perbaruiDrafEdit((p) => ({ ...p, tanggalDokumen: e.target.value }))}
                       className={inputClass}
                     />
                   </div>
@@ -1264,7 +1330,7 @@ export default function DokumenInternalModule({
                     <select
                       value={draf.prioritas}
                       onChange={(e) =>
-                        setDraf((p) => ({ ...p, prioritas: e.target.value as DokumenInternal['prioritas'] }))
+                        perbaruiDrafEdit((p) => ({ ...p, prioritas: e.target.value as DokumenInternal['prioritas'] }))
                       }
                       className={`${inputClass} bg-white`}
                     >
@@ -1279,7 +1345,7 @@ export default function DokumenInternalModule({
                       type="text"
                       value={draf.referensiDokumen ?? ''}
                       placeholder="SO / PR / NCR terkait"
-                      onChange={(e) => setDraf((p) => ({ ...p, referensiDokumen: e.target.value }))}
+                      onChange={(e) => perbaruiDrafEdit((p) => ({ ...p, referensiDokumen: e.target.value }))}
                       className={inputClass}
                     />
                   </div>
@@ -1296,7 +1362,7 @@ export default function DokumenInternalModule({
                         onChange={(e) => {
                           const p = pelangganList.find((x) => x.id === e.target.value);
                           if (!p) return;
-                          setDraf((prev) => ({
+                          perbaruiDrafEdit((prev) => ({
                             ...prev,
                             pihakTerkait: {
                               ...prev.pihakTerkait,
@@ -1328,7 +1394,7 @@ export default function DokumenInternalModule({
                         value={draf.pihakTerkait.instansi}
                         placeholder={adalahPoUmum ? 'Contoh: PT Vendor Teknologi / Penyedia Hosting / EO' : undefined}
                         onChange={(e) =>
-                          setDraf((p) => ({
+                          perbaruiDrafEdit((p) => ({
                             ...p,
                             pihakTerkait: { ...p.pihakTerkait, instansi: e.target.value }
                           }))
@@ -1342,7 +1408,7 @@ export default function DokumenInternalModule({
                         type="text"
                         value={draf.pihakTerkait.namaPihak}
                         onChange={(e) =>
-                          setDraf((p) => ({
+                          perbaruiDrafEdit((p) => ({
                             ...p,
                             pihakTerkait: { ...p.pihakTerkait, namaPihak: e.target.value }
                           }))
@@ -1356,7 +1422,7 @@ export default function DokumenInternalModule({
                         type="text"
                         value={draf.pihakTerkait.jabatan}
                         onChange={(e) =>
-                          setDraf((p) => ({
+                          perbaruiDrafEdit((p) => ({
                             ...p,
                             pihakTerkait: { ...p.pihakTerkait, jabatan: e.target.value }
                           }))
@@ -1370,7 +1436,7 @@ export default function DokumenInternalModule({
                         type="text"
                         value={draf.pihakTerkait.kontak}
                         onChange={(e) =>
-                          setDraf((p) => ({
+                          perbaruiDrafEdit((p) => ({
                             ...p,
                             pihakTerkait: { ...p.pihakTerkait, kontak: e.target.value }
                           }))
@@ -1384,7 +1450,7 @@ export default function DokumenInternalModule({
                         type="text"
                         value={draf.pihakTerkait.alamat}
                         onChange={(e) =>
-                          setDraf((p) => ({
+                          perbaruiDrafEdit((p) => ({
                             ...p,
                             pihakTerkait: { ...p.pihakTerkait, alamat: e.target.value }
                           }))
@@ -1494,7 +1560,6 @@ export default function DokumenInternalModule({
                     </div>
                   )}
                 </div>
-
                 {adalahPoUmum && (
                   <div className="pt-3 border-t border-slate-200 space-y-2">
                     <label className={labelClass}>Metode Pembayaran (Isi Manual)</label>
@@ -1504,7 +1569,7 @@ export default function DokumenInternalModule({
                       value={String(draf.dataDinamis.metodePembayaran ?? '')}
                       placeholder="Contoh: Transfer Bank BCA / Virtual Account / Kartu Kredit / Tunai"
                       onChange={(e) =>
-                        setDraf((prev) => ({
+                        perbaruiDrafEdit((prev) => ({
                           ...prev,
                           dataDinamis: { ...prev.dataDinamis, metodePembayaran: e.target.value }
                         }))
@@ -1812,7 +1877,6 @@ export default function DokumenInternalModule({
                     </div>
                   );
                 })()}
-
                 {adalahPoUmum && (
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1.5">
                     <label className={labelClass}>Metode Pembayaran (Isi Manual)</label>
@@ -1822,7 +1886,7 @@ export default function DokumenInternalModule({
                       value={String(draf.dataDinamis.metodePembayaran ?? '')}
                       placeholder="Contoh: Transfer Bank BCA / Virtual Account / Kartu Kredit / Tunai"
                       onChange={(e) =>
-                        setDraf((prev) => ({
+                        perbaruiDrafEdit((prev) => ({
                           ...prev,
                           dataDinamis: { ...prev.dataDinamis, metodePembayaran: e.target.value }
                         }))
@@ -2008,15 +2072,12 @@ export default function DokumenInternalModule({
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="h-14 w-28 rounded-lg border border-dashed border-slate-300 bg-white flex items-center justify-center overflow-hidden p-1">
-                      {identitas.logoUrl ? (
-                        <img
-                          src={selesaikanGambar(identitas.logoUrl)}
-                          alt="Logo Kop Surat"
-                          className="max-h-full max-w-full object-contain"
-                        />
-                      ) : (
-                        <span className="text-3xs text-slate-400">Belum ada logo</span>
-                      )}
+                      <GambarLogoKopDokumen
+                        src={selesaikanGambar(identitas.logoUrl)}
+                        alt="Logo Kop Surat"
+                        className="max-h-full max-w-full object-contain"
+                        fallback={<span className="text-3xs text-slate-400">Belum ada logo</span>}
+                      />
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-100 cursor-pointer">
@@ -2162,10 +2223,11 @@ export default function DokumenInternalModule({
               >
                 <div className="flex items-start gap-3.5 min-w-0 flex-1">
                   {identitas.tampilkanLogo && logoResolved && (
-                    <img
+                    <GambarLogoKopDokumen
                       src={logoResolved}
                       alt={identitas.namaPerusahaan}
                       className="h-14 max-w-[130px] object-contain shrink-0"
+                      fallback={null}
                     />
                   )}
                   <div className="min-w-0">
@@ -2221,7 +2283,7 @@ export default function DokumenInternalModule({
                     className="text-[9.5px] font-bold uppercase tracking-wider"
                     style={{ color: identitas.warnaAksen || katAktif.warnaAksen }}
                   >
-                    Metadata Pengendalian Dokumen
+                    Dokumen Internal
                   </p>
                   <div className="grid grid-cols-[100px_1fr] gap-y-1 text-[10px]">
                     <span className="text-slate-500">No. Dokumen</span>

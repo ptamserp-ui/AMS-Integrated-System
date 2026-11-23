@@ -1491,7 +1491,12 @@ function GaleriFotoProduk({ produk, cfg }: { produk: ProdukWebsite; cfg: Konfigu
                 index === indeks ? 'border-[var(--brand)] ring-1 ring-[var(--brand)]' : 'border-slate-200'
               }`}
             >
-              <img src={item.url} alt="" className="w-full h-full object-contain p-1" />
+              <img
+                src={item.url}
+                alt=""
+                onError={() => setFotoGagal((daftar) => [...new Set([...daftar, item.sumberIndex])])}
+                className="w-full h-full object-contain p-1"
+              />
             </button>
           ))}
         </div>

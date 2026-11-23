@@ -224,7 +224,11 @@ export function isAiStudioPreviewRuntime(env: Record<string, string | undefined>
   }
   const kService = (env.K_SERVICE || '').trim();
   const appUrl = (env.APP_URL || '').trim();
-  return /^ais-(?:dev|pre)-/i.test(kService) || /^https?:\/\/ais-(?:dev|pre)-/i.test(appUrl);
+  return (
+    /^ais-(?:dev|pre)-/i.test(kService) ||
+    /^https?:\/\/ais-(?:dev|pre)-/i.test(appUrl) ||
+    /^https?:\/\/(?:[^/]+\.)?ai\.studio(?:[:/?#]|$)/i.test(appUrl)
+  );
 }
 
 export function isPlaceholderEnvValue(raw?: string | null): boolean {
@@ -335,28 +339,34 @@ export function resolveFirebaseAdminConfig(opts?: {
   if (rawJson && !isPlaceholderEnvValue(rawJson)) {
     const parsed = decodeServiceAccountJsonString(rawJson, projectId);
     if (!parsed.ok) {
-      return {
-        projectId,
-        databaseId,
-        credentialSource: 'unconfigured',
-        configError: parsed.error
-      };
+      if (!inAiStudioPreview) {
+        return {
+          projectId,
+          databaseId,
+          credentialSource: 'unconfigured',
+          configError: parsed.error
+        };
+      }
+    } else {
+      const accountProjectId = parsed.account.projectId || projectId;
+      if (expectedProjectId && accountProjectId !== expectedProjectId) {
+        if (!inAiStudioPreview) {
+          return {
+            projectId: accountProjectId,
+            databaseId,
+            credentialSource: 'unconfigured',
+            configError: `Project pada Service Account "${accountProjectId}" tidak sesuai target "${expectedProjectId}".`
+          };
+        }
+      } else {
+        return {
+          projectId: accountProjectId,
+          databaseId,
+          credentialSource: 'service-account-json',
+          serviceAccount: parsed.account
+        };
+      }
     }
-    const accountProjectId = parsed.account.projectId || projectId;
-    if (expectedProjectId && accountProjectId !== expectedProjectId) {
-      return {
-        projectId: accountProjectId,
-        databaseId,
-        credentialSource: 'unconfigured',
-        configError: `Project pada Service Account "${accountProjectId}" tidak sesuai target "${expectedProjectId}".`
-      };
-    }
-    return {
-      projectId: accountProjectId,
-      databaseId,
-      credentialSource: 'service-account-json',
-      serviceAccount: parsed.account
-    };
   }
 
   // 2. File JSON terpisah di disk (rekomendasi Windows VPS: C:\AMS\Secrets\firebase-service-account.json)

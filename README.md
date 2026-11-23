@@ -81,6 +81,8 @@ Aplikasi ini mencakup **13 Modul Fungsional Utama**:
 - `npm run build` — Melakukan build produksi (frontend bundler + backend server bundle).
 - `npm run start` — Menjalankan server pada mode produksi (`node server.js`).
 - `npm run lint` — Memeriksa tipe TypeScript secara ketat (`tsc --noEmit`).
+- `npm run lint:rules` — Memeriksa aturan keamanan Firestore.
+- `npm run deploy:check` — Memeriksa berkas dan artefak build deployment; tambahkan `-- --url=https://<domain>` untuk pemeriksaan HTTP opsional. Hasilnya bukan pengganti pengujian login atau koneksi database.
 
 ---
 
