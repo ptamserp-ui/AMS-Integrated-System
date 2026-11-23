@@ -213,9 +213,10 @@ export default function App() {
         setSesi(segar);
       }}
       onKeluar={() => {
-        void keluarDariServer().then(() => {
+        void keluarDariServer().then((hasil) => {
           setSesi(null);
           db.connectRealtimeSync(null);
+          if (!hasil.ok && hasil.pesan) window.alert(hasil.pesan);
         });
       }}
     />

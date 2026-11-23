@@ -337,6 +337,49 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     expect(new ServerRbacStore(dataDir).listUsers()).toEqual([]);
   });
 
+  it('logout mencabut sesi sendiri termasuk developer tanpa membuka pencabutan sesi developer oleh admin', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const dev = rbac.bootstrapFirstDeveloper(
+      { username: 'dev.logout', password: 'DevPassword123!', fullName: 'Dev Logout' },
+      '127.0.0.1', 'Vitest'
+    );
+    expect(dev.ok).toBe(true);
+    if (!dev.ok) return;
+    const staff = rbac.createUser(
+      { username: 'staf.logout', password: 'StaffPassword123!', fullName: 'Staff Logout', roleId: 'sales_medrep' },
+      dev.user.username, dev.role.id, '127.0.0.1'
+    );
+    expect(staff.ok).toBe(true);
+    if (!staff.ok) return;
+    const login = rbac.authenticate('staf.logout', 'StaffPassword123!', '127.0.0.1', 'Vitest');
+    expect(login.ok).toBe(true);
+    if (!login.ok) return;
+
+    expect(rbac.revokeSession(dev.session.id, staff.user.username, staff.user.roleId, '127.0.0.1')).toBe(false);
+    expect(rbac.endOwnSession(dev.session.id, staff.user.id, '127.0.0.1')).toBe(false);
+    expect(rbac.endOwnSession(login.session.id, staff.user.id, '127.0.0.1')).toBe(true);
+    expect(rbac.resolveToken(login.token)).toBeNull();
+    expect(rbac.endOwnSession(dev.session.id, dev.user.id, '127.0.0.1')).toBe(true);
+    expect(rbac.resolveToken(dev.token)).toBeNull();
+    expect(new ServerRbacStore(dataDir).resolveToken(dev.token)).toBeNull();
+  });
+
+  it('gagal menyimpan logout tidak mencabut sesi di memori maupun di disk', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const dev = rbac.bootstrapFirstDeveloper(
+      { username: 'dev.logout', password: 'DevPassword123!', fullName: 'Dev Logout' },
+      '127.0.0.1', 'Vitest'
+    );
+    expect(dev.ok).toBe(true);
+    if (!dev.ok) return;
+    fs.mkdirSync(path.join(dataDir, 'rbac-db.json.tmp'));
+    expect(() => rbac.endOwnSession(dev.session.id, dev.user.id, '127.0.0.1')).toThrow();
+    expect(rbac.resolveToken(dev.token)).not.toBeNull();
+    expect(new ServerRbacStore(dataDir).resolveToken(dev.token)).not.toBeNull();
+  });
+
   it('reset sandi oleh admin, penonaktifan akun, dan penghapusan akun langsung mencabut sesi aktif', () => {
     const dataDir = createTempDataDir();
     const rbac = new ServerRbacStore(dataDir);

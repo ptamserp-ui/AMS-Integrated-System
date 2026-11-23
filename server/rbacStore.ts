@@ -1378,9 +1378,7 @@ export class ServerRbacStore {
     if (!target) return false;
     const targetUser = this.state.users.find((u) => u.id === target.userId);
     if (targetUser?.isHiddenDeveloper) return false;
-    this.state.sessions = this.state.sessions.filter((s) => s.id !== sessionId);
-    this.persistState();
-    this.recordAudit({
+    this.persistWithAudit({ ...this.state, sessions: this.state.sessions.filter((s) => s.id !== sessionId) }, {
       actorUsername,
       actorRole,
       action: 'SESSION_REVOKED',
@@ -1389,6 +1387,23 @@ export class ServerRbacStore {
       status: 'ALLOWED',
       ip,
       detail: `Sesi milik ${targetUser?.username || target.userId} dicabut.`
+    });
+    return true;
+  }
+
+  public endOwnSession(sessionId: string, userId: string, ip: string): boolean {
+    const target = this.state.sessions.find((session) => session.id === sessionId && session.userId === userId);
+    const user = this.state.users.find((item) => item.id === userId);
+    if (!target || !user) return false;
+    this.persistWithAudit({ ...this.state, sessions: this.state.sessions.filter((session) => session.id !== sessionId) }, {
+      actorUsername: user.username,
+      actorRole: user.roleId,
+      action: 'SESSION_REVOKED',
+      resource: 'rbac-admin',
+      targetId: sessionId,
+      status: 'ALLOWED',
+      ip,
+      detail: `Sesi milik ${user.username} dicabut.`
     });
     return true;
   }

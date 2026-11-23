@@ -181,9 +181,10 @@ export default function MobileApp() {
   };
 
   const tanganiKeluar = async () => {
-    await keluarDariServer();
+    const hasil = await keluarDariServer();
     db.connectRealtimeSync(null);
     setSesi(null);
+    if (!hasil.ok && hasil.pesan) window.alert(hasil.pesan);
   };
 
   const capabilities = useMemo(() => getMobileCapabilities(sesi), [sesi]);

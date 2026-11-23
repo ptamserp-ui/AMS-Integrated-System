@@ -73,6 +73,7 @@ Temuan kode berikut mengacu pada commit `5780a4f`. Tautan source di bawah menunj
 | P0-02 | **Perubahan bersamaan berisiko tertimpa.** Pada jalur sync yang diperiksa, nilai koleksi dikirim dan diganti tanpa pemeriksaan versi yang diharapkan. Versi dicatat tetapi belum mencegah konflik. Lihat [pocketbase.ts](../src/services/pocketbase.ts) dan [dataSyncStore.ts](../server/dataSyncStore.ts). | Terbuka | Mekanisme konflik yang aman dan uji dua pengguna, termasuk offline/reconnect, membuktikan tidak ada perubahan hilang atau tertimpa tanpa peringatan. |
 | P0-03 | **Identitas pada sebagian audit bisnis tidak dapat dipercaya.** Contoh pencatatan faktur dan perubahan CoA menggunakan identitas/role tetap, bukan selalu identitas pelaku login. Audit RBAC server dibatasi 500 entri. Lihat [pocketbase.ts](../src/services/pocketbase.ts) dan [rbacStore.ts](../server/rbacStore.ts). | Terbuka | Pelaku sebenarnya, waktu dan perubahan tercatat; cakupan aksi, retensi dan pemulihan audit diuji serta disetujui. |
 | P0-04 | **Backup dan restore belum terbukti.** Data tidak hanya berada di Firebase: ada state server, RBAC, indeks dan file media, konfigurasi/identitas terkait, serta kemungkinan antrean browser. | Terbuka | Backup konsisten, terenkripsi dan tersimpan di luar VPS; restore lengkap diuji pada lingkungan terisolasi, termasuk rekonsiliasi data dan akses. |
+| P0-05 | **Data sinkronisasi belum dibatasi berdasarkan hak baca peran.** Pada kandidat `d862ef7`, `GET /api/sync/state` mengembalikan seluruh state kepada pengguna yang terautentikasi, dan broadcast WebSocket mengirim pembaruan lengkap kepada klien terautentikasi tanpa memeriksa hak baca peran. Ini temuan kode, bukan bukti akses atau kebocoran aktual. | Terbuka | Tetapkan kebijakan akses per koleksi dan data pribadi; terapkan dan uji pembatasan pada HTTP dan WebSocket, termasuk perubahan peran/sesi serta kebutuhan self-service. |
 
 Jangan melakukan purge, reset, migrasi atau cutover data tanpa backup yang tervalidasi, rencana pemulihan dan persetujuan yang diperlukan.
 
@@ -188,6 +189,35 @@ Target checklist beban: **50 pengguna bersamaan, tanpa HTTP 5xx dan respons kura
 - **Percobaan deploy Windows:** perintah opsional dijalankan pada lingkungan Windows yang tidak memiliki `C:\Apps\AMS` maupun skrip deploy pada lokasi tersebut. Deploy Windows tidak terjadi dan pemeriksaan health lokal pada port 3100 gagal terhubung. Ini bukan deployment VPS Ubuntu staging dan bukan bukti gangguan pada service Ubuntu; tidak perlu mengulang perintah Windows untuk memperbarui staging Ubuntu.
 - **Keputusan:** fase 0 dan 1 tetap parsial dan **NO-GO produksi** tidak berubah.
 
+### 23 November 2026 — lanjutan fase 0–1: logout
+
+- **Lingkungan:** kandidat lokal pada worktree rilis berbasis `d862ef7`; perubahan berikut belum di-commit, di-push atau di-deploy ke VPS.
+- **Temuan:** logout akun developer menghapus cookie tetapi tidak mencabut sesi server, karena perlindungan sesi developer juga diterapkan pada logout sendiri. Klien juga tidak memperingatkan bila logout server atau Firebase gagal.
+- **Perbaikan lokal:** logout mencabut sesi milik pengguna sendiri, termasuk developer; pencabutan sesi developer melalui fitur administrasi tetap ditolak. Penyimpanan pencabutan sesi dan audit dilakukan bersama. Klien tetap menghapus sesi lokal ketika gagal, tetapi memperingatkan bahwa logout server atau Firebase belum dipastikan.
+- **Bukti lokal:** tes lulus **29 file / 325 tes**, termasuk logout developer dan staf, perlindungan sesi developer, kegagalan simpan serta kegagalan server, jaringan dan Firebase; lint dan build staging lulus. Build masih memperingatkan ukuran chunk. Pengujian ini belum membuktikan perilaku UI, HTTP atau Firebase di VPS.
+- **Verifikasi salinan backup:** hash SHA-256 arsip di Windows cocok dengan hash arsip VPS yang dilaporkan pengguna. Ini membuktikan kesamaan berkas terenkripsi yang dibandingkan, bukan kelengkapan data atau keberhasilan restore.
+- **Latihan restore data lokal, parsial:** arsip berhasil didekripsi dan diekstrak di folder Windows terbatas; hash keempat berkas hasil ekstraksi cocok dengan isi arsip dan semuanya berbentuk JSON yang terbaca. Struktur RBAC memuat satu akun dan 13 peran. Arsip ini dibuat sebelum uji akun staging terbaru; `.session-secret` tidak terdapat dalam arsip. Tidak ada aplikasi yang dijalankan dari hasil restore dan login belum diuji. Data hasil ekstraksi serta profil GPG sementara telah dihapus; arsip terenkripsi tetap disimpan.
+- **Masih terbuka:** restore lengkap yang membuktikan login dan rekonsiliasi data, backup Firestore/konfigurasi dan identitas yang diperlukan, uji beberapa akun dan matriks peran di VPS, serta pengujian logout dan sinkronisasi/pemulihan Firebase setelah deployment yang disetujui. Fase 0 dan 1 tetap parsial; **NO-GO produksi** tetap berlaku.
+
+### 23 November 2026 — penundaan uji restore lengkap
+
+- **Keputusan pengguna:** uji restore lengkap dan login dari backup ditunda untuk dilakukan setelah semua fase lain selesai. Catat dan jalankan uji tersebut di lingkungan terisolasi, termasuk rekonsiliasi data dan verifikasi akun/peran, tanpa menyentuh data aktif.
+- **Batas penundaan:** pekerjaan fase lain dapat dilanjutkan, tetapi kriteria restore pada fase 0, 1 dan 5 tetap terbuka. Keputusan produksi tetap **NO-GO** sampai uji dan prasyarat produksi lain terpenuhi; fase 6 tidak dapat dinyatakan GO hanya karena pengujian ditunda. Integrasi pemerintah fase 7 tetap mengikuti rencana dan pengecualian yang disetujui.
+
+### 23 November 2026 — pemeriksaan akses baca peran
+
+- **Temuan kode P0-05:** pada `d862ef7`, pembatasan menu dan pemeriksaan tulis tidak mencegah pengguna terautentikasi menerima seluruh snapshot sinkronisasi melalui HTTP dan pembaruan lengkap melalui WebSocket. Hak baca data tiap peran belum terbukti; akses data belum dapat dianggap aman hanya karena menu tersembunyi.
+- **Batas dan mitigasi sementara:** belum dilakukan uji akses terhadap data VPS nyata. Jangan mengundang pengguna tambahan atau memasukkan data sensitif untuk evaluasi sebelum pembatasan diverifikasi; batasi staging pada personel tepercaya dan data sintetis. Kebijakan akses per koleksi, terutama self-service HRIS dan ketergantungan lintas modul, perlu ditetapkan sebelum implementasi agar alur penting tidak terputus.
+- **Status:** fase 1 masih parsial dan **NO-GO produksi** tetap berlaku.
+
+### 23 November 2026 — kebijakan akses minimum
+
+- **Keputusan pengguna:** akses data dibatasi sesuai izin peran; data pribadi self-service hanya milik sendiri jika identitas dapat dibuktikan. Akses yang tidak dapat dipastikan ditolak.
+- **Akses seluruh karyawan yang dipilih pengguna:** profil/administrasi untuk HRD, Payroll, Manajemen dan Developer; gaji/slip serta data kesehatan kerja untuk HRD, Payroll dan Manajemen. Pengguna kemudian mengklarifikasi bahwa **Developer memiliki akses penuh ke seluruh data dan modul**, termasuk gaji dan kesehatan. Ini kebijakan target, belum diterapkan atau diuji. Akses teknis langsung ke VPS/Firebase memerlukan pengendalian terpisah.
+- **Peran:** pengguna memilih membuat peran khusus HRD, Payroll dan Manajemen jika belum tersedia. Daftar peran kustom di VPS belum diperiksa; jangan membuat duplikat atau mengaktifkan akses sebelum pembatasan server dan pengujian selesai.
+- **Temuan lanjutan:** akun RBAC memiliki ID akun, sedangkan catatan HRIS memakai ID karyawan; model akun yang diperiksa belum memiliki relasi ID karyawan yang dapat dipakai untuk membuktikan kepemilikan. Koleksi absensi dan cuti juga ditulis sebagai kumpulan data, bukan transaksi per individu. Penyaringan tampilan saja tidak menjamin isolasi atau melindungi data dari perubahan oleh pengguna lain.
+- **Tindak lanjut:** tentukan pihak yang berwenang melihat data HRIS seluruh karyawan, buat relasi identitas yang dikelola administrator dan jalur baca/tulis per individu yang tervalidasi. Tinjau pula cache browser, ekspor, media dan akses Firebase sebagai jalur terpisah. Sampai diperbaiki dan diuji, jangan menganggap self-service atau isolasi peran aman.
+
 ### Format pembaruan berikutnya
 
 Salin format berikut untuk setiap evaluasi baru; jangan menghapus baseline.
@@ -217,6 +247,8 @@ Prioritas utama adalah memungkinkan administrator membuat dan menyimpan akun pen
 
 **Kriteria selesai:** backup dapat dipulihkan, administrator tetap dapat login, dan file RBAC rusak tidak ditimpa diam-diam.
 
+**Penjadwalan:** atas permintaan pengguna, uji restore lengkap dan login dari backup ditunda sampai setelah fase lain selesai. Fase ini tetap parsial sampai kriteria tersebut terbukti.
+
 ### Fase 1 — Akun pengguna dan peran aktif — prioritas utama
 
 1. Telusuri dan uji alur administrator membuat akun, memilih peran, mengaktifkan akun dan menyimpan.
@@ -226,6 +258,7 @@ Prioritas utama adalah memungkinkan administrator membuat dan menyimpan akun pen
 5. Uji persistensi akun/peran setelah refresh, penggunaan browser lain dan restart service; tampilkan kesalahan penyimpanan dengan jelas.
 6. Verifikasi pemulihan akun dan peran dari backup, serta kejelasan status sinkronisasi Firebase.
 7. Tinjau keunikan email dan login Google untuk akun yang didaftarkan. Login Google tidak boleh otomatis memberi hak administrator kepada staf.
+8. Tentukan dan terapkan pembatasan hak baca data sinkronisasi di server dan WebSocket, termasuk data self-service (**P0-05**).
 
 **Kriteria selesai:** administrator membuat akun uji untuk beberapa peran; masing-masing berhasil login, hanya memperoleh izin yang ditetapkan, tetap tersedia setelah restart dan tidak dapat login setelah dinonaktifkan. Akun yang gagal disimpan tidak boleh dilaporkan berhasil.
 
@@ -263,7 +296,7 @@ Prioritas utama adalah memungkinkan administrator membuat dan menyimpan akun pen
 
 - Inventarisasi data contoh; rencanakan pembersihan hanya setelah backup dan persetujuan (**P1-05**).
 - Latih migrasi data asli dan rekonsiliasi di staging (**P1-06**).
-- Uji backup otomatis, restore lengkap, rollback, monitoring dan respons insiden (**P0-04, P1-07**).
+- Uji backup otomatis, rollback, monitoring dan respons insiden (**P0-04, P1-07**). Uji restore lengkap dan login dari backup ditunda sesuai catatan pada riwayat evaluasi.
 - Lakukan load test hanya dengan persetujuan: target checklist **50 pengguna, tanpa 5xx, respons < 2 detik** (**P1-09**).
 
 **Kriteria selesai:** restore dan rollback terbukti; rekonsiliasi saldo berselisih nol dan jumlah record memenuhi toleransi checklist; monitoring dan penanggung jawab operasional siap.
@@ -289,9 +322,11 @@ Kolom **sebelum** adalah baseline 23 November 2026 untuk commit `5780a4f`. Kolom
 
 | Area / fase | Sebelum — baseline | Sesudah — hasil terverifikasi | Langkah berikutnya / bukti |
 |---|---|---|---|
-| Backup dan RBAC rusak — fase 0 | Restore belum terbukti; file RBAC rusak berisiko ditimpa state baru | **Parsial:** RBAC diperbaiki, diuji lokal dan di-deploy; arsip data terenkripsi VPS terbaca dan output SCP menunjukkan salinan selesai di Windows dengan host key terverifikasi | Verifikasi hash salinan, cadangkan Firestore/konfigurasi dan uji restore lengkap terisolasi |
+| Backup dan RBAC rusak — fase 0 | Restore belum terbukti; file RBAC rusak berisiko ditimpa state baru | **Parsial:** RBAC diperbaiki dan di-deploy; hash arsip Windows cocok dengan VPS, ekstraksi dan integritas empat berkas diuji lokal | Cadangkan Firestore/konfigurasi; restore lengkap dan login terisolasi ditunda sampai fase lain selesai, sebelum GO produksi |
 | Pembuatan akun dan login — fase 1 | Kode tersedia dan admin berhasil login; akun baru belum diuji end-to-end di VPS | **Staging, parsial:** pengguna berhasil membuat dan login satu akun uji | Uji beberapa akun/peran serta penanganan kegagalan di staging |
 | Peran dan status akun — fase 1 | Pengaturan peran tersedia dalam kode; hak setiap peran dan penonaktifan di VPS belum terbukti | **Staging, parsial:** peran satu akun uji masih sesuai setelah restart; penonaktifan dan penolakan akses diuji lokal | Uji matriks izin dan penonaktifan setiap peran di UI/server VPS |
+| Logout dan sesi — fase 1 | Logout developer menghapus cookie tetapi tidak mencabut sesi server; kegagalan logout tidak diberitahukan | **Lokal, parsial:** pencabutan sesi sendiri dan peringatan kegagalan diuji; belum di-deploy | Deploy setelah disetujui dan uji logout serta pencabutan sesi pada staging |
+| Hak baca data server — fase 1 | Hak setiap peran di server belum terbukti | **Terbuka:** snapshot HTTP dan pembaruan WebSocket belum dibatasi hak baca peran (**P0-05**) | Tetapkan kebijakan data per peran dan self-service; perbaiki dan uji HTTP serta WebSocket |
 | Persistensi akun dan Firebase — fase 1 | RBAC disimpan di server; sinkronisasi Firebase dan pemulihan akun belum terbukti end-to-end | **Staging, parsial:** satu akun dan perannya bertahan setelah restart; Firebase Admin dilaporkan terhubung | Uji restore lengkap serta sinkronisasi dan pemulihan Firebase sebenarnya |
 | State dan media rusak — fase 2 | Fallback file state dan indeks media dapat menulis state kosong jika file rusak atau tidak valid | Belum dijalankan | Perbaiki P0-01 dan uji file rusak/tidak valid tanpa menimpanya |
 | Sinkronisasi dan konflik — fase 2 | Jalur sync yang diperiksa tidak memeriksa versi yang diharapkan; perubahan bersamaan berisiko tertimpa | Belum dijalankan | Perbaiki P0-02 dan uji dua pengguna serta offline/reconnect |

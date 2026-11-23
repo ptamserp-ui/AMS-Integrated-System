@@ -356,25 +356,38 @@ export async function hubungkanGoogleFirebaseUntukSync(): Promise<{ ok: boolean;
   }
 }
 
-export async function keluarDariServer(): Promise<void> {
+export async function keluarDariServer(): Promise<{ ok: boolean; pesan?: string }> {
   const lokal = bacaSesi();
+  let serverBerhasil = false;
+  let firebaseBerhasil = false;
   try {
     const headers = new Headers();
     if (lokal?.token) {
       headers.set('Authorization', `Bearer ${lokal.token}`);
     }
-    await fetch('/api/auth/logout', {
+    const response = await fetch('/api/auth/logout', {
       method: 'POST',
       credentials: 'include',
       headers
     });
+    serverBerhasil = response.ok;
+  } catch (error) {
+    console.error('Gagal mencabut sesi server:', error);
+  }
+  try {
     const { signOutFirebase } = await import('../services/firebase');
-    await signOutFirebase().catch(() => {});
-  } catch {
-    /* tetap bersihkan sesi lokal walau jaringan gagal */
+    await signOutFirebase();
+    firebaseBerhasil = true;
+  } catch (error) {
+    console.error('Gagal keluar dari Firebase:', error);
   } finally {
     akhiriSesi();
   }
+  if (!serverBerhasil || !firebaseBerhasil) {
+    const bagian = [!serverBerhasil && 'server AMS', !firebaseBerhasil && 'Firebase'].filter(Boolean).join(' dan ');
+    return { ok: false, pesan: `Sesi lokal telah dihapus, tetapi logout dari ${bagian} belum dipastikan. Periksa koneksi dan hubungi administrator.` };
+  }
+  return { ok: true };
 }
 
 export async function gantiKataSandiServer(

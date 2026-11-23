@@ -896,7 +896,9 @@ async function startServer() {
   app.post('/api/auth/logout', (req, res) => {
     if (req.auth) {
       const loggedOutSessionId = req.auth.session.id;
-      rbacStore.revokeSession(loggedOutSessionId, req.auth.user.username, req.auth.role.id, getClientIp(req));
+      if (!rbacStore.endOwnSession(loggedOutSessionId, req.auth.user.id, getClientIp(req))) {
+        return res.status(409).json({ error: 'LOGOUT_FAILED', pesan: 'Sesi tidak dapat dicabut. Silakan coba lagi.' });
+      }
       for (const client of syncClients) {
         if (client.sessionId === loggedOutSessionId) {
           client.isAuthenticated = false;
