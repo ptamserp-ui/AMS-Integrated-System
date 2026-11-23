@@ -181,6 +181,13 @@ Target checklist beban: **50 pengguna bersamaan, tanpa HTTP 5xx dan respons kura
 - **Masih perlu:** uji matriks izin beberapa peran dan penolakan akses di VPS, pemulihan lengkap, backup Firestore/konfigurasi, pencocokan hash salinan backup dan sinkronisasi/pemulihan Firebase sebenarnya. Uji satu akun bukan bukti seluruh peran atau fitur telah lolos.
 - **Keputusan:** fase 0 dan 1 masih parsial; **NO-GO produksi** tetap berlaku.
 
+### 23 November 2026 — sinkronisasi laporan dan penyalinan backup
+
+- **Laporan di VPS Ubuntu:** commit dokumentasi `9339dac` ditarik dengan fast-forward setelah deploy aplikasi `3de93b8`. Perubahan tersebut hanya dokumentasi, sehingga tidak membutuhkan build atau restart.
+- **Backup di Windows:** output pengguna menunjukkan penyalinan arsip terenkripsi `/home/amsdeploy/ams-staging-data-20261123.tar.gpg` ke `Documents\AMS-Backups\ams-staging-data-20261123.tar.gpg` selesai melalui SCP, menggunakan pemeriksaan host key yang telah diverifikasi. Arsip mencakup data `/var/lib/ams-data`, bukan backup Firestore atau seluruh konfigurasi/identitas. Hash salinan belum dibandingkan dan restore lengkap belum diuji.
+- **Percobaan deploy Windows:** perintah opsional dijalankan pada lingkungan Windows yang tidak memiliki `C:\Apps\AMS` maupun skrip deploy pada lokasi tersebut. Deploy Windows tidak terjadi dan pemeriksaan health lokal pada port 3100 gagal terhubung. Ini bukan deployment VPS Ubuntu staging dan bukan bukti gangguan pada service Ubuntu; tidak perlu mengulang perintah Windows untuk memperbarui staging Ubuntu.
+- **Keputusan:** fase 0 dan 1 tetap parsial dan **NO-GO produksi** tidak berubah.
+
 ### Format pembaruan berikutnya
 
 Salin format berikut untuk setiap evaluasi baru; jangan menghapus baseline.
@@ -198,7 +205,7 @@ Keputusan GO / NO-GO dan alasan:
 
 ## 9. Rencana kerja perbaikan menyeluruh
 
-**Disusun:** 23 November 2026. **Status:** fase 0 dan 1 dimulai secara lokal; hasil dan batasnya dicatat pada riwayat evaluasi.
+**Disusun:** 23 November 2026. **Status:** fase 0 dan 1 masih parsial setelah deploy staging; hasil dan batasnya dicatat pada riwayat evaluasi.
 
 Prioritas utama adalah memungkinkan administrator membuat dan menyimpan akun pengguna baru dengan peran aktif, sehingga pengguna dapat login dan membantu evaluasi **di staging**. Pada kandidat `5780a4f`, pembuatan akun, pengaturan peran dan login username/kata sandi sudah tersedia dalam kode, tetapi alurnya belum terbukti end-to-end di VPS. Penyimpanan RBAC berada di server; keberhasilan sinkronisasi ke Firebase perlu diverifikasi tersendiri.
 
@@ -278,11 +285,11 @@ Dikerjakan **setelah integrasi internal optimal**: tentukan kebutuhan, dapatkan 
 
 ## 10. Perbandingan kondisi sebelum dan sesudah
 
-Kolom **sebelum** adalah baseline 23 November 2026 untuk commit `5780a4f`. Kolom **sesudah** belum merupakan hasil: perbarui setiap kali pekerjaan selesai dan diverifikasi, dengan tanggal, commit, lingkungan dan bukti aman. Catat hasil staging dan produksi secara terpisah. Jika gagal atau baru sebagian, tulis hasil sebenarnya dan risiko tersisa; jangan mengubahnya menjadi lulus. Simpan riwayat evaluasi pada bagian 8.
+Kolom **sebelum** adalah baseline 23 November 2026 untuk commit `5780a4f`. Kolom **sesudah** memuat hasil yang telah dilaporkan atau diverifikasi, termasuk hasil parsial; perbarui dengan tanggal, commit, lingkungan dan bukti aman di riwayat evaluasi. Catat hasil staging dan produksi secara terpisah. Jika gagal atau baru sebagian, tulis hasil sebenarnya dan risiko tersisa; jangan mengubahnya menjadi lulus.
 
 | Area / fase | Sebelum — baseline | Sesudah — hasil terverifikasi | Langkah berikutnya / bukti |
 |---|---|---|---|
-| Backup dan RBAC rusak — fase 0 | Restore belum terbukti; file RBAC rusak berisiko ditimpa state baru | **Parsial:** RBAC diperbaiki, diuji lokal dan di-deploy; arsip data terenkripsi VPS terbaca, service aktif dan pengguna melaporkan salinan di Windows | Verifikasi hash salinan, cadangkan Firestore/konfigurasi dan uji restore lengkap terisolasi |
+| Backup dan RBAC rusak — fase 0 | Restore belum terbukti; file RBAC rusak berisiko ditimpa state baru | **Parsial:** RBAC diperbaiki, diuji lokal dan di-deploy; arsip data terenkripsi VPS terbaca dan output SCP menunjukkan salinan selesai di Windows dengan host key terverifikasi | Verifikasi hash salinan, cadangkan Firestore/konfigurasi dan uji restore lengkap terisolasi |
 | Pembuatan akun dan login — fase 1 | Kode tersedia dan admin berhasil login; akun baru belum diuji end-to-end di VPS | **Staging, parsial:** pengguna berhasil membuat dan login satu akun uji | Uji beberapa akun/peran serta penanganan kegagalan di staging |
 | Peran dan status akun — fase 1 | Pengaturan peran tersedia dalam kode; hak setiap peran dan penonaktifan di VPS belum terbukti | **Staging, parsial:** peran satu akun uji masih sesuai setelah restart; penonaktifan dan penolakan akses diuji lokal | Uji matriks izin dan penonaktifan setiap peran di UI/server VPS |
 | Persistensi akun dan Firebase — fase 1 | RBAC disimpan di server; sinkronisasi Firebase dan pemulihan akun belum terbukti end-to-end | **Staging, parsial:** satu akun dan perannya bertahan setelah restart; Firebase Admin dilaporkan terhubung | Uji restore lengkap serta sinkronisasi dan pemulihan Firebase sebenarnya |
