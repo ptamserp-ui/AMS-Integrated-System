@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { resolveFirebaseBootstrapAdmins } from '../src/services/firebaseConfig';
 import type {
   PermissionAction,
   RbacResourceId,
@@ -364,6 +365,13 @@ function resolveRoleByIdOrName(roles: RoleDefinition[], requested?: string): Rol
   return roles.find((r) => r.id === key || r.id.toLowerCase() === lower || r.name.toLowerCase() === lower);
 }
 
+export function getFirebaseBootstrapAdmins(): Set<string> {
+  return resolveFirebaseBootstrapAdmins(
+    [process.env.BOOTSTRAP_DEV_EMAIL || '', process.env.FIREBASE_ADMIN_EMAILS || ''],
+    process.env.VITE_FIREBASE_CONFIGURED_ADMINS_ONLY
+  );
+}
+
 function bootstrapUsersFromEnv(roles: RoleDefinition[], now: string): ServerUserRecord[] {
   const envHash = (process.env.BOOTSTRAP_DEV_PASSWORD_HASH || '').trim();
   const envPlain = process.env.BOOTSTRAP_DEV_PASSWORD || '';
@@ -473,6 +481,14 @@ export class ServerRbacStore {
   }
 
   private loadOrSeedState(): RbacDatabaseState {
+    getFirebaseBootstrapAdmins();
+    if (
+      process.env.VITE_FIREBASE_CONFIGURED_ADMINS_ONLY === 'true' &&
+      (process.env.BOOTSTRAP_DEV_PASSWORD_HASH?.trim() || process.env.BOOTSTRAP_DEV_PASSWORD) &&
+      !process.env.BOOTSTRAP_DEV_EMAIL?.trim()
+    ) {
+      throw new Error('BOOTSTRAP_DEV_EMAIL wajib diisi saat bootstrap kata sandi dan mode admin Firebase terbatas aktif.');
+    }
     const now = new Date().toISOString();
     try {
       if (fs.existsSync(this.dbPath)) {
@@ -786,17 +802,7 @@ export class ServerRbacStore {
       return { ok: false, status: 400, message: 'Email Google terverifikasi tidak ditemukan.' };
     }
 
-    const configuredBootstrapEmail = (process.env.BOOTSTRAP_DEV_EMAIL || 'antraderyll@gmail.com').trim().toLowerCase();
-    const extraAdminEmails = (process.env.FIREBASE_ADMIN_EMAILS || '')
-      .split(',')
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
-    const bootstrappedAdminEmails = new Set([
-      configuredBootstrapEmail,
-      'antraderyll@gmail.com',
-      'cloud.ams2026@gmail.com',
-      ...extraAdminEmails
-    ]);
+    const bootstrappedAdminEmails = getFirebaseBootstrapAdmins();
 
     let user = this.state.users.find((u) => u.email.trim().toLowerCase() === cleanEmail);
 

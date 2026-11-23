@@ -332,6 +332,17 @@ sudo chmod 600 "/opt/ams/app/$ENV_FILE"
 
 Nama file environment harus tepat (`.env.staging` atau `.env.production`), karena file tersebut dipakai saat build dan runtime. Buat nilai rahasia langsung di VPS; jangan mengirimkannya melalui chat.
 
+Untuk membatasi bootstrap administrator Firebase hanya ke email yang dikonfigurasi, tambahkan ke environment sebelum build dan sebelum service dijalankan:
+
+```env
+VITE_FIREBASE_CONFIGURED_ADMINS_ONLY="true"
+VITE_FIREBASE_ADMIN_EMAIL="<email-admin>"
+BOOTSTRAP_DEV_EMAIL="<email-admin>"
+FIREBASE_ADMIN_EMAILS="<email-admin>"
+```
+
+Gunakan daftar email yang konsisten (pisahkan beberapa email dengan koma pada variabel daftar) dan build ulang jika konfigurasi berubah. Tanpa opsi ini, akun bootstrap lama tetap diizinkan untuk kompatibilitas. Opsi ini tidak mencabut akun RBAC yang sudah ada atau hak administrator Firebase lainnya. Periksa dan sesuaikan juga `isBootstrappedAdmin` pada Firestore Rules di project target sebelum mempublikasikannya: file rules di repository masih berisi akun lama dan tidak membaca environment ini. Jangan menimpa rules project lain tanpa memastikan targetnya.
+
 ### 5. Build dan systemd
 
 Verifikasi dan build dijalankan dari direktori aplikasi sebagai pengguna `ams`:

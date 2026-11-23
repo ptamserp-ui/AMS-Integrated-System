@@ -13,6 +13,18 @@ export interface ResolveFirebaseClientOptions {
   isAiStudioPreview?: boolean;
 }
 
+export function resolveFirebaseBootstrapAdmins(configured: string[], configuredOnly?: string): Set<string> {
+  if (configuredOnly && configuredOnly !== 'true' && configuredOnly !== 'false') {
+    throw new Error('VITE_FIREBASE_CONFIGURED_ADMINS_ONLY harus bernilai true atau false.');
+  }
+  const legacyAdmins = configuredOnly === 'true' ? [] : ['antraderyll@gmail.com', 'cloud.ams2026@gmail.com'];
+  return new Set(
+    [...legacyAdmins, ...configured.flatMap((value) => value.split(','))]
+      .map((email) => email.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 export function isAiStudioPreviewHost(hostname?: string): boolean {
   if (!hostname) return false;
   return /^ais-(?:dev|pre)-[^.]+\.[^.]+\.run\.app$/i.test(hostname.trim());

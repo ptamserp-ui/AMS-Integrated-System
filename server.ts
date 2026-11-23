@@ -12,7 +12,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { RBAC_RESOURCES, ServerRbacStore } from './server/rbacStore';
+import { getFirebaseBootstrapAdmins, RBAC_RESOURCES, ServerRbacStore } from './server/rbacStore';
 import {
   clearSessionCookie,
   createRbacMiddleware,
@@ -745,17 +745,7 @@ async function startServer() {
     if (!authorized && typeof body.idToken === 'string' && body.idToken.trim()) {
       const verified = await verifyFirebaseIdToken(body.idToken.trim());
       if (verified.ok) {
-        const bootstrappedEmail = (process.env.BOOTSTRAP_DEV_EMAIL || 'antraderyll@gmail.com').trim().toLowerCase();
-        const extraAdmins = (process.env.FIREBASE_ADMIN_EMAILS || '')
-          .split(',')
-          .map((s) => s.trim().toLowerCase())
-          .filter(Boolean);
-        const adminEmailSet = new Set([
-          bootstrappedEmail,
-          'antraderyll@gmail.com',
-          'cloud.ams2026@gmail.com',
-          ...extraAdmins
-        ]);
+        const adminEmailSet = getFirebaseBootstrapAdmins();
         const matchedUser = rbacStore.listAllUsersForCloudSync().find(
           (u) => u.email.trim().toLowerCase() === verified.email
         );

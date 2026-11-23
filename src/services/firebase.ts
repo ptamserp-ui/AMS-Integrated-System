@@ -26,7 +26,7 @@ import {
   type Unsubscribe
 } from 'firebase/firestore';
 import defaultFirebaseConfig from '../../firebase-applet-config.json';
-import { resolveFirebaseClientConfig } from './firebaseConfig';
+import { resolveFirebaseBootstrapAdmins, resolveFirebaseClientConfig } from './firebaseConfig';
 import type { RoleDefinition, ServerUserRecord } from '../types';
 
 export enum OperationType {
@@ -55,14 +55,10 @@ export interface FirestoreErrorInfo {
   };
 }
 
-const BOOTSTRAPPED_ADMIN_EMAILS = new Set([
-  'antraderyll@gmail.com',
-  'cloud.ams2026@gmail.com',
-  ...String(import.meta.env?.VITE_FIREBASE_ADMIN_EMAIL || '')
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean)
-]);
+const BOOTSTRAPPED_ADMIN_EMAILS = resolveFirebaseBootstrapAdmins(
+  [String(import.meta.env?.VITE_FIREBASE_ADMIN_EMAIL || '')],
+  import.meta.env?.VITE_FIREBASE_CONFIGURED_ADMINS_ONLY
+);
 const MAX_DOC_BYTES = 920_000;
 
 const firebaseConfig = resolveFirebaseClientConfig(import.meta.env, defaultFirebaseConfig, {

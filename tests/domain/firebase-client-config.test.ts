@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveFirebaseClientConfig, type FirebaseClientConfig } from '../../src/services/firebaseConfig';
+import { resolveFirebaseBootstrapAdmins, resolveFirebaseClientConfig, type FirebaseClientConfig } from '../../src/services/firebaseConfig';
 
 const productionConfig: FirebaseClientConfig = {
   apiKey: 'production-api-key',
@@ -24,6 +24,16 @@ const stagingEnv = {
 };
 
 describe('resolveFirebaseClientConfig', () => {
+  it('limits bootstrap admins to the configured addresses when opted in', () => {
+    expect([...resolveFirebaseBootstrapAdmins([' Admin@Example.com, second@example.com, '], 'true')]).toEqual([
+      'admin@example.com',
+      'second@example.com'
+    ]);
+    expect([...resolveFirebaseBootstrapAdmins([], 'true')]).toEqual([]);
+    expect(resolveFirebaseBootstrapAdmins([], undefined).has('cloud.ams2026@gmail.com')).toBe(true);
+    expect(() => resolveFirebaseBootstrapAdmins([], 'TRUE')).toThrow('harus bernilai true atau false');
+  });
+
   it('uses the configured staging project instead of the bundled project', () => {
     expect(resolveFirebaseClientConfig(stagingEnv, productionConfig)).toEqual({
       apiKey: 'staging-api-key',

@@ -1,8 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { ServerRbacStore } from '../../server/rbacStore';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getFirebaseBootstrapAdmins, ServerRbacStore } from '../../server/rbacStore';
 import { ServerDataSyncStore, canWriteSyncKey } from '../../server/dataSyncStore';
 
 const createdDirs: string[] = [];
@@ -14,6 +14,7 @@ function createTempDataDir(): string {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   while (createdDirs.length > 0) {
     const dir = createdDirs.pop()!;
     fs.rmSync(dir, { recursive: true, force: true });
@@ -21,6 +22,47 @@ afterEach(() => {
 });
 
 describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Login Internet Real-Time', () => {
+  it('membatasi daftar bootstrap Firebase dan login ke email yang dikonfigurasi', () => {
+    vi.stubEnv('VITE_FIREBASE_CONFIGURED_ADMINS_ONLY', 'true');
+    vi.stubEnv('BOOTSTRAP_DEV_EMAIL', ' admin@example.com ');
+    vi.stubEnv('FIREBASE_ADMIN_EMAILS', 'ADMIN@example.com, second@example.com');
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD', '');
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD_HASH', '');
+    const rbac = new ServerRbacStore(createTempDataDir());
+
+    expect([...getFirebaseBootstrapAdmins()]).toEqual(['admin@example.com', 'second@example.com']);
+    for (const oldEmail of ['antraderyll@gmail.com', 'cloud.ams2026@gmail.com']) {
+      expect(rbac.authenticateByVerifiedEmail(oldEmail, 'uid-old', 'Old', '127.0.0.1', 'Vitest')).toMatchObject({
+        ok: false,
+        status: 403
+      });
+    }
+    expect(rbac.authenticateByVerifiedEmail('Admin@Example.com', 'uid-admin', 'Admin', '127.0.0.1', 'Vitest')).toMatchObject({
+      ok: true,
+      role: { id: 'developer_it_support' }
+    });
+  });
+
+  it('tidak memakai email lama jika mode terbatas tidak memiliki alamat bootstrap', () => {
+    vi.stubEnv('VITE_FIREBASE_CONFIGURED_ADMINS_ONLY', 'true');
+    vi.stubEnv('BOOTSTRAP_DEV_EMAIL', '');
+    vi.stubEnv('FIREBASE_ADMIN_EMAILS', '');
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD', '');
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD_HASH', '');
+    expect(getFirebaseBootstrapAdmins().size).toBe(0);
+    const dir = createTempDataDir();
+    const rbac = new ServerRbacStore(dir);
+    expect(rbac.authenticateByVerifiedEmail('antraderyll@gmail.com', 'uid', 'Old', '127.0.0.1', 'Vitest').ok).toBe(false);
+
+    vi.stubEnv('BOOTSTRAP_DEV_PASSWORD', 'StrongPassword123!');
+    expect(() => new ServerRbacStore(dir)).toThrow('BOOTSTRAP_DEV_EMAIL wajib diisi');
+  });
+
+  it('menolak nilai opsi pembatasan yang tidak valid saat server dimulai', () => {
+    vi.stubEnv('VITE_FIREBASE_CONFIGURED_ADMINS_ONLY', 'TRUE');
+    expect(() => new ServerRbacStore(createTempDataDir())).toThrow('harus bernilai true atau false');
+  });
+
   it('memberi hak write gudang berdasarkan tugas dan memigrasikan role sistem lama secara aman', () => {
     const dataDir = createTempDataDir();
     const initial = new ServerRbacStore(dataDir);
