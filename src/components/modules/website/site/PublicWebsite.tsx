@@ -389,6 +389,7 @@ export default function PublicWebsite({
     () => ({
       cfg: konfigurasiTampil,
       cfgAsli: konfigurasi,
+      pratinjau,
       ke,
       batasProduk: rute.halaman === 'beranda' ? 6 : undefined,
       kategoriAktif: kategoriRuteTampil,
@@ -403,6 +404,8 @@ export default function PublicWebsite({
     }),
     [
       konfigurasiTampil,
+      konfigurasi,
+      pratinjau,
       ke,
       rute.halaman,
       kategoriRuteTampil,

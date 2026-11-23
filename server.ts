@@ -18,7 +18,8 @@ import {
   createRbacMiddleware,
   getClientIp,
   SESSION_COOKIE_NAME,
-  setSessionCookie
+  setSessionCookie,
+  type AuthContext
 } from './server/rbacMiddleware';
 import {
   canDeleteMedia,
@@ -27,6 +28,7 @@ import {
   canReadSyncKey,
   canWriteSyncKey,
   filterSyncValueForRole,
+  isHrisPersonalSyncKey,
   isLegacyRbacSyncKey,
   isValidSyncKey,
   mapSyncKeyToResource,
@@ -34,14 +36,19 @@ import {
   mergeCatalogIntoDraftConfig,
   mergeCatalogIntoPublishedSnapshot,
   PUBLIC_SYNC_KEYS,
-  ServerDataSyncStore
+  ServerDataSyncStore,
+  validateHrisReplacement
 } from './server/dataSyncStore';
 import { ActiveDbDriver, PocketBaseArchiveConfig, ServerDbDriverManager } from './server/dbDriverManager';
 import { resolveFirebaseClientConfig, type FirebaseClientConfig } from './src/services/firebaseConfig';
+import { buatIdentitasSinkronisasi, HEADER_IDENTITAS_SYNC } from './src/utils/identitasSinkronisasi';
+import { adalahKonfigurasiSitus } from './src/utils/websitePrimitives';
 import type { RoleDefinition } from './src/types/index';
 import { loadDeploymentEnv, resolveDeploymentEnvironment } from './server/envLoader';
 import { buildWindowsDeploymentGuides } from './server/deploymentGuides';
 import { WebsiteTranslationError, WebsiteTranslationService } from './server/websiteTranslation';
+import { buatProspekWebsite, KUNCI_RFQ_WEBSITE, samaPermintaanWebsite } from './server/websiteRfq';
+import type { ProspekAlkes } from './src/types';
 import {
   encodeImageDataUrl,
   isValidMediaId,
@@ -71,24 +78,48 @@ const BERKAS_SNAPSHOT_STATIS = path.resolve(__dirname, 'public', 'website-publis
 const BERKAS_INDEKS = path.resolve(__dirname, 'index.html');
 const rbacStore = new ServerRbacStore(DATA_DIR);
 const dataSyncStore = new ServerDataSyncStore(DATA_DIR);
+const SELF_SERVICE_ROLE_IDS = new Set(['karyawan', 'sales_medrep', 'sales_manager']);
 const getEmployeeRecord = (employeeId: string): Record<string, unknown> | undefined => {
   const employees = dataSyncStore.getEntry('hris_karyawan')?.value;
   if (!Array.isArray(employees)) return undefined;
-  return employees.find(
+  const matches = employees.filter(
     (employee): employee is Record<string, unknown> =>
       Boolean(employee && typeof employee === 'object' &&
         (employee as { id?: unknown }).id === employeeId)
   );
+  return matches.length === 1 ? matches[0] : undefined;
 };
 const employeeRecordExists = (employeeId: string): boolean => {
   const employee = getEmployeeRecord(employeeId);
   return typeof employee?.nama === 'string' && employee.nama.trim().length > 0;
+};
+const verifiedEmployeeId = (auth: AuthContext): string | undefined => {
+  if (!SELF_SERVICE_ROLE_IDS.has(auth.role.id)) return undefined;
+  const employeeId = auth.user.employeeId;
+  if (!employeeId || !employeeRecordExists(employeeId)) return undefined;
+  const linkedUsers = rbacStore.listAllUsersForCloudSync().filter((user) => user.employeeId === employeeId);
+  return linkedUsers.length === 1 && linkedUsers[0].id === auth.user.id ? employeeId : undefined;
 };
 const mediaStore = new ServerMediaStore(DATA_DIR);
 mediaStore.migrateLegacyMediaEntries(dataSyncStore.getEntry('website_media_v1')?.value, 'startup-migration');
 const dbDriverManager = new ServerDbDriverManager(DATA_DIR, __dirname);
 const websiteTranslationService = new WebsiteTranslationService(DATA_DIR);
 const { attachAuth, requireAuth, requirePermission } = createRbacMiddleware(rbacStore);
+
+function rejectStaleSyncIdentity(req: express.Request, res: express.Response): boolean {
+  const expected = req.get(HEADER_IDENTITAS_SYNC);
+  if (!expected) return false;
+  const auth = req.auth!;
+  const current = buatIdentitasSinkronisasi(
+    auth.user.id, auth.role.id, auth.role.permissions, auth.user.employeeId
+  );
+  if (expected === encodeURIComponent(current)) return false;
+  res.status(409).json({
+    error: 'SYNC_IDENTITY_CHANGED',
+    pesan: 'Identitas atau hak akses telah berubah. Perubahan offline ditahan; hubungi administrator.'
+  });
+  return true;
+}
 
 function readFirebaseClientConfig(): FirebaseClientConfig | null {
   try {
@@ -216,17 +247,14 @@ async function verifyFirebaseIdToken(idToken: string): Promise<
   }
 }
 
-/** Snapshot harus berbentuk KonfigurasiSitus; penolakan melindungi berkas data dari muatan sembarangan. */
-function adalahKonfigurasiSitus(nilai: unknown): nilai is Record<string, any> {
-  if (!nilai || typeof nilai !== 'object') return false;
-  const cfg = nilai as Record<string, any>;
-  return Boolean(
-    cfg.identitas && typeof cfg.identitas.nama === 'string' && cfg.hero && typeof cfg.hero.judul === 'string'
-  );
-}
-
 function bacaSnapshot(): Record<string, any> | null {
   try {
+    if (dataSyncStore.hasKey('website_published')) {
+      const tersimpan = dataSyncStore.getEntry('website_published')?.value;
+      if (adalahKonfigurasiSitus(tersimpan)) return tersimpan;
+      console.error('[website] Snapshot pada penyimpanan server tidak valid.');
+      return null;
+    }
     const target = fs.existsSync(BERKAS_SNAPSHOT)
       ? BERKAS_SNAPSHOT
       : fs.existsSync(BERKAS_SNAPSHOT_STATIS)
@@ -234,11 +262,31 @@ function bacaSnapshot(): Record<string, any> | null {
         : null;
     if (!target) return null;
     const isi = JSON.parse(fs.readFileSync(target, 'utf8')) as unknown;
-    return adalahKonfigurasiSitus(isi) ? isi : null;
-  } catch {
+    if (adalahKonfigurasiSitus(isi)) return isi;
+    console.error('[website] Berkas snapshot tidak valid:', target);
+    return null;
+  } catch (error) {
+    console.error('[website] Snapshot tidak dapat dibaca.', error);
     return null;
   }
 }
+
+function tulisSalinanSnapshot(snapshot: unknown): boolean {
+  try {
+    const serialized = JSON.stringify(snapshot, null, 2);
+    fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
+    fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
+    fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
+    fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
+    return true;
+  } catch (error) {
+    console.error('[website] Snapshot tersimpan, tetapi salinan berkas gagal diperbarui.', error);
+    return false;
+  }
+}
+
+const PERINGATAN_SALINAN_SNAPSHOT =
+  'Snapshot server tersimpan, tetapi salinan berkas untuk hosting statis gagal diperbarui.';
 
 function serialisasiJsonAmanUntukHtml(data: unknown): string {
   return JSON.stringify(data)
@@ -434,6 +482,15 @@ async function startServer() {
     }
   };
 
+  const notifySelfServiceScopeChanged = (client: SyncWsClient, auth: AuthContext) => {
+    if (!SELF_SERVICE_ROLE_IDS.has(auth.role.id)) return;
+    try {
+      client.ws.send(JSON.stringify({ type: 'rbac:updated', at: new Date().toISOString() }));
+    } catch {
+      syncClients.delete(client);
+    }
+  };
+
   const broadcastSyncUpdate = (
     key: string,
     entry: { value: unknown; version: number; updatedAt: string; updatedBy: string },
@@ -465,7 +522,9 @@ async function startServer() {
         client.token = undefined;
         continue;
       }
-      const value = filterSyncValueForRole(auth.role, key, entry.value, auth.user.employeeId);
+      if (key === 'hris_karyawan') notifySelfServiceScopeChanged(client, auth);
+      const employeeId = isHrisPersonalSyncKey(key) ? verifiedEmployeeId(auth) : undefined;
+      const value = filterSyncValueForRole(auth.role, key, entry.value, employeeId);
       if (value === undefined) continue;
       try {
         client.ws.send(JSON.stringify({
@@ -494,7 +553,9 @@ async function startServer() {
           client.token = undefined;
           continue;
         }
-        if (!canReadSyncKey(auth.role, key, auth.user.employeeId)) continue;
+        if (key === 'hris_karyawan') notifySelfServiceScopeChanged(client, auth);
+        const employeeId = isHrisPersonalSyncKey(key) ? verifiedEmployeeId(auth) : undefined;
+        if (!canReadSyncKey(auth.role, key, employeeId)) continue;
       }
       try {
         client.ws.send(JSON.stringify({
@@ -542,16 +603,20 @@ async function startServer() {
       const permittedEntries: typeof updated = {};
       const permittedDeleted: string[] = [];
       if (auth) {
+        if (updated.hris_karyawan || deleted.includes('hris_karyawan')) {
+          notifySelfServiceScopeChanged(client, auth);
+        }
+        const employeeId = verifiedEmployeeId(auth);
         for (const [key, entry] of Object.entries(updated)) {
           if (PUBLIC_SYNC_KEYS.has(key)) {
             permittedEntries[key] = entry;
             continue;
           }
-          const value = filterSyncValueForRole(auth.role, key, entry.value, auth.user.employeeId);
+          const value = filterSyncValueForRole(auth.role, key, entry.value, employeeId);
           if (value !== undefined) permittedEntries[key] = { ...entry, value };
         }
         for (const key of deleted) {
-          if (PUBLIC_SYNC_KEYS.has(key) || canReadSyncKey(auth.role, key, auth.user.employeeId)) {
+          if (PUBLIC_SYNC_KEYS.has(key) || canReadSyncKey(auth.role, key, employeeId)) {
             permittedDeleted.push(key);
           }
         }
@@ -614,20 +679,14 @@ async function startServer() {
   };
 
   const PB_COLLECTION_PATH = /^\/api\/collections\/([A-Za-z0-9_-]+)\/records\/?$/;
-  const PB_HRIS_FULL_READ_ROLE_IDS = new Set([
-    'developer_it_support',
-    'hrd_manager',
-    'payroll_manager',
-    'management'
-  ]);
+  const isHrisMediaScope = (scope: string) => scope === 'hrd-pelatihan' || isHrisPersonalSyncKey(scope);
   const mediaScopeResource = (scope: string) =>
     RBAC_RESOURCES.find((resource) => resource.id === scope)?.id ??
     (mapSyncKeyToResource(scope) === 'overview' ? undefined : mapSyncKeyToResource(scope));
   const canReadInternalMedia = (role: RoleDefinition, scope: string): boolean => {
     if (role.id === 'developer_it_support') return true;
-    if (scope === 'hrd-pelatihan' || scope.startsWith('hris_')) {
-      return PB_HRIS_FULL_READ_ROLE_IDS.has(role.id) &&
-        Boolean(role.permissions['hrd-pelatihan']?.includes('view'));
+    if (isHrisMediaScope(scope)) {
+      return canReadSyncKey(role, 'hris_karyawan');
     }
     const resource = mediaScopeResource(scope);
     return Boolean(resource && role.permissions[resource]?.includes('view'));
@@ -636,8 +695,8 @@ async function startServer() {
     if (role.id === 'developer_it_support') return true;
     const resource = mediaScopeResource(scope);
     if (!resource) return false;
-    if (scope === 'hrd-pelatihan' || scope.startsWith('hris_')) {
-      if (!PB_HRIS_FULL_READ_ROLE_IDS.has(role.id)) return false;
+    if (isHrisMediaScope(scope)) {
+      if (!canReadSyncKey(role, 'hris_karyawan')) return false;
     }
     const permissions = role.permissions[resource] || [];
     return operation === 'upload'
@@ -674,8 +733,8 @@ async function startServer() {
     }
     const collection = collectionMatch[1];
     if (
-      collection.startsWith('hris_') &&
-      !PB_HRIS_FULL_READ_ROLE_IDS.has(req.auth.role.id)
+      isHrisPersonalSyncKey(collection) &&
+      !canReadSyncKey(req.auth.role, 'hris_karyawan')
     ) {
       return res.status(403).json({ error: 'FORBIDDEN', pesan: 'Akses HRIS melalui PocketBase dibatasi untuk peran HRD, Payroll, Manajemen, dan Developer.' });
     }
@@ -906,8 +965,25 @@ async function startServer() {
       });
     }
 
+    if (body.entries && Object.prototype.hasOwnProperty.call(body.entries, 'website_published') &&
+        !adalahKonfigurasiSitus(body.entries.website_published?.value)) {
+      return res.status(400).json({
+        error: 'INVALID_WEBSITE_SNAPSHOT',
+        pesan: 'Snapshot website pada cadangan cloud tidak lengkap atau tidak valid. Pemulihan dibatalkan.'
+      });
+    }
+
+    let syncRes: ReturnType<typeof dataSyncStore.hydrateFromCloud>;
+    try {
+      syncRes = body.entries ? dataSyncStore.hydrateFromCloud(body.entries) : { appliedKeys: [], revision: dataSyncStore.getRevision() };
+    } catch (error) {
+      console.error('[firebase-hydrate] Pemulihan data sinkronisasi gagal.', error);
+      return res.status(500).json({
+        error: 'CLOUD_HYDRATE_FAILED',
+        pesan: 'Pemulihan data cloud gagal. Periksa antrean RFQ dan penyimpanan server bersama administrator.'
+      });
+    }
     const rbacRes = rbacStore.hydrateFromCloud({ roles: body.roles, users: body.users });
-    const syncRes = body.entries ? dataSyncStore.hydrateFromCloud(body.entries) : { appliedKeys: [], revision: dataSyncStore.getRevision() };
 
     if (body.activeDriver || body.pocketbaseArchive) {
       dbDriverManager.hydrateArchiveFromCloud(body.activeDriver, body.pocketbaseArchive, actorUsername || 'firebase-sync');
@@ -917,17 +993,9 @@ async function startServer() {
       mediaStore.migrateLegacyMediaEntries(body.entries.website_media_v1.value, actorUsername || 'firebase-hydrate');
     }
 
-    if (syncRes.appliedKeys.includes('website_published') && body.entries?.website_published?.value && adalahKonfigurasiSitus(body.entries.website_published.value)) {
-      try {
-        const serialized = JSON.stringify(body.entries.website_published.value, null, 2);
-        fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
-        fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
-        fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
-        fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
-      } catch {
-        /* lanjutkan meskipun public snapshot tidak dapat ditulis */
-      }
-    }
+    const peringatanSnapshot = syncRes.appliedKeys.includes('website_published') &&
+      !tulisSalinanSnapshot(dataSyncStore.getEntry('website_published')?.value)
+      ? PERINGATAN_SALINAN_SNAPSHOT : undefined;
 
     if (rbacRes.rolesApplied > 0 || rbacRes.usersApplied > 0) {
       broadcastRbacUpdated();
@@ -946,7 +1014,8 @@ async function startServer() {
       rolesApplied: rbacRes.rolesApplied,
       usersApplied: rbacRes.usersApplied,
       entriesApplied: syncRes.appliedKeys.length,
-      revision: syncRes.revision
+      revision: syncRes.revision,
+      ...(peringatanSnapshot ? { peringatan: peringatanSnapshot } : {})
     });
   });
 
@@ -1020,12 +1089,13 @@ async function startServer() {
 
   app.get('/api/system/migration-bundle', requirePermission('rbac-admin', 'view'), (_req, res) => {
     const appState = dataSyncStore.getAllState();
+    const employeeId = verifiedEmployeeId(_req.auth!);
     for (const [key, entry] of Object.entries(appState.entries)) {
       const value = filterSyncValueForRole(
         _req.auth!.role,
         key,
         entry.value,
-        _req.auth!.user.employeeId
+        employeeId
       );
       if (value === undefined) {
         delete appState.entries[key];
@@ -1306,6 +1376,7 @@ async function startServer() {
   });
 
   app.get('/api/sync/state', requireAuth, (req, res) => {
+    if (rejectStaleSyncIdentity(req, res)) return;
     let sinceMap: Record<string, number> | undefined;
     let knownKeys: string[] = [];
     const rawVersions = req.query.versions;
@@ -1338,8 +1409,9 @@ async function startServer() {
       }
     }
     const state = dataSyncStore.getAllState(sinceMap);
+    const employeeId = verifiedEmployeeId(req.auth!);
     for (const [key, entry] of Object.entries(state.entries)) {
-      const value = filterSyncValueForRole(req.auth!.role, key, entry.value, req.auth!.user.employeeId);
+      const value = filterSyncValueForRole(req.auth!.role, key, entry.value, employeeId);
       if (value === undefined) {
         delete state.entries[key];
       } else {
@@ -1348,8 +1420,8 @@ async function startServer() {
     }
     if (
       !sinceMap &&
-      req.auth!.user.employeeId &&
-      ['karyawan', 'sales_medrep', 'sales_manager'].includes(req.auth!.role.id)
+      employeeId &&
+      SELF_SERVICE_ROLE_IDS.has(req.auth!.role.id)
     ) {
       const personalKeys = req.auth!.role.id === 'karyawan'
         ? [
@@ -1364,7 +1436,7 @@ async function startServer() {
           ]
         : ['hris_karyawan', 'hris_absensi', 'hris_cuti'];
       for (const key of personalKeys) {
-        if (!Object.prototype.hasOwnProperty.call(state.entries, key)) {
+        if (canReadSyncKey(req.auth!.role, key, employeeId) && !Object.prototype.hasOwnProperty.call(state.entries, key)) {
           state.entries[key] = {
             value: [],
             version: 0,
@@ -1374,12 +1446,18 @@ async function startServer() {
         }
       }
     }
-    const allowedKeys = [...new Set([...knownKeys, ...Object.keys(state.entries)])]
-      .filter((key) => canReadSyncKey(req.auth!.role, key, req.auth!.user.employeeId));
-    res.set('Cache-Control', 'no-store').json({ ...state, allowedKeys });
+    const relevantKeys = [...new Set([...knownKeys, ...Object.keys(state.entries)])];
+    const allowedKeys = relevantKeys.filter((key) => canReadSyncKey(req.auth!.role, key, employeeId));
+    const writableKeys = relevantKeys.filter((key) =>
+      canWriteSyncKey(req.auth!.role, key) &&
+      (!SELF_SERVICE_ROLE_IDS.has(req.auth!.role.id) || !isHrisPersonalSyncKey(key) || Boolean(employeeId))
+    );
+    const deletableKeys = relevantKeys.filter((key) => canDeleteSyncKey(req.auth!.role, key));
+    res.set('Cache-Control', 'no-store').json({ ...state, allowedKeys, writableKeys, deletableKeys });
   });
 
   app.put('/api/sync/keys/:key', requireAuth, (req, res) => {
+    if (rejectStaleSyncIdentity(req, res)) return;
     const { key } = req.params;
     if (isLegacyRbacSyncKey(key)) {
       return res.status(410).json({
@@ -1411,14 +1489,20 @@ async function startServer() {
     if (!('value' in body) || body.value === undefined) {
       return res.status(400).json({ error: 'BAD_REQUEST', pesan: 'Field "value" wajib disertakan.' });
     }
+    if (key === 'website_published' && !adalahKonfigurasiSitus(body.value)) {
+      return res.status(400).json({
+        error: 'INVALID_WEBSITE_SNAPSHOT',
+        pesan: 'Snapshot website tidak lengkap atau tidak valid; perubahan tidak disimpan.'
+      });
+    }
     let valueToSave = body.value;
     if (
-      ['karyawan', 'sales_medrep', 'sales_manager'].includes(req.auth!.role.id) &&
+      SELF_SERVICE_ROLE_IDS.has(req.auth!.role.id) &&
       key.startsWith('hris_')
     ) {
-      const employeeId = req.auth!.user.employeeId;
-      if (!employeeId || !employeeRecordExists(employeeId)) {
-        return res.status(403).json({ error: 'EMPLOYEE_LINK_REQUIRED', pesan: 'Akun belum ditautkan ke ID karyawan HRIS oleh admin.' });
+      const employeeId = verifiedEmployeeId(req.auth!);
+      if (!employeeId) {
+        return res.status(403).json({ error: 'EMPLOYEE_LINK_REQUIRED', pesan: 'Tautan ID karyawan tidak ditemukan atau tidak unik; hubungi admin.' });
       }
       const employeeName = String(getEmployeeRecord(employeeId)?.nama || '');
       const merged = mergeSelfServiceSyncValue(
@@ -1434,24 +1518,28 @@ async function startServer() {
       valueToSave = merged.value;
     }
 
+    const replacementError = validateHrisReplacement(
+      req.auth!.role, key, dataSyncStore.getEntry(key)?.value, valueToSave
+    );
+    if (replacementError) {
+      return res.status(403).json({ error: 'HRIS_REPLACEMENT_DENIED', pesan: replacementError });
+    }
+
     if (key === 'website_media_v1') {
       mediaStore.migrateLegacyMediaEntries(valueToSave, req.auth!.user.username);
     }
 
-    // Jika situs publik diperbarui via key sync, cerminkan ke snapshot disk bila valid
-    if (key === 'website_published' && adalahKonfigurasiSitus(valueToSave)) {
-      try {
-        const serialized = JSON.stringify(valueToSave, null, 2);
-        fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
-        fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
-        fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
-        fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
-      } catch {
-        /* tetap lanjutkan penyimpanan sync store */
-      }
+    let synced: ReturnType<typeof dataSyncStore.setKey>;
+    try {
+      synced = dataSyncStore.setKey(key, valueToSave, req.auth!.user.username);
+    } catch (error) {
+      console.error('[sync] Penyimpanan perubahan gagal.', error);
+      return res.status(500).json({ error: 'SYNC_WRITE_FAILED', pesan: 'Perubahan gagal disimpan di server.' });
     }
-
-    const synced = dataSyncStore.setKey(key, valueToSave, req.auth!.user.username);
+    const peringatan: string[] = [];
+    if (key === 'website_published' && !tulisSalinanSnapshot(valueToSave)) {
+      peringatan.push(PERINGATAN_SALINAN_SNAPSHOT);
+    }
     let latestRevision = synced.revision;
     const sourceClientId =
       typeof body.clientId === 'string' && body.clientId
@@ -1479,16 +1567,8 @@ async function startServer() {
       if (currentSnapshot && adalahKonfigurasiSitus(currentSnapshot)) {
         const merged = mergeCatalogIntoPublishedSnapshot(currentSnapshot, valueToSave, req.auth!.user.fullName);
         if (merged) {
-          try {
-            const serialized = JSON.stringify(merged, null, 2);
-            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
-            fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
-            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
-            fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
-          } catch {
-            /* abaikan kegagalan tulis berkas statis */
-          }
           const syncedPub = dataSyncStore.setKey('website_published', merged, req.auth!.user.username);
+          if (!tulisSalinanSnapshot(merged)) peringatan.push(PERINGATAN_SALINAN_SNAPSHOT);
           latestRevision = Math.max(latestRevision, syncedPub.revision);
           broadcastSyncUpdate('website_published', syncedPub.entry, syncedPub.revision);
         }
@@ -1501,11 +1581,13 @@ async function startServer() {
       version: synced.entry.version,
       revision: latestRevision,
       updatedAt: synced.entry.updatedAt,
-      updatedBy: synced.entry.updatedBy
+      updatedBy: synced.entry.updatedBy,
+      ...(peringatan.length ? { peringatan: peringatan.join(' ') } : {})
     });
   });
 
   app.delete('/api/sync/keys/:key', requireAuth, (req, res) => {
+    if (rejectStaleSyncIdentity(req, res)) return;
     const { key } = req.params;
     if (isLegacyRbacSyncKey(key)) {
       return res.status(410).json({
@@ -1541,6 +1623,7 @@ async function startServer() {
   });
 
   app.post('/api/sync/batch', requireAuth, (req, res) => {
+    if (rejectStaleSyncIdentity(req, res)) return;
     const body = (req.body || {}) as {
       updates?: Record<string, unknown>;
       deletes?: string[];
@@ -1600,11 +1683,11 @@ async function startServer() {
     const selfServiceKeys = Object.keys(sanitizedUpdates).filter((key) => key.startsWith('hris_'));
     if (
       selfServiceKeys.length > 0 &&
-      ['karyawan', 'sales_medrep', 'sales_manager'].includes(req.auth!.role.id)
+      SELF_SERVICE_ROLE_IDS.has(req.auth!.role.id)
     ) {
-      const employeeId = req.auth!.user.employeeId;
-      if (!employeeId || !employeeRecordExists(employeeId)) {
-        return res.status(403).json({ error: 'EMPLOYEE_LINK_REQUIRED', pesan: 'Akun belum ditautkan ke ID karyawan HRIS oleh admin.' });
+      const employeeId = verifiedEmployeeId(req.auth!);
+      if (!employeeId) {
+        return res.status(403).json({ error: 'EMPLOYEE_LINK_REQUIRED', pesan: 'Tautan ID karyawan tidak ditemukan atau tidak unik; hubungi admin.' });
       }
       const employeeName = String(getEmployeeRecord(employeeId)?.nama || '');
       for (const key of selfServiceKeys) {
@@ -1622,23 +1705,35 @@ async function startServer() {
       }
     }
 
+    for (const [key, value] of Object.entries(sanitizedUpdates)) {
+      if (key === 'website_published' && !adalahKonfigurasiSitus(value)) {
+        return res.status(400).json({
+          error: 'INVALID_WEBSITE_SNAPSHOT',
+          pesan: 'Snapshot website tidak lengkap atau tidak valid; batch tidak disimpan.'
+        });
+      }
+      const replacementError = validateHrisReplacement(req.auth!.role, key, dataSyncStore.getEntry(key)?.value, value);
+      if (replacementError) {
+        return res.status(403).json({ error: 'HRIS_REPLACEMENT_DENIED', pesan: replacementError });
+      }
+    }
+
     if (sanitizedUpdates.website_media_v1) {
       mediaStore.migrateLegacyMediaEntries(sanitizedUpdates.website_media_v1, req.auth!.user.username);
     }
 
-    if (sanitizedUpdates.website_published && adalahKonfigurasiSitus(sanitizedUpdates.website_published)) {
-      try {
-        const serialized = JSON.stringify(sanitizedUpdates.website_published, null, 2);
-        fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
-        fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
-        fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
-        fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
-      } catch {
-        /* lanjutkan penyimpanan batch */
-      }
+    let result: ReturnType<typeof dataSyncStore.setBatch>;
+    try {
+      result = dataSyncStore.setBatch(sanitizedUpdates, deletes, req.auth!.user.username);
+    } catch (error) {
+      console.error('[sync] Penyimpanan batch gagal.', error);
+      return res.status(500).json({ error: 'SYNC_WRITE_FAILED', pesan: 'Batch gagal disimpan di server.' });
     }
-
-    const result = dataSyncStore.setBatch(sanitizedUpdates, deletes, req.auth!.user.username);
+    const peringatan: string[] = [];
+    if (result.updated.website_published && !result.deleted.includes('website_published') &&
+        !tulisSalinanSnapshot(result.updated.website_published.value)) {
+      peringatan.push(PERINGATAN_SALINAN_SNAPSHOT);
+    }
     let latestRevision = result.revision;
     const sourceClientId =
       typeof body.clientId === 'string' && body.clientId
@@ -1677,16 +1772,8 @@ async function startServer() {
           req.auth!.user.fullName
         );
         if (merged) {
-          try {
-            const serialized = JSON.stringify(merged, null, 2);
-            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
-            fs.writeFileSync(BERKAS_SNAPSHOT, serialized, 'utf8');
-            fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
-            fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, serialized, 'utf8');
-          } catch {
-            /* abaikan */
-          }
           const syncedPub = dataSyncStore.setKey('website_published', merged, req.auth!.user.username);
+          if (!tulisSalinanSnapshot(merged)) peringatan.push(PERINGATAN_SALINAN_SNAPSHOT);
           latestRevision = Math.max(latestRevision, syncedPub.revision);
           broadcastSyncUpdate('website_published', syncedPub.entry, syncedPub.revision);
         }
@@ -1702,7 +1789,8 @@ async function startServer() {
       ok: true,
       revision: latestRevision,
       versions,
-      deleted: result.deleted
+      deleted: result.deleted,
+      ...(peringatan.length ? { peringatan: peringatan.join(' ') } : {})
     });
   });
 
@@ -1744,6 +1832,9 @@ async function startServer() {
     const deletes = Array.isArray(body.deletes) ? body.deletes : [];
 
     for (const key of [...Object.keys(updates), ...deletes]) {
+      if (typeof key !== 'string') {
+        return res.status(400).json({ error: 'INVALID_KEY', pesan: 'Kunci sinkronisasi harus berupa teks.' });
+      }
       if (isLegacyRbacSyncKey(key)) {
         return res.status(410).json({
           error: 'LEGACY_RBAC_REMOVED',
@@ -1752,6 +1843,29 @@ async function startServer() {
       }
       if (!isValidSyncKey(key)) {
         return res.status(400).json({ error: 'INVALID_KEY', pesan: `Kunci sinkronisasi tidak valid: ${key}` });
+      }
+      if (key === KUNCI_RFQ_WEBSITE) {
+        return res.status(403).json({ error: 'FORBIDDEN', pesan: 'Antrean RFQ website tidak dapat diubah melalui pemulihan data contoh.' });
+      }
+    }
+
+    for (const key of Object.keys(updates)) {
+      if (
+        isHrisPersonalSyncKey(key) &&
+        (!canReadSyncKey(req.auth!.role, 'hris_karyawan') || !canWriteSyncKey(req.auth!.role, key))
+      ) {
+        return res.status(403).json({ error: 'FORBIDDEN', pesan: `Peran Anda tidak dapat memulihkan atau mengubah data HRIS "${key}".` });
+      }
+    }
+    for (const key of deletes) {
+      if (isHrisPersonalSyncKey(key) && !canDeleteSyncKey(req.auth!.role, key)) {
+        return res.status(403).json({ error: 'FORBIDDEN', pesan: `Peran Anda tidak dapat menghapus data HRIS "${key}".` });
+      }
+    }
+    for (const [key, value] of Object.entries(updates)) {
+      const replacementError = validateHrisReplacement(req.auth!.role, key, dataSyncStore.getEntry(key)?.value, value);
+      if (replacementError) {
+        return res.status(403).json({ error: 'HRIS_REPLACEMENT_DENIED', pesan: replacementError });
       }
     }
 
@@ -1796,6 +1910,14 @@ async function startServer() {
   });
 
   app.post('/api/sync/reset', requirePermission('rbac-admin', 'delete'), (req, res) => {
+    const restrictedHrisKey = Object.keys(dataSyncStore.getAllState().entries)
+      .find((key) => isHrisPersonalSyncKey(key) && !canDeleteSyncKey(req.auth!.role, key));
+    if (restrictedHrisKey) {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        pesan: 'Reset seluruh data ditolak karena peran Anda tidak memiliki izin menghapus seluruh data HRIS.'
+      });
+    }
     const revision = dataSyncStore.resetAll();
     const sourceClientId =
       typeof (req.body as { clientId?: string } | undefined)?.clientId === 'string'
@@ -1878,9 +2000,16 @@ async function startServer() {
   const mirrorMediaToFirebaseAdmin = async (meta: StoredMediaMeta, bytes: Buffer) => {
     try {
       const adminDb = getFirebaseAdminDb();
-      if (!adminDb || bytes.length > 650_000) return;
+      if (!adminDb) return;
+      if (bytes.length > 650_000) {
+        console.warn('[media] File terlalu besar untuk dicadangkan ke Firebase Admin:', meta.id);
+        return;
+      }
       const dataUrl = encodeImageDataUrl(meta.contentType, bytes);
-      if (dataUrl.length > 980_000) return;
+      if (dataUrl.length > 980_000) {
+        console.warn('[media] File terlalu besar untuk dicadangkan ke Firebase Admin:', meta.id);
+        return;
+      }
       const now = new Date();
       await adminDb.collection('ams_media_assets').doc(meta.id).set({
         id: meta.id,
@@ -1896,8 +2025,8 @@ async function startServer() {
         updatedAt: now,
         ownerUid: 'server-admin'
       });
-    } catch {
-      /* penyimpanan disk tetap sukses walau mirror Firestore gagal sementara */
+    } catch (error) {
+      console.error('[media] File tersimpan di server, tetapi pencadangan Firebase Admin gagal:', meta.id, error);
     }
   };
 
@@ -2014,6 +2143,7 @@ async function startServer() {
     requireAuth,
     express.raw({ limit: '8mb', type: ['image/png', 'image/jpeg', 'image/webp'] }),
     (req, res) => {
+      if (rejectStaleSyncIdentity(req, res)) return;
       if (!canUploadMedia(req.auth!.role)) {
         rbacStore.recordAudit({
           actorUsername: req.auth!.user.username,
@@ -2093,26 +2223,37 @@ async function startServer() {
         const sourceClientId =
           typeof req.headers['x-sync-client-id'] === 'string' ? req.headers['x-sync-client-id'] : undefined;
 
-        broadcastMessage(
-          {
-            type: 'media:uploaded',
-            media: meta,
-            url: `/api/website/media/${encodeURIComponent(meta.id)}`,
-            revision: dataSyncStore.getRevision(),
-            sourceClientId: sourceClientId || null
-          },
-          meta.visibility === 'public'
-        );
+        const peringatan: string[] = [];
+        try {
+          broadcastMessage(
+            {
+              type: 'media:uploaded',
+              media: meta,
+              url: `/api/website/media/${encodeURIComponent(meta.id)}`,
+              revision: dataSyncStore.getRevision(),
+              sourceClientId: sourceClientId || null
+            },
+            meta.visibility === 'public'
+          );
+        } catch (error) {
+          console.error('[media] File tersimpan, tetapi siaran realtime gagal:', meta.id, error);
+          peringatan.push('Foto tersimpan di server, tetapi siaran realtime gagal. Pengunjung mungkin perlu memuat ulang.');
+        }
 
-        rbacStore.recordAudit({
-          actorUsername: req.auth!.user.username,
-          actorRole: req.auth!.role.id,
-          action: 'MEDIA_UPLOADED',
-          resource: `media:${meta.scope}`,
-          status: 'ALLOWED',
-          ip: getClientIp(req),
-          detail: `Foto "${meta.filename}" (${meta.contentType}, ${meta.size} byte) disimpan sebagai file server ID ${meta.id}.`
-        });
+        try {
+          rbacStore.recordAudit({
+            actorUsername: req.auth!.user.username,
+            actorRole: req.auth!.role.id,
+            action: 'MEDIA_UPLOADED',
+            resource: `media:${meta.scope}`,
+            status: 'ALLOWED',
+            ip: getClientIp(req),
+            detail: `Foto "${meta.filename}" (${meta.contentType}, ${meta.size} byte) disimpan sebagai file server ID ${meta.id}.`
+          });
+        } catch (error) {
+          console.error('[media] File tersimpan, tetapi audit server gagal:', meta.id, error);
+          peringatan.push('Foto tersimpan di server, tetapi audit server gagal. Hubungi administrator.');
+        }
 
         void mirrorMediaToFirebaseAdmin(meta, savedBytes);
 
@@ -2121,7 +2262,8 @@ async function startServer() {
           id: meta.id,
           url: `/api/website/media/${encodeURIComponent(meta.id)}`,
           fileUrl: `/api/media/${encodeURIComponent(meta.id)}`,
-          media: meta
+          media: meta,
+          ...(peringatan.length ? { peringatan: peringatan.join(' ') } : {})
         });
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Gagal menyimpan file gambar di server.';
@@ -2190,8 +2332,68 @@ async function startServer() {
 
   app.get('/api/website/published', (req, res) => {
     const snapshot = bacaSnapshot();
-    if (!snapshot) return res.status(404).json({ pesan: 'Belum ada konten situs yang diterbitkan.' });
+    if (!snapshot) {
+      return res.status(404).set('Cache-Control', 'no-store').json({
+        error: 'WEBSITE_NOT_PUBLISHED',
+        pesan: 'Belum ada konten situs yang diterbitkan.'
+      });
+    }
     res.set('Cache-Control', 'no-store').json({ config: snapshot });
+  });
+
+  const rfqHits = new Map<string, { count: number; reset: number }>();
+  app.post('/api/website/rfq', (req, res) => {
+    const sekarang = Date.now();
+    const ip = req.ip || req.socket.remoteAddress || 'tidak-diketahui';
+    let hit = rfqHits.get(ip);
+    if (!hit || hit.reset <= sekarang) {
+      for (const [kunci, entri] of rfqHits) {
+        if (entri.reset <= sekarang) rfqHits.delete(kunci);
+      }
+      if (rfqHits.size >= 10000) {
+        return res.status(503).json({ pesan: 'Layanan permintaan sedang sibuk. Coba lagi nanti.' });
+      }
+      hit = { count: 0, reset: sekarang + 15 * 60 * 1000 };
+      rfqHits.set(ip, hit);
+    }
+    if (hit.count >= 20) {
+      return res.status(429).json({ pesan: 'Terlalu banyak permintaan. Coba lagi beberapa menit.' });
+    }
+    hit.count += 1;
+
+    const snapshot = bacaSnapshot();
+    if (!snapshot || snapshot.isPublished !== true) {
+      return res.status(503).json({ pesan: 'Formulir permintaan belum tersedia. Hubungi tim penjualan melalui surel atau WhatsApp.' });
+    }
+    const hasil = buatProspekWebsite(req.body);
+    if (!hasil.ok) return res.status(400).json({ pesan: hasil.pesan });
+
+    const tersimpan = dataSyncStore.getEntry(KUNCI_RFQ_WEBSITE)?.value;
+    if (tersimpan !== undefined && !Array.isArray(tersimpan)) {
+      console.error('[website-rfq] Antrean RFQ server tidak berbentuk daftar.');
+      return res.status(503).json({ pesan: 'Penyimpanan permintaan tidak tersedia. Hubungi tim penjualan melalui surel atau WhatsApp.' });
+    }
+    const daftar: ProspekAlkes[] = tersimpan ?? [];
+    const sebelumnya = daftar.find((item) => item?.id === hasil.prospek.id);
+    if (sebelumnya) {
+      if (!samaPermintaanWebsite(sebelumnya, hasil.prospek)) {
+        return res.status(409).json({ pesan: 'ID permintaan sudah digunakan untuk isian lain. Muat ulang formulir sebelum mencoba lagi.' });
+      }
+      return res.set('Cache-Control', 'no-store').json({ ok: true, nomorProspek: sebelumnya.nomorProspek });
+    }
+    let synced: ReturnType<typeof dataSyncStore.setKey>;
+    try {
+      synced = dataSyncStore.setKey(KUNCI_RFQ_WEBSITE, [hasil.prospek, ...daftar], 'website-public');
+    } catch (error) {
+      console.error('[website-rfq] Permintaan gagal disimpan.', error);
+      return res.status(500).json({ pesan: 'Permintaan belum dapat disimpan. Coba lagi atau gunakan surel/WhatsApp.' });
+    }
+    try {
+      broadcastSyncUpdate(KUNCI_RFQ_WEBSITE, synced.entry, synced.revision);
+    } catch (error) {
+      console.error('[website-rfq] Permintaan tersimpan, tetapi siaran realtime gagal.', error);
+    }
+    return res.status(201).set('Cache-Control', 'no-store').json({ ok: true, nomorProspek: hasil.prospek.nomorProspek });
   });
 
   const translationHits = new Map<string, { count: number; reset: number }>();
@@ -2289,37 +2491,43 @@ async function startServer() {
           pesan: `Akses ditolak: peran "${req.auth.role.name}" tidak memiliki izin "publish" pada modul website.`
         });
       }
+      if (rejectStaleSyncIdentity(req, res)) return;
     }
     if (!dapatPosting(req.ip ?? 'tidak-diketahui')) {
       return res.status(429).json({ pesan: 'Terlalu banyak percobaan publikasi. Coba lagi 15 menit.' });
     }
     const kandidat = ((req.body as Record<string, any> | undefined)?.config ?? req.body) as unknown;
     if (!adalahKonfigurasiSitus(kandidat)) {
-      return res.status(400).json({ pesan: 'Bentuk konfigurasi situs tidak valid (identitas.nama dan hero.judul wajib ada).' });
+      return res.status(400).json({ error: 'INVALID_WEBSITE_SNAPSHOT', pesan: 'Konfigurasi situs tidak lengkap atau tidak valid.' });
     }
+    const pelaku = req.auth ? req.auth.user.fullName : 'Admin Token API';
+    const terautentikasi: Record<string, unknown> = { ...kandidat, lastModifiedBy: pelaku };
+    const isian = JSON.stringify(terautentikasi, null, 2);
+    let synced: ReturnType<typeof dataSyncStore.setKey>;
     try {
-      const pelaku = req.auth ? req.auth.user.fullName : 'Admin Token API';
-      const terautentikasi: Record<string, any> = {
-        ...(kandidat as Record<string, any>),
-        lastModifiedBy: pelaku
-      };
-      const isian = JSON.stringify(terautentikasi, null, 2);
-      fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT), { recursive: true });
-      fs.writeFileSync(BERKAS_SNAPSHOT, isian, 'utf8');
-      // Salinan public/ ikut terbawa ke dist/ saat build → situs tetap tayang di hosting statis.
-      fs.mkdirSync(path.dirname(BERKAS_SNAPSHOT_STATIS), { recursive: true });
-      fs.writeFileSync(BERKAS_SNAPSHOT_STATIS, isian, 'utf8');
-      const synced = dataSyncStore.setKey(
+      synced = dataSyncStore.setKey(
         'website_published',
         terautentikasi,
         req.auth ? req.auth.user.username : 'admin-token'
       );
+    } catch (error) {
+      console.error('[website] Gagal menyimpan snapshot.', error);
+      return res.status(500).json({ pesan: 'Snapshot gagal ditulis ke penyimpanan server.' });
+    }
+    const peringatan: string[] = [];
+    if (!tulisSalinanSnapshot(terautentikasi)) peringatan.push(PERINGATAN_SALINAN_SNAPSHOT);
+    try {
       broadcastSyncUpdate(
         'website_published',
         synced.entry,
         synced.revision,
         typeof req.headers['x-sync-client-id'] === 'string' ? req.headers['x-sync-client-id'] : undefined
       );
+    } catch (error) {
+      console.error('[website] Snapshot tersimpan, tetapi siaran realtime gagal.', error);
+      peringatan.push('Siaran realtime gagal; pengunjung mungkin perlu memuat ulang halaman.');
+    }
+    try {
       rbacStore.recordAudit({
         actorUsername: req.auth ? req.auth.user.username : 'admin-token',
         actorRole: req.auth ? req.auth.role.id : 'system',
@@ -2331,16 +2539,20 @@ async function startServer() {
           ? 'Snapshot situs publik diterbitkan ke server.'
           : 'Penayangan situs publik ditahan di server.'
       });
-      res.json({
-        ok: true,
-        disimpanPada: new Date().toISOString(),
-        oleh: pelaku,
-        revision: synced.revision,
-        byte: Buffer.byteLength(isian)
-      });
-    } catch {
-      res.status(500).json({ pesan: 'Snapshot gagal ditulis ke penyimpanan server.' });
+    } catch (error) {
+      console.error('[website] Snapshot tersimpan, tetapi audit server gagal disimpan.', error);
+      peringatan.push('Audit server gagal disimpan; hubungi administrator.');
     }
+    return res.json({
+      ok: true,
+      disimpanPada: new Date().toISOString(),
+      oleh: pelaku,
+      revision: synced.revision,
+      version: synced.entry.version,
+      config: terautentikasi,
+      ...(peringatan.length ? { peringatan: peringatan.join(' ') } : {}),
+      byte: Buffer.byteLength(isian)
+    });
   });
 
   // Vite middleware in dev or static files in production

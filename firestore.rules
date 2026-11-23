@@ -81,11 +81,12 @@ service cloud.firestore {
 
     function isValidRbacUser(data) {
       return data.keys().hasAll(['id', 'username', 'fullName', 'email', 'roleId', 'department', 'isActive', 'isHiddenDeveloper', 'passwordHash', 'createdAt', 'updatedAt', 'ownerUid'])
-        && data.keys().hasOnly(['id', 'username', 'fullName', 'email', 'roleId', 'department', 'isActive', 'isHiddenDeveloper', 'passwordHash', 'createdAt', 'updatedAt', 'ownerUid'])
+        && data.keys().hasOnly(['id', 'username', 'fullName', 'email', 'employeeId', 'roleId', 'department', 'isActive', 'isHiddenDeveloper', 'passwordHash', 'createdAt', 'updatedAt', 'ownerUid'])
         && isValidId(data.id)
         && data.username is string && data.username.size() >= 3 && data.username.size() <= 32 && data.username.matches('^[a-z0-9._-]+$')
         && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 120
         && data.email is string && data.email.size() <= 160
+        && (!('employeeId' in data) || (data.employeeId is string && data.employeeId.size() <= 128))
         && data.roleId is string && data.roleId.size() >= 1 && data.roleId.size() <= 64
         && data.department is string && data.department.size() <= 120
         && data.isActive is bool
@@ -232,7 +233,7 @@ service cloud.firestore {
         && incoming().isHiddenDeveloper == existing().isHiddenDeveloper
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'fullName', 'email', 'roleId', 'department', 'isActive', 'passwordHash', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'fullName', 'email', 'employeeId', 'roleId', 'department', 'isActive', 'passwordHash', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(userId) && existing().isHiddenDeveloper == false;
     }
 

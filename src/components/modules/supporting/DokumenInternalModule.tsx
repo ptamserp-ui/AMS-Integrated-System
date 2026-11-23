@@ -898,6 +898,7 @@ export default function DokumenInternalModule({
       };
       setIdentitas(next);
       simpanIdentitasKop(next);
+      if (hasil.peringatan) setPesanStatus({ ok: false, teks: hasil.peringatan });
     } catch (err) {
       setPesanStatus({
         ok: false,

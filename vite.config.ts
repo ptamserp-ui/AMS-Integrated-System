@@ -7,20 +7,25 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { defineConfig } from 'vite';
+import { join, resolve } from 'path';
+import { defineConfig, type ResolvedConfig } from 'vite';
 import { fileURLToPath } from 'url';
 
 /** Hosting statis Sites hanya melayani `/web/`, jadi `/web` dan `/mobile` dibuat explisit. */
 function salinHalamanWeb() {
+  let out = '';
   return {
     name: 'situs-web-index',
     apply: 'build' as const,
+    configResolved(config: ResolvedConfig) {
+      out = resolve(config.root, config.build.outDir);
+    },
     closeBundle() {
-      const out = fileURLToPath(new URL('./dist/', import.meta.url));
-      mkdirSync(`${out}web`, { recursive: true });
-      writeFileSync(`${out}web/index.html`, readFileSync(`${out}index.html`));
-      mkdirSync(`${out}mobile`, { recursive: true });
-      writeFileSync(`${out}mobile/index.html`, readFileSync(`${out}index.html`));
+      const index = readFileSync(join(out, 'index.html'));
+      mkdirSync(join(out, 'web'), { recursive: true });
+      writeFileSync(join(out, 'web', 'index.html'), index);
+      mkdirSync(join(out, 'mobile'), { recursive: true });
+      writeFileSync(join(out, 'mobile', 'index.html'), index);
     }
   };
 }

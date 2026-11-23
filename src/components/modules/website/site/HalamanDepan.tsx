@@ -8,7 +8,6 @@ import type { KonfigurasiSitus } from '../../../../types';
 import type { SesiLogin } from '../../../../utils/autentikasi';
 import {
   bacaSnapshotInline,
-  bacaWebsiteTerbitLokal,
   punyaDataOperasionalLokal
 } from '../../../../utils/websitePrimitives';
 import PublicWebsite from './PublicWebsite';
@@ -26,15 +25,7 @@ function bacaBerandaAwalSinkron(): {
   statusTayang: 'tayang' | 'belum' | 'tahan';
   status: StatusMuat;
 } {
-  const inline = bacaSnapshotInline();
-  const lokal = bacaWebsiteTerbitLokal();
-  const terpilih =
-    inline && lokal
-      ? Math.max(lokal.lastPublishedAt ?? 0, lokal.lastModifiedAt ?? 0) >=
-        Math.max(inline.lastPublishedAt ?? 0, inline.lastModifiedAt ?? 0)
-        ? lokal
-        : inline
-      : inline ?? lokal;
+  const terpilih = bacaSnapshotInline();
   if (!terpilih) {
     return { konfigurasi: null, statusTayang: 'belum', status: 'memuat' };
   }
@@ -63,13 +54,18 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
     let publicWs: WebSocket | null = null;
     let publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let diketahuiRevision = 0;
+    let urutanMuat = 0;
 
     const muat = () => {
+      const urutan = ++urutanMuat;
       tentukanKontenTayang().then(({ konfigurasi: isi, status: st }) => {
-        if (batal) return;
+        if (batal || urutan !== urutanMuat) return;
         setKonfigurasiDasar(isi);
         setStatusTayang(st);
         setStatus('selesai');
+      }).catch((error: unknown) => {
+        console.error('Gagal memuat halaman depan:', error);
+        if (!batal && urutan === urutanMuat) setStatus('selesai');
       });
     };
 
@@ -153,6 +149,7 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
       }
     };
 
+    pasangWsPublikRingan();
     if (punyaDataOperasionalLokal()) {
       void import('../../../../services/pocketbase').then(async ({ db }) => {
         if (batal) return;
@@ -162,8 +159,6 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
         db.connectRealtimeSync(null);
         berhentiTerbit = db.subscribeKoleksi(['website_published'], muat);
       });
-    } else {
-      pasangWsPublikRingan();
     }
 
     return () => {

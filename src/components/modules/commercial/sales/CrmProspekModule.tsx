@@ -43,6 +43,7 @@ export default function CrmProspekModule({
   const dbTick = useDbTick([
     'sales_pelanggan',
     'sales_prospek',
+    'sales_website_rfq',
     'sales_teritorial',
     'sales_kunjungan',
     'penjualan'

@@ -357,13 +357,12 @@ export async function pushSyncEntryToFirestore(
   updatedBy: string
 ): Promise<void> {
   const user = authFirebase.currentUser;
-  if (!user || !user.emailVerified) return;
-  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(key)) return;
+  if (!user || !user.emailVerified) throw new Error('Akun Google Firebase terverifikasi tidak terhubung.');
+  if (!/^[a-zA-Z0-9_-]{1,80}$/.test(key)) throw new Error('Kunci koleksi Firebase tidak valid.');
 
   const wrapped = { payload: sanitizeFirestoreValue(value) };
   if (estimatePayloadBytes(wrapped) > MAX_DOC_BYTES) {
-    console.warn(`[Firebase] Koleksi "${key}" melewati 920 KB, dilewati agar aman dari batas 1 MiB Firestore.`);
-    return;
+    throw new Error(`Koleksi "${key}" melewati 920 KB dan belum dapat dicadangkan ke Firebase.`);
   }
 
   const path = `ams_sync_entries/${key}`;
@@ -607,6 +606,31 @@ export interface CloudPulledState {
     config: Record<string, unknown>;
     archivedAt: string;
   };
+}
+
+export async function hydrateCloudStateOnServer(cloud: CloudPulledState, idToken: string, token?: string): Promise<void> {
+  const response = await fetch('/api/firebase/hydrate', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({
+      idToken,
+      roles: cloud.roles,
+      users: cloud.users,
+      entries: cloud.entries,
+      activeDriver: cloud.pocketbaseArchive?.driver,
+      pocketbaseArchive: cloud.pocketbaseArchive?.config
+    })
+  });
+  const result = await response.json().catch(() => null) as { ok?: unknown; pesan?: unknown; peringatan?: unknown } | null;
+  if (!response.ok || result?.ok !== true) {
+    const detail = typeof result?.pesan === 'string' ? ` ${result.pesan}` : '';
+    throw new Error(`Pemulihan data Firebase ke server gagal (HTTP ${response.status}).${detail}`);
+  }
+  if (typeof result.peringatan === 'string') console.warn('[firebase-hydrate] ' + result.peringatan);
 }
 
 export async function pullAllCloudStateFromFirestore(): Promise<CloudPulledState> {

@@ -1912,7 +1912,9 @@ export class ServerRbacStore {
               username: incomingUser.username.toLowerCase(),
               fullName: incomingUser.fullName,
               email: incomingUser.email || this.state.users[idx].email,
-              ...(incomingUser.employeeId ? { employeeId: incomingUser.employeeId } : {}),
+              ...(typeof incomingUser.employeeId === 'string'
+                ? { employeeId: incomingUser.employeeId.trim() || undefined }
+                : {}),
               roleId: incomingUser.roleId,
               department: incomingUser.department || this.state.users[idx].department,
               isActive: incomingUser.isActive !== false,

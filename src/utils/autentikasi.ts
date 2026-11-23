@@ -280,35 +280,27 @@ export async function masukDenganGoogleFirebaseServer(): Promise<
       import('../services/firebase'),
       import('../services/pocketbase')
     ]);
-    const { signInWithGoogleFirebase, pullAllCloudStateFromFirestore } = firebaseMod;
+    const { signInWithGoogleFirebase, pullAllCloudStateFromFirestore, hydrateCloudStateOnServer } = firebaseMod;
     const { db } = pbMod;
     const { idToken } = await signInWithGoogleFirebase();
 
     // Pulihkan state dari Firestore lebih dulu agar container re-publish langsung memiliki user/roles/app-state terbaru
-    try {
-      const cloud = await pullAllCloudStateFromFirestore();
-      if (
-        Object.keys(cloud.entries).length > 0 ||
-        cloud.roles.length > 0 ||
-        cloud.users.length > 0 ||
-        cloud.pocketbaseArchive
-      ) {
-        await fetch('/api/firebase/hydrate', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            idToken,
-            roles: cloud.roles,
-            users: cloud.users,
-            entries: cloud.entries,
-            activeDriver: cloud.pocketbaseArchive?.driver,
-            pocketbaseArchive: cloud.pocketbaseArchive?.config
-          })
-        });
+    if (db.hasPendingOfflineChanges()) {
+      console.warn('Pemulihan Firebase ditunda karena browser masih memiliki perubahan offline.');
+    } else {
+      try {
+        const cloud = await pullAllCloudStateFromFirestore();
+        if (
+          Object.keys(cloud.entries).length > 0 ||
+          cloud.roles.length > 0 ||
+          cloud.users.length > 0 ||
+          cloud.pocketbaseArchive
+        ) {
+          await hydrateCloudStateOnServer(cloud, idToken);
+        }
+      } catch (error) {
+        console.warn('Pemulihan Firebase sebelum login gagal; login dilanjutkan dan status sinkronisasi perlu diperiksa.', error);
       }
-    } catch {
-      /* bila Firestore masih kosong pada pemakaian pertama, lanjutkan login & push awal setelah sesi terbit */
     }
 
     const res = await fetch('/api/auth/firebase-login', {
@@ -326,7 +318,9 @@ export async function masukDenganGoogleFirebaseServer(): Promise<
     }
     const sesi = petakanPayloadKeSesi(data as AuthResponsePayload);
     simpanSesi(sesi);
-    void db.syncWithFirebaseCloud();
+    void db.syncWithFirebaseCloud().then((result) => {
+      if (!result.ok) console.warn(result.pesan);
+    });
     return { ok: true, sesi };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -382,6 +376,10 @@ export async function keluarDariServer(): Promise<{ ok: boolean; pesan?: string 
       if (results[0].status === 'fulfilled' && results[0].value.remaining > 0) {
         sinkronBerhasil = false;
         console.warn('Masih ada perubahan yang belum tersinkron sebelum keluar.');
+      }
+      if (db.hasPendingOfflineChanges()) {
+        sinkronBerhasil = false;
+        console.warn('Perubahan atau media offline masih tersimpan pada browser.');
       }
       db.resetSessionSyncState();
     } catch (error) {

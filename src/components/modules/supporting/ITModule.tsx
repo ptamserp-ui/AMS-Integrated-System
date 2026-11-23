@@ -445,6 +445,9 @@ VITE_FIREBASE_ADMIN_EMAIL=ptams.erp@gmail.com`,
       setConnStatus(db.getConnectionStatus());
       setModalPurge(null);
       setTimeout(() => setExportNotice(null), 7000);
+    } catch (error) {
+      console.error('Gagal menjalankan tindakan data:', error);
+      setExportNotice(error instanceof Error ? error.message : 'Tindakan data gagal. Hubungi administrator.');
     } finally {
       setSedangMemprosesPurge(false);
     }

@@ -7,7 +7,7 @@
  * Tidak ada teks konten yang hard-code di sini: seluruhnya dibaca dari KonfigurasiSitus
  * yang dikelola lewat dashboard menu Website.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowRight,
   BadgeCheck,
@@ -31,8 +31,9 @@ import {
   Sparkles,
   Trash2
 } from 'lucide-react';
-import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite, ProspekAlkes, TautanWebsite, TipeFasyankes } from '../../../../types';
+import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite, TautanWebsite, TipeFasyankes } from '../../../../types';
 import { cocokKategoriProduk, hrefTautan, selesaikanGambar } from '../../../../utils/websitePrimitives';
+import { siapkanPermintaanRfq, type PermintaanRfqSesi } from '../../../../utils/websiteRfq';
 import { SeksiProdukPublik, type ItemRfqPublik } from './PublicCatalogSection';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
@@ -41,6 +42,7 @@ export type { ItemRfqPublik };
 export interface PropsSeksi {
   cfg: KonfigurasiSitus;
   cfgAsli?: KonfigurasiSitus;
+  pratinjau?: boolean;
   ke: (halaman: HalamanWebsite, kategoriKey?: string) => void;
   /** jumlah kartu produk maksimal (dibatasi di beranda, penuh di halaman Produk) */
   batasProduk?: number;
@@ -847,6 +849,7 @@ const OPSI_JALUR_PENGADAAN = [
 export function SeksiKontak({
   cfg,
   ke,
+  pratinjau = false,
   daftarRfq = [],
   onUbahJumlahRfq,
   onHapusRfq,
@@ -863,8 +866,31 @@ export function SeksiKontak({
   const [subjek, setSubjek] = useState('');
   const [pesan, setPesan] = useState('');
   const [galatForm, setGalatForm] = useState('');
-  const [nomorTercatat, setNomorTercatat] = useState<string | null>(null);
+  const [nomorTercatat, setNomorTercatat] = useState<{ nomor: string; sidikIsi: string } | null>(null);
   const [tersalin, setTersalin] = useState(false);
+  const [sedangMengirim, setSedangMengirim] = useState(false);
+  const mengirimRef = useRef(false);
+  const permintaanRef = useRef<PermintaanRfqSesi | null>(null);
+
+  const isiPermintaan = {
+    namaInstansi,
+    tipeInstansi,
+    namaPemohon,
+    kontakPemohon,
+    jalurPengadaan,
+    subjek,
+    pesan,
+    produk: daftarRfq.map((item) => ({
+      nama: item.nama,
+      tipeModel: item.tipeModel ?? '',
+      produsen: item.produsen ?? '',
+      satuan: item.satuan || 'Unit',
+      jumlah: item.jumlah
+    }))
+  };
+  const sidikIsiSaatIni = JSON.stringify(isiPermintaan);
+  const sidikIsiTerkini = useRef(sidikIsiSaatIni);
+  sidikIsiTerkini.current = sidikIsiSaatIni;
 
   const subjekOtomatis = useMemo(() => {
     if (subjek.trim()) return subjek.trim();
@@ -911,6 +937,7 @@ export function SeksiKontak({
     : hrefTautan({ tipe: 'whatsapp', nilai: kontak.whatsapp }, kontak);
 
   const catatPermintaanKeSistem = async () => {
+    if (pratinjau || mengirimRef.current) return;
     setGalatForm('');
     if (!namaInstansi.trim()) {
       setGalatForm('Mohon isi nama instansi, rumah sakit, klinik, atau perusahaan pemohon.');
@@ -925,40 +952,47 @@ export function SeksiKontak({
       return;
     }
 
-    const sekarang = new Date();
-    const tglIso = sekarang.toISOString().split('T')[0];
-    const tindakLanjut = new Date(sekarang.getTime() + 2 * 86400000).toISOString().split('T')[0];
-    const kodeRfq = `WEB-RFQ-${sekarang.getFullYear()}${String(sekarang.getMonth() + 1).padStart(2, '0')}-${String(
-      Math.floor(100 + Math.random() * 900)
-    )}`;
+    const sidikIsi = sidikIsiSaatIni;
+    mengirimRef.current = true;
+    setSedangMengirim(true);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 15000);
+    try {
+      permintaanRef.current = await siapkanPermintaanRfq(sidikIsi, permintaanRef.current);
+      const jawaban = await fetch('/api/website/rfq', {
+        method: 'POST',
+        credentials: 'omit',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...isiPermintaan, requestId: permintaanRef.current.id }),
+        signal: controller.signal
+      });
+      const hasil = (await jawaban.json().catch(() => null)) as { nomorProspek?: unknown; pesan?: unknown } | null;
+      if (!jawaban.ok) {
+        setGalatForm(typeof hasil?.pesan === 'string' ? hasil.pesan : 'Permintaan belum dapat disimpan. Coba lagi atau gunakan surel/WhatsApp.');
+        return;
+      }
+      if (typeof hasil?.nomorProspek !== 'string' || !hasil.nomorProspek) {
+        setGalatForm(pesanStatusTidakPasti(sidikIsi));
+        return;
+      }
+      setNomorTercatat({ nomor: hasil.nomorProspek, sidikIsi });
+    } catch (error) {
+      console.error('Gagal memastikan pengiriman permintaan penawaran:', error);
+      setGalatForm(pesanStatusTidakPasti(sidikIsi));
+    } finally {
+      window.clearTimeout(timer);
+      mengirimRef.current = false;
+      setSedangMengirim(false);
+    }
+  };
 
-    const ringkasanProduk =
-      daftarRfq.length > 0
-        ? daftarRfq.map((i) => `${i.nama} (${i.jumlah} ${i.satuan})`).join(', ')
-        : subjekOtomatis;
-
-    const prospekBaru: ProspekAlkes = {
-      id: `PRSP-${Date.now()}`,
-      nomorProspek: kodeRfq,
-      namaProspek: namaInstansi.trim(),
-      tipeFasyankes: tipeInstansi,
-      sumberLead: 'Situs Web',
-      tahap: 'Penawaran Resmi',
-      produkDiminati: ringkasanProduk,
-      nilaiEstimasi: 0,
-      probabilitasPersen: 50,
-      medRep: 'Tim Komersial Pusat',
-      rayonDistribusi: 'Nasional (Situs Publik)',
-      tanggalDibuat: tglIso,
-      tanggalTindakLanjut: tindakLanjut,
-      catatan: `Pemohon: ${namaPemohon.trim() || '-'} (${kontakPemohon.trim()}) | Jalur: ${jalurPengadaan}${
-        pesan.trim() ? ` | Catatan: ${pesan.trim()}` : ''
-      }`
-    };
-
-    const { db } = await import('../../../../services/pocketbase');
-    db.addProspek(prospekBaru);
-    setNomorTercatat(kodeRfq);
+  const pesanStatusTidakPasti = (sidikIsi: string) => {
+    if (sidikIsiTerkini.current !== sidikIsi) {
+      return 'Status permintaan sebelumnya belum dapat dipastikan dan isian telah berubah. Hubungi tim penjualan sebelum mengirim ulang.';
+    }
+    return permintaanRef.current?.isi === sidikIsi && permintaanRef.current.tersimpanDiSesi
+      ? 'Status pengiriman belum dapat dipastikan. Coba kirim lagi tanpa mengubah isi formulir.'
+      : 'Status pengiriman belum dapat dipastikan. Jangan muat ulang atau tutup halaman; coba kirim lagi tanpa mengubah isi formulir.';
   };
 
   const salinRingkasan = async () => {
@@ -966,8 +1000,10 @@ export function SeksiKontak({
       await navigator.clipboard.writeText(`${subjekOtomatis}\n\n${isiRfqTerformat}`);
       setTersalin(true);
       window.setTimeout(() => setTersalin(false), 2500);
-    } catch {
+    } catch (error) {
+      console.error('Gagal menyalin ringkasan RFQ:', error);
       setTersalin(false);
+      setGalatForm('Teks permintaan tidak dapat disalin. Gunakan surel atau WhatsApp untuk meneruskannya.');
     }
   };
 
@@ -1100,20 +1136,28 @@ export function SeksiKontak({
               <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
               <div className="text-xs text-emerald-950">
                 <p className="font-bold">
-                  {t('Permintaan penawaran tercatat dengan nomor referensi')}{' '}
-                  <span className="font-mono">{nomorTercatat}</span>
+                  {t(nomorTercatat.sidikIsi === sidikIsiSaatIni
+                    ? 'Permintaan penawaran tercatat dengan nomor referensi'
+                    : 'Permintaan sebelumnya tercatat dengan nomor referensi')}{' '}
+                  <span className="font-mono">{nomorTercatat.nomor}</span>
                 </p>
                 <p className="text-emerald-800 mt-0.5 leading-relaxed">
-                  {t('Data kebutuhan Anda telah masuk ke antrean prospek komersial untuk diverifikasi PJT. Anda juga dapat langsung meneruskan salinan ke surel atau WhatsApp tim penjualan di bawah.')}
+                  {t(nomorTercatat.sidikIsi === sidikIsiSaatIni
+                    ? 'Data kebutuhan Anda telah masuk ke antrean prospek komersial untuk diverifikasi PJT. Anda juga dapat langsung meneruskan salinan ke surel atau WhatsApp tim penjualan di bawah.'
+                    : 'Isian formulir telah berubah; perubahan tersebut belum dikirim. Periksa dan kirim kembali jika diperlukan.')}
                 </p>
               </div>
             </div>
           )}
 
           {galatForm && (
-            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
-              {galatForm}
+            <p role="alert" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
+              {t(galatForm)}
             </p>
+          )}
+
+          {pratinjau && (
+            <p className="mt-4 text-xs text-slate-600">{t('Pratinjau: permintaan tidak dikirim ke tim penjualan.')}</p>
           )}
 
           <div className="mt-4 space-y-3">
@@ -1124,6 +1168,7 @@ export function SeksiKontak({
                 </label>
                 <input
                   id="web-instansi"
+                  maxLength={160}
                   value={namaInstansi}
                   onChange={(e) => {
                     setNamaInstansi(e.target.value);
@@ -1159,6 +1204,7 @@ export function SeksiKontak({
                 </label>
                 <input
                   id="web-pemohon"
+                  maxLength={160}
                   value={namaPemohon}
                   onChange={(e) => setNamaPemohon(e.target.value)}
                   placeholder={t('Contoh: apt. Rina, S.Farm (Instalasi Farmasi)')}
@@ -1171,6 +1217,7 @@ export function SeksiKontak({
                 </label>
                 <input
                   id="web-kontak-pemohon"
+                  maxLength={160}
                   value={kontakPemohon}
                   onChange={(e) => {
                     setKontakPemohon(e.target.value);
@@ -1206,6 +1253,7 @@ export function SeksiKontak({
                 </label>
                 <input
                   id="web-subjek"
+                  maxLength={200}
                   value={subjek}
                   onChange={(e) => setSubjek(e.target.value)}
                   placeholder={subjekOtomatis}
@@ -1220,6 +1268,7 @@ export function SeksiKontak({
               </label>
               <textarea
                 id="web-pesan"
+                maxLength={4000}
                 value={pesan}
                 onChange={(e) => {
                   setPesan(e.target.value);
@@ -1235,10 +1284,11 @@ export function SeksiKontak({
               <button
                 type="button"
                 onClick={catatPermintaanKeSistem}
-                className="inline-flex items-center gap-2 whitespace-nowrap px-4 py-2.5 rounded-full bg-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_85%,black)] text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+                disabled={pratinjau || sedangMengirim}
+                className="inline-flex items-center gap-2 whitespace-nowrap px-4 py-2.5 rounded-full bg-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_85%,black)] text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Send className="w-4 h-4" />
-                {t('Kirim Permintaan Penawaran')}
+                {t(sedangMengirim ? 'Mengirim permintaan…' : 'Kirim Permintaan Penawaran')}
               </button>
               <a
                 href={tautanMailto}

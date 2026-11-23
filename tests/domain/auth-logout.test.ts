@@ -7,6 +7,7 @@ vi.mock('../../src/services/firebase', () => ({ signOutFirebase: vi.fn() }));
 vi.mock('../../src/services/pocketbase', () => ({
   db: {
     flushPendingSync: vi.fn().mockResolvedValue({ synced: 0, remaining: 0 }),
+    hasPendingOfflineChanges: vi.fn().mockReturnValue(false),
     resetSessionSyncState: vi.fn()
   }
 }));
@@ -74,6 +75,15 @@ describe('logout', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][1].headers.get('Authorization')).toBe('Bearer test-token');
     expect(signOutFirebase).toHaveBeenCalledOnce();
+    expect(bacaSesi()).toBeNull();
+  });
+
+  it('memperingatkan jika masih ada media atau perubahan offline saat keluar', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    vi.mocked(db.hasPendingOfflineChanges).mockReturnValueOnce(true);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(await keluarDariServer()).toMatchObject({ ok: false, pesan: expect.stringContaining('sinkronisasi') });
     expect(bacaSesi()).toBeNull();
   });
 });

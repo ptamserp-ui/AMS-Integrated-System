@@ -25,6 +25,7 @@ import LogoAplikasi, {
 } from '../common/LogoAplikasi';
 import KartuMasuk from '../modules/website/site/KartuMasuk';
 import ErrorBoundary from '../common/ErrorBoundary';
+import SyncAccessHold, { useSyncHoldReason } from '../common/SyncAccessHold';
 import { OfflineIndicator } from '../pwa/OfflineIndicator';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
 import { MobileAbsensiView } from './MobileAbsensiView';
@@ -54,6 +55,7 @@ const KOLEKSI_MOBILE_SINKRON = [
   'hris_slip_gaji',
   'sales_pelanggan',
   'sales_prospek',
+  'sales_website_rfq',
   'sales_kunjungan',
   'sales_pra_order',
   'penjualan',
@@ -76,6 +78,7 @@ export default function MobileApp() {
   const [tick, setTick] = useState(0);
   const [syncingPb, setSyncingPb] = useState(false);
   const [lastPbResult, setLastPbResult] = useState<string | null>(null);
+  const alasanTahan = useSyncHoldReason();
 
   const identitasVisual = useIdentitasVisualAplikasi();
 
@@ -91,6 +94,7 @@ export default function MobileApp() {
     setSyncingPb(true);
     try {
       await db.syncFromServer(true);
+      if (db.getSyncHoldReason()) return;
       const pbRes = await db.syncFromPocketBaseAMS();
       const jam = new Date(pbRes.syncedAt).toLocaleTimeString('id-ID', {
         hour: '2-digit',
@@ -117,14 +121,14 @@ export default function MobileApp() {
       }
       const segar = await ambilSesiServer();
       if (segar) {
-        db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
+        db.prepareSessionSync(segar);
         await db.syncFromServer(false);
-        void db.syncFromPocketBaseAMS();
+        if (bacaSesi()?.token === segar.token && !db.getSyncHoldReason()) void db.syncFromPocketBaseAMS();
       } else {
         await db.hydratePublicSettingsFromServer();
       }
       if (aktif) {
-        setSesi(segar);
+        setSesi(segar && bacaSesi()?.token === segar.token ? segar : null);
         setMemeriksaSesi(false);
       }
     };
@@ -149,13 +153,8 @@ export default function MobileApp() {
   useEffect(() => {
     if (!sesi?.token) return;
     const unsubRbac = db.subscribeRbacUpdated(() => {
-      void ambilSesiServer().then((segar) => {
-        if (segar) {
-          db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
-          void db.syncFromServer(false);
-        }
-        setSesi(segar);
-      });
+      setMemeriksaSesi(true);
+      void segarkanSesi().finally(() => setMemeriksaSesi(false));
     });
     const unsubKoleksi = db.subscribeKoleksi(KOLEKSI_MOBILE_SINKRON, refresh);
     return () => {
@@ -164,11 +163,21 @@ export default function MobileApp() {
     };
   }, [sesi?.token, refresh]);
 
+  const segarkanSesi = async () => {
+    const segar = await ambilSesiServer();
+    if (segar) {
+      db.prepareSessionSync(segar);
+      await db.syncFromServer(false);
+    }
+    setSesi(segar && bacaSesi()?.token === segar.token ? segar : null);
+  };
+
   const tanganiMasuk = async (sesiBaru: SesiLogin) => {
     setMemeriksaSesi(true);
-    db.prepareSessionSync(sesiBaru.userId, `${sesiBaru.peran}:${JSON.stringify(sesiBaru.permissions)}`);
+    db.prepareSessionSync(sesiBaru);
     await db.syncFromServer(false);
-    if (!sesiBaru.isHiddenDeveloper) {
+    const sesiAktif = bacaSesi()?.token === sesiBaru.token ? sesiBaru : null;
+    if (sesiAktif && !db.getSyncHoldReason() && !sesiAktif.isHiddenDeveloper) {
       db.logAudit(
         'Autentikasi & Akses',
         'Masuk berhasil ke AMS Mobile (RBAC server terverifikasi)',
@@ -178,9 +187,9 @@ export default function MobileApp() {
         [{ kolom: 'sesi', nilaiLama: 'Keluar', nilaiBaru: `Masuk ${sesiBaru.masukPada}` }]
       );
     }
-    void db.syncFromPocketBaseAMS();
-    db.connectRealtimeSync(sesiBaru.token || null);
-    setSesi(sesiBaru);
+    if (sesiAktif && !db.getSyncHoldReason()) void db.syncFromPocketBaseAMS();
+    db.connectRealtimeSync(sesiAktif?.token || null);
+    setSesi(sesiAktif);
     setTabAktif('beranda');
     setMemeriksaSesi(false);
   };
@@ -196,21 +205,22 @@ export default function MobileApp() {
 
   // Baca data live dari store
   void tick;
-  const karyawanList = db.getKaryawanHRIS();
-  const absensiList = db.getAbsensi();
-  const shiftList = db.getJadwalShift();
-  const cutiList = db.getCuti();
-  const slipList = db.getSlipGaji();
-  const pelangganList = db.getPelangganB2B();
-  const prospekList = db.getProspek();
-  const kunjunganList = db.getKunjunganMedRep();
-  const praOrderList = db.getPraOrder();
-  const penjualanList = db.getPenjualan();
-  const tenderList = db.getTender();
-  const produkList = db.getPengetahuanProduk();
-  const izinEdarList = db.getIzinEdar();
-  const stokList = db.getStokGudang();
-  const skemaHargaList = db.getSkemaHarga();
+  const bolehBacaCache = Boolean(sesi && !memeriksaSesi && !alasanTahan);
+  const karyawanList = bolehBacaCache ? db.getKaryawanHRIS() : [];
+  const absensiList = bolehBacaCache ? db.getAbsensi() : [];
+  const shiftList = bolehBacaCache ? db.getJadwalShift() : [];
+  const cutiList = bolehBacaCache ? db.getCuti() : [];
+  const slipList = bolehBacaCache ? db.getSlipGaji() : [];
+  const pelangganList = bolehBacaCache ? db.getPelangganB2B() : [];
+  const prospekList = bolehBacaCache ? db.getProspek() : [];
+  const kunjunganList = bolehBacaCache ? db.getKunjunganMedRep() : [];
+  const praOrderList = bolehBacaCache ? db.getPraOrder() : [];
+  const penjualanList = bolehBacaCache ? db.getPenjualan() : [];
+  const tenderList = bolehBacaCache ? db.getTender() : [];
+  const produkList = bolehBacaCache ? db.getPengetahuanProduk() : [];
+  const izinEdarList = bolehBacaCache ? db.getIzinEdar() : [];
+  const stokList = bolehBacaCache ? db.getStokGudang() : [];
+  const skemaHargaList = bolehBacaCache ? db.getSkemaHarga() : [];
   const conn = db.getConnectionStatus();
 
   const karyawanAktif = useMemo(
@@ -305,6 +315,10 @@ export default function MobileApp() {
     );
   }
 
+  if (alasanTahan) {
+    return <SyncAccessHold reason={alasanTahan} onRetry={segarkanSesi} onLogout={() => void tanganiKeluar()} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       {/* Sticky Top Header */}
@@ -340,6 +354,11 @@ export default function MobileApp() {
 
       {/* Main Content */}
       <main className="mx-auto w-full max-w-5xl px-4 pb-24 pt-4">
+        {conn.lastSyncError && (
+          <div role="alert" className="mb-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-xs text-rose-900">
+            Sinkronisasi belum berhasil: {conn.lastSyncError}. Perubahan tetap tertunda; periksa data atau hubungi administrator.
+          </div>
+        )}
         {!capabilities.canViewAllEmployees && !karyawanAktif && (
           <div role="alert" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
             Akun belum ditautkan ke ID karyawan HRIS yang aktif. Hubungi admin untuk mengaitkan akun sebelum memakai fitur self-service.

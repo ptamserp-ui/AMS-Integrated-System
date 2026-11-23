@@ -84,6 +84,7 @@ export default function AnalitikSalesModule() {
     'sales_teritorial',
     'sales_pelanggan',
     'sales_prospek',
+    'sales_website_rfq',
     'sales_kunjungan',
     'stok_gudang',
     'pemasok',

@@ -1,13 +1,14 @@
 import { kompresGambarWebsite } from './website';
 import {
+  KUNCI_PENDING_MEDIA,
   daftarMediaWebsite,
   hapusMediaWebsite,
   setPratinjauMemori,
   simpanMediaWebsite
 } from './websitePrimitives';
+import { HEADER_IDENTITAS_SYNC } from './identitasSinkronisasi';
 
 const KUNCI_SESI_AUTH = 'ams_alkes_sesi_login_v2';
-const KUNCI_PENDING_MEDIA = 'ams_alkes_pending_media_uploads_v1';
 
 export interface UnggahMediaOptions {
   lebarMaks?: number;
@@ -24,6 +25,7 @@ export interface HasilUnggahMedia {
   storedOnServer: boolean;
   contentType: 'image/png' | 'image/jpeg' | 'image/webp';
   size: number;
+  peringatan?: string;
 }
 
 function bacaTokenAuthLokal(): string | null {
@@ -66,15 +68,27 @@ interface PendingMediaItem {
   scope: string;
 }
 
-function bacaAntreanMedia(): PendingMediaItem[] {
-  try {
-    if (typeof localStorage === 'undefined') return [];
-    const raw = localStorage.getItem(KUNCI_PENDING_MEDIA);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? (parsed as PendingMediaItem[]) : [];
-  } catch {
-    return [];
+class MediaUploadError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
   }
+}
+
+function bacaAntreanMedia(): PendingMediaItem[] {
+  if (typeof localStorage === 'undefined') return [];
+  const raw = localStorage.getItem(KUNCI_PENDING_MEDIA);
+  const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+  if (!Array.isArray(parsed) || !parsed.every((item) =>
+    item && typeof item === 'object' &&
+    typeof item.id === 'string' &&
+    typeof item.filename === 'string' &&
+    typeof item.dataUrl === 'string' &&
+    (item.visibility === 'public' || item.visibility === 'internal') &&
+    typeof item.scope === 'string'
+  )) {
+    throw new Error('Antrean media offline tidak valid.');
+  }
+  return parsed;
 }
 
 function simpanAntreanMedia(items: PendingMediaItem[]): void {
@@ -85,8 +99,9 @@ function simpanAntreanMedia(items: PendingMediaItem[]): void {
     } else {
       localStorage.setItem(KUNCI_PENDING_MEDIA, JSON.stringify(items));
     }
-  } catch {
-    /* abaikan kuota penuh */
+  } catch (error) {
+    console.error('Gagal menyimpan antrean media:', error);
+    throw new Error('Antrean media offline tidak dapat disimpan.');
   }
 }
 
@@ -104,9 +119,11 @@ async function mirrorAssetToFirestoreAsync(payload: {
   try {
     const { authFirebase, pushMediaAssetToFirestore } = await import('../services/firebase');
     if (!authFirebase.currentUser?.emailVerified) return;
-    await pushMediaAssetToFirestore(payload);
-  } catch {
-    /* fallback aman — gambar sudah tersimpan sebagai file di server Express */
+    if (!await pushMediaAssetToFirestore(payload)) {
+      throw new Error(`Media ${payload.id} tidak dapat dicadangkan ke Firebase.`);
+    }
+  } catch (error) {
+    console.error('[media] File tersimpan di server, tetapi pencadangan Firebase gagal.', error);
   }
 }
 
@@ -118,6 +135,7 @@ async function kirimMediaBinerKeServer(params: {
   visibility: 'public' | 'internal';
   scope: string;
   token: string;
+  syncIdentity?: string;
 }): Promise<{
   ok: true;
   id: string;
@@ -125,6 +143,7 @@ async function kirimMediaBinerKeServer(params: {
   sha256: string;
   uploadedBy: string;
   size: number;
+  peringatan?: string;
 }> {
   const res = await fetch('/api/media/upload', {
     method: 'POST',
@@ -135,7 +154,8 @@ async function kirimMediaBinerKeServer(params: {
       'X-Media-Id': params.id,
       'X-Media-Filename': encodeURIComponent(params.filename),
       'X-Media-Visibility': params.visibility,
-      'X-Media-Scope': params.scope
+      'X-Media-Scope': params.scope,
+      ...(params.syncIdentity ? { [HEADER_IDENTITAS_SYNC]: encodeURIComponent(params.syncIdentity) } : {})
     },
     body: params.blob
   });
@@ -145,25 +165,44 @@ async function kirimMediaBinerKeServer(params: {
     throw new Error('Sesi login berakhir. Silakan masuk ulang untuk mengunggah foto.');
   }
 
-  const body = (await res.json().catch(() => ({}))) as {
-    ok?: boolean;
-    id?: string;
-    url?: string;
-    pesan?: string;
-    media?: { sha256?: string; uploadedBy?: string; size?: number };
-  };
+  const body = (await res.json().catch(() => null)) as {
+    ok?: unknown;
+    id?: unknown;
+    url?: unknown;
+    pesan?: unknown;
+    peringatan?: unknown;
+    media?: { sha256?: unknown; uploadedBy?: unknown; size?: unknown };
+  } | null;
 
   if (!res.ok) {
-    throw new Error(body.pesan || `Gagal mengunggah foto ke server (HTTP ${res.status}).`);
+    throw new MediaUploadError(
+      typeof body?.pesan === 'string' && body.pesan ? body.pesan : `Gagal mengunggah foto ke server (HTTP ${res.status}).`,
+      res.status
+    );
+  }
+  const expectedUrl = `/api/website/media/${encodeURIComponent(params.id)}`;
+  if (
+    body?.ok !== true ||
+    body.id !== params.id ||
+    body.url !== expectedUrl ||
+    typeof body.media?.sha256 !== 'string' ||
+    !/^[a-f0-9]{64}$/i.test(body.media.sha256) ||
+    typeof body.media.uploadedBy !== 'string' || !body.media.uploadedBy ||
+    body.media.size !== params.blob.size
+  ) {
+    throw new Error('Konfirmasi unggahan server tidak lengkap atau tidak sesuai. Media akan dipertahankan untuk dicoba ulang.');
   }
 
+  const peringatan = typeof body.peringatan === 'string' && body.peringatan ? body.peringatan : undefined;
+  if (peringatan) console.warn('[media] Unggahan diterima dengan peringatan:', peringatan);
   return {
     ok: true,
-    id: body.id || params.id,
-    url: body.url || `/api/website/media/${encodeURIComponent(params.id)}`,
-    sha256: body.media?.sha256 || '0000000000000000',
-    uploadedBy: body.media?.uploadedBy || 'user',
-    size: body.media?.size ?? params.blob.size
+    id: params.id,
+    url: expectedUrl,
+    sha256: body.media.sha256,
+    uploadedBy: body.media.uploadedBy,
+    size: params.blob.size,
+    ...(peringatan ? { peringatan } : {})
   };
 }
 
@@ -195,6 +234,11 @@ export async function unggahFotoKeServer(
   const online = typeof navigator === 'undefined' ? true : navigator.onLine !== false;
 
   if (token && online && typeof fetch === 'function') {
+    const { db } = await import('../services/pocketbase');
+    const syncIdentity = db.identitasSyncSiap();
+    if (!syncIdentity) {
+      throw new Error('Identitas sinkronisasi belum diverifikasi. Periksa sesi dan coba lagi.');
+    }
     try {
       const serverRes = await kirimMediaBinerKeServer({
         id,
@@ -203,7 +247,8 @@ export async function unggahFotoKeServer(
         contentType,
         visibility,
         scope,
-        token
+        token,
+        syncIdentity
       });
 
       void mirrorAssetToFirestoreAsync({
@@ -224,11 +269,16 @@ export async function unggahFotoKeServer(
         url: serverRes.url,
         storedOnServer: true,
         contentType,
-        size: serverRes.size
+        size: serverRes.size,
+        ...(serverRes.peringatan ? { peringatan: serverRes.peringatan } : {})
       };
     } catch (err) {
       // Penolakan otorisasi / validasi konten tidak perlu masuk antrean offline
       const msg = err instanceof Error ? err.message : '';
+      if (err instanceof MediaUploadError && [400, 403, 409, 410].includes(err.status)) {
+        if (err.status === 409) db.tahanSinkronisasi('Identitas berubah saat media diunggah. Periksa ulang sesi.');
+        throw err;
+      }
       if (
         msg.includes('Sesi login') ||
         msg.includes('Akses ditolak') ||
@@ -237,7 +287,7 @@ export async function unggahFotoKeServer(
       ) {
         throw err;
       }
-      // Kegagalan jaringan sementara -> lanjutkan antrean offline di bawah
+      console.warn('Unggahan foto belum dapat dikonfirmasi; media akan disimpan dalam antrean:', err);
     }
   }
 
@@ -267,15 +317,23 @@ export async function flushPendingMediaUploads(): Promise<number> {
   const token = bacaTokenAuthLokal();
   if (!token || (typeof navigator !== 'undefined' && navigator.onLine === false)) return 0;
 
-  const antrean = bacaAntreanMedia();
-  if (antrean.length === 0) return 0;
-
   flushSedangJalan = true;
-  let uploadedCount = 0;
-  const sisa: PendingMediaItem[] = [];
-
   try {
+    const { db } = await import('../services/pocketbase');
+    const identity = db.identitasSyncSiap();
+    if (!identity) return 0;
+    let antrean: PendingMediaItem[];
+    try {
+      antrean = bacaAntreanMedia();
+    } catch (error) {
+      console.error('Gagal membaca antrean media:', error);
+      db.tahanSinkronisasi('Antrean media offline tidak dapat dibaca. Jangan hapus data browser; hubungi administrator.');
+      return 0;
+    }
+    if (antrean.length === 0) return 0;
+    const uploadedIds = new Set<string>();
     for (const item of antrean) {
+      if (!db.isIdentitasSyncSiap(identity)) break;
       try {
         const { blob, contentType } = dataUrlToBlob(item.dataUrl);
         const serverRes = await kirimMediaBinerKeServer({
@@ -285,8 +343,10 @@ export async function flushPendingMediaUploads(): Promise<number> {
           contentType,
           visibility: item.visibility,
           scope: item.scope,
-          token
+          token,
+          syncIdentity: identity
         });
+        if (!db.isIdentitasSyncSiap(identity)) break;
         setPratinjauMemori(item.id, item.dataUrl);
         if (daftarMediaWebsite().some((m) => m.id === item.id)) {
           hapusMediaWebsite(item.id);
@@ -302,15 +362,23 @@ export async function flushPendingMediaUploads(): Promise<number> {
           sha256: serverRes.sha256,
           uploadedBy: serverRes.uploadedBy
         });
-        uploadedCount += 1;
-      } catch {
-        sisa.push(item);
+        uploadedIds.add(item.id);
+      } catch (error) {
+        console.warn('Media offline belum berhasil diunggah:', error);
+        if (error instanceof MediaUploadError && [400, 403, 409, 410].includes(error.status)) {
+          db.tahanSinkronisasi(`Server menolak media offline: ${error.message}`);
+          break;
+        }
       }
     }
-    simpanAntreanMedia(sisa);
+    try {
+      simpanAntreanMedia(bacaAntreanMedia().filter((item) => !uploadedIds.has(item.id)));
+    } catch (error) {
+      console.error('Gagal memperbarui antrean media:', error);
+      db.tahanSinkronisasi('Antrean media offline tidak dapat diperbarui. Jangan hapus data browser; hubungi administrator.');
+    }
+    return uploadedIds.size;
   } finally {
     flushSedangJalan = false;
   }
-
-  return uploadedCount;
 }

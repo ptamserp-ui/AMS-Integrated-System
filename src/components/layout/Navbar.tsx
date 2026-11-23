@@ -93,7 +93,7 @@ export const MAIN_MENU: MainMenuItem[] = [
 ];
 
 export const ALL_TABS: TabDef[] = [
-  { id: 'website', label: 'Website', short: 'Website', icon: Globe, badge: 'SEGERA' },
+  { id: 'website', label: 'Website', short: 'Website', icon: Globe },
 
   { id: 'sales-marketing', label: 'Sales & Marketing', short: 'Sales', icon: TrendingUp, group: 'commercial', badge: 'LKPP' },
   { id: 'product-catalog', label: 'Product Catalog', short: 'Produk', icon: PackageSearch, group: 'commercial' },

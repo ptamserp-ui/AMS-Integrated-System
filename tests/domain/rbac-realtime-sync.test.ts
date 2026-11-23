@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getFirebaseBootstrapAdmins, ServerRbacStore } from '../../server/rbacStore';
 import {
   ServerDataSyncStore,
+  canDeleteSyncKey,
   canReadSyncKey,
   canWriteSyncKey,
   filterSyncValueForRole,
@@ -12,6 +13,7 @@ import {
   mergeCatalogIntoDraftConfig,
   mergeCatalogIntoPublishedSnapshot
 } from '../../server/dataSyncStore';
+import type { RoleDefinition } from '../../src/types/index';
 
 const createdDirs: string[] = [];
 
@@ -230,6 +232,7 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
       {
         id: 'EMP-01',
         nama: 'Pegawai Satu',
+        divisi: { riwayatKesehatan: 'rahasia' },
         gajiPokok: 10,
         tanggalLahir: '1990-01-01',
         statusRekamMedis: 'Fit to Work'
@@ -259,6 +262,61 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
       { id: 'EMP-01', nama: 'Pegawai Satu' }
     ]);
     expect(filterSyncValueForRole(roles.hrd_manager!, 'hris_karyawan', entries)).toEqual(entries);
+  });
+
+  it('menolak perubahan dan penghapusan HRIS untuk peran tanpa cakupan baca HRIS', () => {
+    const rbac = new ServerRbacStore(createTempDataDir());
+    const roles = Object.fromEntries(rbac.listRoles().map((role) => [role.id, role]));
+    const pjtWithHrisActions: RoleDefinition = {
+      ...roles.pjt!,
+      permissions: { ...roles.pjt!.permissions, 'hrd-pelatihan': ['view', 'create', 'update', 'delete'] }
+    };
+    const revokedEmployee: RoleDefinition = {
+      ...roles.karyawan!,
+      permissions: { ...roles.karyawan!.permissions, 'hrd-pelatihan': [] }
+    };
+
+    expect(canReadSyncKey(pjtWithHrisActions, 'hris_karyawan')).toBe(false);
+    expect(canWriteSyncKey(pjtWithHrisActions, 'hris_karyawan')).toBe(false);
+    expect(canDeleteSyncKey(pjtWithHrisActions, 'hris_karyawan')).toBe(false);
+    expect(canWriteSyncKey(pjtWithHrisActions, 'sertifikasi_pegawai')).toBe(false);
+    expect(canWriteSyncKey(roles.hrd_manager!, 'hris_karyawan')).toBe(true);
+    expect(canDeleteSyncKey(roles.hrd_manager!, 'hris_karyawan')).toBe(true);
+    expect(canWriteSyncKey(roles.payroll_manager!, 'hris_slip_gaji')).toBe(true);
+    expect(canWriteSyncKey(roles.payroll_manager!, 'hris_karyawan')).toBe(false);
+    expect(canDeleteSyncKey(roles.payroll_manager!, 'hris_karyawan')).toBe(false);
+    expect(canDeleteSyncKey(roles.payroll_manager!, 'hris_slip_gaji')).toBe(false);
+    expect(canWriteSyncKey(roles.developer_it_support!, 'hris_karyawan')).toBe(true);
+    expect(canReadSyncKey(revokedEmployee, 'hris_karyawan', 'EMP-01')).toBe(false);
+    expect(canWriteSyncKey(revokedEmployee, 'hris_absensi')).toBe(false);
+  });
+
+  it('hanya mengirim kolom profil dan sertifikasi yang diizinkan untuk self-service', () => {
+    const rbac = new ServerRbacStore(createTempDataDir());
+    const employee = rbac.listRoles().find((role) => role.id === 'karyawan')!;
+    const profile = {
+      id: 'EMP-01',
+      nik: 'NIK-01',
+      nama: 'Pegawai Satu',
+      gajiPokok: 10,
+      gajiLain: 20,
+      riwayatKesehatan: 'rahasia',
+      sertifikasi: [{ nama: 'CDAKB', nomor: 'CERT-1', masaBerlaku: '2030-01-01', catatanMedis: 'rahasia' }]
+    };
+
+    expect(filterSyncValueForRole(employee, 'hris_karyawan', [profile], 'EMP-01')).toEqual([{
+      id: 'EMP-01',
+      nik: 'NIK-01',
+      nama: 'Pegawai Satu',
+      sertifikasi: [{ nama: 'CDAKB', nomor: 'CERT-1', masaBerlaku: '2030-01-01' }]
+    }]);
+    expect(filterSyncValueForRole(employee, 'hris_cuti', [{
+      id: 'CUTI-1',
+      karyawanId: 'EMP-01',
+      status: 'Menunggu',
+      gajiLain: 20,
+      riwayatKesehatan: 'rahasia'
+    }], 'EMP-01')).toEqual([{ id: 'CUTI-1', karyawanId: 'EMP-01', status: 'Menunggu' }]);
   });
 
   it('mewajibkan tautan unik akun self-service ke satu ID karyawan', () => {
@@ -323,6 +381,24 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     expect(new ServerRbacStore(dataDir).listUsers()[0].employeeId).toBeUndefined();
   });
 
+  it('memulihkan penghapusan tautan dari snapshot cloud tanpa menghapus tautan pada dokumen lama', () => {
+    const dataDir = createTempDataDir();
+    const rbac = new ServerRbacStore(dataDir);
+    const created = rbac.createUser(
+      { username: 'staf.cloud', password: 'Password123!', fullName: 'Staf Cloud', roleId: 'karyawan', employeeId: 'EMP-01' },
+      'dev', 'developer_it_support', '127.0.0.1'
+    );
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    const original = rbac.listAllUsersForCloudSync().find((user) => user.id === created.user.id)!;
+    const { employeeId: _employeeId, ...legacy } = original;
+    rbac.hydrateFromCloud({ users: [{ ...legacy, updatedAt: '2098-01-01T00:00:00.000Z' }] });
+    expect(rbac.listUsers().find((user) => user.id === created.user.id)?.employeeId).toBe('EMP-01');
+
+    rbac.hydrateFromCloud({ users: [{ ...original, employeeId: '', updatedAt: '2099-01-01T00:00:00.000Z' }] });
+    expect(new ServerRbacStore(dataDir).listUsers().find((user) => user.id === created.user.id)?.employeeId).toBeUndefined();
+  });
+
   it('membatasi pengiriman self-service pada record sendiri dan mempertahankan status cuti server', () => {
     const current = [
       { id: 'CUTI-1', karyawanId: 'EMP-01', status: 'Menunggu', tanggalPengajuan: '2026-11-01' },
@@ -358,6 +434,32 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
         'EMP-01'
       )
     ).toMatchObject({ ok: false });
+  });
+
+  it('melindungi rincian cuti yang sudah diputuskan dan menolak ID record karyawan lain', () => {
+    const approved = {
+      id: 'CUTI-1', karyawanId: 'EMP-01', status: 'Disetujui', disetujuiOleh: 'HRD',
+      jenis: 'Cuti Tahunan', tanggalMulai: '2026-12-01', tanggalSelesai: '2026-12-02',
+      jumlahHari: 2, alasan: 'Keluarga', tanggalPengajuan: '2026-11-01'
+    };
+    const other = { id: 'CUTI-2', karyawanId: 'EMP-02', status: 'Menunggu' };
+    const current = [approved, other];
+
+    expect(mergeSelfServiceSyncValue(
+      'hris_cuti', current, [{ ...approved, tanggalMulai: '2026-12-10' }], 'EMP-01'
+    )).toMatchObject({ ok: false });
+    expect(mergeSelfServiceSyncValue(
+      'hris_cuti', [{ ...approved, status: 'Ditolak' }], [{ ...approved, alasan: 'Diubah' }], 'EMP-01'
+    )).toMatchObject({ ok: false });
+    expect(mergeSelfServiceSyncValue(
+      'hris_cuti', current, [{ ...approved, status: 'Menunggu', disetujuiOleh: 'Pemohon' }], 'EMP-01'
+    )).toEqual({ ok: true, value: [other, approved] });
+    expect(mergeSelfServiceSyncValue(
+      'hris_cuti', current, [{ id: other.id, karyawanId: 'EMP-01' }], 'EMP-01'
+    )).toMatchObject({ ok: false });
+    expect(mergeSelfServiceSyncValue(
+      'hris_cuti', { rusak: true }, [{ id: 'CUTI-3', karyawanId: 'EMP-01' }], 'EMP-01'
+    )).toMatchObject({ ok: false });
   });
 
   it('akun & peran baru yang diinput admin langsung persisten dan bisa dipakai login dari IP internet lain', () => {
@@ -834,7 +936,7 @@ describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Lo
     const pbSource = fs.readFileSync(path.join(rootDir, 'src/services/pocketbase.ts'), 'utf8');
     const pbKeys = new Set<string>();
     const pbKeyRegex =
-      /this\.(?:get|set)(?:Collection|Json|SettingJson)\(\s*'([^']+)'|notifyListeners\(\s*'([^']+)'/g;
+      /this\.(?:(?:get|set)(?:Collection|Json|SettingJson)(?:<[^>]+>)?|applyRemoteEntry)\(\s*'([^']+)'|notifyListeners\(\s*'([^']+)'/g;
     let m: RegExpExecArray | null;
     while ((m = pbKeyRegex.exec(pbSource))) {
       pbKeys.add(m[1] || m[2]);

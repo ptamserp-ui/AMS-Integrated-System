@@ -644,6 +644,22 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
     expect((reloaded.getAllState().entries.izin_edar.value as unknown[]).length).toBe(2);
   });
 
+  it('kegagalan menyimpan batch draf tidak mengubah state di memori maupun di disk', () => {
+    const dir = createTempDir();
+    const store = new ServerDataSyncStore(dir);
+    store.setBatch({ website_draft: { judul: 'Semula' }, website_content_v: 1 }, [], 'admin');
+    const sebelum = store.getAllState();
+    const tmp = path.join(dir, 'app-state.json.tmp');
+    fs.mkdirSync(tmp);
+    try {
+      expect(() => store.setBatch({ website_draft: { judul: 'Baru' } }, ['website_content_v'], 'admin')).toThrow();
+      expect(store.getAllState()).toEqual(sebelum);
+      expect(new ServerDataSyncStore(dir).getAllState()).toEqual(sebelum);
+    } finally {
+      fs.rmdirSync(tmp);
+    }
+  });
+
   it('mapSyncKeyToResource, canWriteSyncKey, dan canDeleteSyncKey menegakkan batas RBAC dengan tepat', () => {
     expect(mapSyncKeyToResource('izin_edar')).toBe('ra-pjt');
     expect(mapSyncKeyToResource('keuangan_jurnal')).toBe('finance-akuntansi');

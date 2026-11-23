@@ -33,6 +33,8 @@ import { authFetch, punyaIzin, type SesiLogin } from '../../../utils/autentikasi
 import { db } from '../../../services/pocketbase';
 import { produkKatalogUntukWebsite } from '../../../utils/productCatalog';
 import { selesaikanGambar } from '../../../utils/website';
+import { adalahKonfigurasiSitus } from '../../../utils/websitePrimitives';
+import { HEADER_IDENTITAS_SYNC } from '../../../utils/identitasSinkronisasi';
 import { namaPengguna, peranPengguna } from '../../layout/Navbar';
 import {
   BAGIAN_WEBSITE,
@@ -101,9 +103,16 @@ const PERANGKAT = {
 type Mode = 'sunting' | 'pratinjau' | 'jejak';
 
 const tanpaMeta = (cfg: KonfigurasiSitus) => {
-  const { lastModifiedAt: _m, lastPublishedAt: _p, isPublished: _i, ...isi } = cfg;
+  const { lastModifiedAt: _m, lastModifiedBy: _b, lastPublishedAt: _p, isPublished: _i, ...isi } = cfg;
   return JSON.stringify(isi);
 };
+
+export function nilaiPembaruanDraf(dasar: string, aktif: string, terbaru: string):
+  'sama' | 'abaikan' | 'terapkan' | 'konflik' {
+  if (terbaru === aktif) return 'sama';
+  if (terbaru === dasar) return 'abaikan';
+  return aktif === dasar ? 'terapkan' : 'konflik';
+}
 
 function sinkronkanProdukKatalog(cfg: KonfigurasiSitus): KonfigurasiSitus {
   return {
@@ -397,6 +406,8 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   const [mode, setMode] = useState<Mode>('sunting');
   const [perangkat, setPerangkat] = useState<keyof typeof PERANGKAT>('desktop');
   const [pesan, setPesan] = useState<{ nada: 'ok' | 'waspada'; teks: string } | null>(null);
+  const [sedangPublikasi, setSedangPublikasi] = useState(false);
+  const publikasiDalamProses = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const iframeSiap = useRef(false);
 
@@ -405,7 +416,11 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   const bolehTerbit = sesi
     ? punyaIzin(sesi, 'website', 'publish')
     : PERAN_PENERBIT.includes(currentRole);
-  const bolehUbahPilihanProduk = sesi ? punyaIzin(sesi, 'website', 'update') : true;
+  const bolehUbah = !sesi || (
+    punyaIzin(sesi, 'website', 'create') ||
+    punyaIzin(sesi, 'website', 'update') ||
+    bolehTerbit
+  );
 
   useEffect(() => {
     const berhentiTerbit = db.subscribe('website_published', () => setTerbit(db.getWebsiteTerbit()));
@@ -414,7 +429,8 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
       const terbaru = sinkronkanProdukKatalog(db.getWebsiteDraft());
       const metaBaru = tanpaMeta(terbaru);
       const curMeta = tanpaMeta(drafRef.current);
-      if (metaBaru === curMeta) {
+      const pembaruan = nilaiPembaruanDraf(baselineRef.current, curMeta, metaBaru);
+      if (pembaruan === 'sama') {
         if (metaBaru !== baselineRef.current) {
           baselineRef.current = metaBaru;
           setBaseline(metaBaru);
@@ -422,7 +438,11 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
         setDrafRemoteTerbaru(false);
         return;
       }
-      if (curMeta === baselineRef.current) {
+      if (pembaruan === 'abaikan') {
+        setDrafRemoteTerbaru(false);
+        return;
+      }
+      if (pembaruan === 'terapkan') {
         baselineRef.current = metaBaru;
         drafRef.current = terbaru;
         setDraf(terbaru);
@@ -454,7 +474,7 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   }, []);
 
   useEffect(() => {
-    if (!pesan) return;
+    if (!pesan || pesan.nada === 'waspada') return;
     const t = setTimeout(() => setPesan(null), 6000);
     return () => clearTimeout(t);
   }, [pesan]);
@@ -472,92 +492,165 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   }, []);
 
   const simpan = () => {
+    if (!bolehUbah || drafRemoteTerbaru) return;
     sedangSimpanLokalRef.current = true;
     try {
       const hasil = db.simpanWebsiteDraft(draf, pengguna, peran);
       tandaiTersimpan(hasil);
-      setPesan({ nada: 'ok', teks: 'Draf konten tersimpan & tersinkronisasi ke server. Jejak perubahan tercatat pada audit trail.' });
+      setPesan({
+        nada: 'ok',
+        teks: 'Draf tersimpan di perangkat. Periksa status sinkronisasi untuk memastikan perubahan diterima server.'
+      });
+    } catch (error) {
+      setPesan({ nada: 'waspada', teks: error instanceof Error ? error.message : 'Draf gagal disimpan.' });
     } finally {
       sedangSimpanLokalRef.current = false;
     }
   };
 
   const sinkron = () => {
+    if (!bolehUbah || drafRemoteTerbaru) return;
+    if (belumTersimpan && !window.confirm('Sinkronisasi dapat mengganti butir dari data aplikasi yang tidak dikunci. Lanjutkan dengan draf yang sedang disunting?')) return;
     sedangSimpanLokalRef.current = true;
     try {
-      const { baru } = db.sinkronkanWebsiteDraft(pengguna, peran);
+      const { baru } = db.sinkronkanWebsiteDraft(pengguna, peran, drafRef.current);
       const diselaraskan = sinkronkanProdukKatalog(baru);
       tandaiTersimpan(diselaraskan);
       const jumlah = BAGIAN_WEBSITE.filter((b) => b.dinamis).reduce((acc, b) => acc + jumlahButir(diselaraskan, b.kunci), 0);
       setPesan({
         nada: 'ok',
-        teks: `Sinkron selesai — ${jumlah} butir konten (termasuk Product Catalog) dibangun ulang dari data aplikasi.`
+        teks: `${jumlah} butir konten dibangun ulang dan draf disimpan di perangkat. Periksa status sinkronisasi server.`
       });
+    } catch (error) {
+      setPesan({ nada: 'waspada', teks: error instanceof Error ? error.message : 'Sinkronisasi draf gagal.' });
     } finally {
       sedangSimpanLokalRef.current = false;
     }
   };
 
-  /** Snapshot dikirim ke server agar /web tayang lintas perangkat; hosting statis memakai berkas unduhan. */
-  const kirimSnapshot = async (snapshot: KonfigurasiSitus): Promise<{ ok: boolean; pesan?: string; status?: number }> => {
+  const kirimSnapshot = async (snapshot: KonfigurasiSitus, identitas: string): Promise<
+    | { ok: true; config: KonfigurasiSitus; version: number; peringatan?: string }
+    | { ok: false; pesan: string }
+  > => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 15000);
     try {
       const jawaban = await authFetch('/api/website/published', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'X-Sync-Client-Id': db.getClientId()
+          'X-Sync-Client-Id': db.getClientId(),
+          [HEADER_IDENTITAS_SYNC]: encodeURIComponent(identitas)
         },
-        body: JSON.stringify({ config: snapshot })
+        body: JSON.stringify({ config: snapshot }),
+        signal: controller.signal
       });
-      const data = (await jawaban.json().catch(() => ({}))) as { pesan?: string };
-      return { ok: jawaban.ok, status: jawaban.status, pesan: data.pesan };
+      const data = (await jawaban.json().catch(() => null)) as {
+        pesan?: unknown;
+        config?: unknown;
+        version?: unknown;
+        peringatan?: unknown;
+      } | null;
+      if (!jawaban.ok) {
+        return { ok: false, pesan: typeof data?.pesan === 'string' ? data.pesan : `Server menolak publikasi (HTTP ${jawaban.status}).` };
+      }
+      if (!adalahKonfigurasiSitus(data?.config) || typeof data?.version !== 'number') {
+        return { ok: false, pesan: 'Server mungkin sudah menerima perubahan, tetapi konfirmasinya tidak lengkap. Muat ulang dan periksa situs sebelum mencoba lagi.' };
+      }
+      return {
+        ok: true,
+        config: data.config,
+        version: data.version,
+        ...(typeof data.peringatan === 'string' ? { peringatan: data.peringatan } : {})
+      };
     } catch {
-      return { ok: false };
+      return { ok: false, pesan: 'Status publikasi belum dapat dipastikan. Periksa koneksi dan situs sebelum mencoba lagi.' };
+    } finally {
+      window.clearTimeout(timer);
     }
   };
 
-  const terbitkan = async () => {
-    let snapshot: KonfigurasiSitus;
-    sedangSimpanLokalRef.current = true;
-    try {
-      db.simpanWebsiteDraft(draf, pengguna, peran);
-      snapshot = db.terbitkanWebsite(pengguna, peran);
-      tandaiTersimpan(db.getWebsiteDraft());
-      setTerbit(snapshot);
-    } finally {
-      sedangSimpanLokalRef.current = false;
+  const ubahTayang = async (aksi: 'terbit' | 'tahan') => {
+    if (publikasiDalamProses.current || !bolehTerbit || (aksi === 'terbit' && drafRemoteTerbaru)) return;
+    const identitas = db.identitasSyncSiap();
+    if (!identitas || db.getConnectionStatus().pendingKeys.includes('website_published')) {
+      setPesan({ nada: 'waspada', teks: 'Publikasi ditunda: verifikasi sinkronisasi akun atau selesaikan antrean publikasi lama bersama administrator.' });
+      return;
     }
-    const hasil = await kirimSnapshot(snapshot);
-    setPesan({
-      nada: hasil.ok ? 'ok' : 'waspada',
-      teks: hasil.ok
-        ? 'Konten tayang. Snapshot server diperbarui (terotorisasi RBAC) dan penerbitan tercatat di audit trail.'
-        : hasil.status === 401 || hasil.status === 403
-          ? hasil.pesan || 'Ditolak oleh RBAC server: Anda tidak memiliki izin publish website.'
-          : 'Konten tayang pada perangkat ini. Snapshot server tidak tersedia (hosting statis) — pakai Unduh Snapshot JSON lalu unggah sebagai website-published.json.'
-    });
+    publikasiDalamProses.current = true;
+    setSedangPublikasi(true);
+    try {
+      let snapshot: KonfigurasiSitus;
+      if (aksi === 'terbit') {
+        sedangSimpanLokalRef.current = true;
+        try {
+          const tersimpan = db.simpanWebsiteDraft(drafRef.current, pengguna, peran);
+          tandaiTersimpan(tersimpan);
+          snapshot = { ...tersimpan, isPublished: true, lastPublishedAt: Date.now() };
+        } finally {
+          sedangSimpanLokalRef.current = false;
+        }
+      } else {
+        const terkini = db.getWebsiteTerbit();
+        if (!terkini) throw new Error('Tidak ada snapshot tayang untuk ditahan.');
+        snapshot = { ...terkini, isPublished: false, lastPublishedAt: undefined };
+      }
+      const hasil = await kirimSnapshot(snapshot, identitas);
+      if (!hasil.ok) {
+        setPesan({ nada: 'waspada', teks: hasil.pesan });
+        return;
+      }
+      if (db.identitasSyncSiap() !== identitas) {
+        setTerbit(db.getWebsiteTerbit());
+        setPesan({ nada: 'waspada', teks: 'Server menerima perubahan, tetapi sesi berubah. Muat ulang dan periksa status situs bersama administrator.' });
+        return;
+      }
+      sedangSimpanLokalRef.current = true;
+      try {
+        db.catatWebsiteTerbit(hasil.config, pengguna, peran, hasil.version);
+        setTerbit(db.getWebsiteTerbit());
+        const drafTerkini = {
+          ...drafRef.current,
+          isPublished: hasil.config.isPublished,
+          lastPublishedAt: hasil.config.lastPublishedAt
+        };
+        drafRef.current = drafTerkini;
+        setDraf(drafTerkini);
+      } catch (error) {
+        setTerbit(db.getWebsiteTerbit());
+        setPesan({
+          nada: 'waspada',
+          teks: `Server menerima perubahan, tetapi cache perangkat belum diperbarui: ${error instanceof Error ? error.message : 'kesalahan penyimpanan.'}`
+        });
+        return;
+      } finally {
+        sedangSimpanLokalRef.current = false;
+      }
+      setPesan({
+        nada: hasil.peringatan ? 'waspada' : 'ok',
+        teks: hasil.peringatan || (aksi === 'terbit'
+          ? 'Snapshot tayang diterima server. Periksa status sinkronisasi draf dan audit.'
+          : 'Penahanan situs diterima server.')
+      });
+    } catch (error) {
+      setPesan({ nada: 'waspada', teks: error instanceof Error ? error.message : 'Perubahan status situs gagal diproses.' });
+    } finally {
+      publikasiDalamProses.current = false;
+      setSedangPublikasi(false);
+    }
   };
 
-  const tahan = () => {
-    sedangSimpanLokalRef.current = true;
-    try {
-      const tersisa = db.tahanWebsite(pengguna, peran);
-      setTerbit(tersisa);
-      tandaiTersimpan(db.getWebsiteDraft());
-      void kirimSnapshot(tersisa ?? { ...draf, isPublished: false });
-      setPesan({ nada: 'waspada', teks: 'Situs publik ditahan. Pengunjung melihat pesan non-aktif sampai penerbitan berikutnya.' });
-    } finally {
-      sedangSimpanLokalRef.current = false;
-    }
+  const unduhBerkas = (konfigurasi: KonfigurasiSitus, nama: string) => {
+    const isi = JSON.stringify(konfigurasi, null, 2);
+    const tautan = document.createElement('a');
+    tautan.href = URL.createObjectURL(new Blob([isi], { type: 'application/json' }));
+    tautan.download = nama;
+    tautan.click();
+    setTimeout(() => URL.revokeObjectURL(tautan.href), 0);
   };
 
   const unduh = () => {
-    const isi = JSON.stringify(terbit ?? draf, null, 2);
-    const tautan = document.createElement('a');
-    tautan.href = URL.createObjectURL(new Blob([isi], { type: 'application/json' }));
-    tautan.download = 'website-published.json';
-    tautan.click();
-    URL.revokeObjectURL(tautan.href);
+    unduhBerkas(terbit ?? draf, 'website-published.json');
     setPesan({ nada: 'ok', teks: 'website-published.json diunduh. Letakkan di folder public/ atau unggah lewat panel Storage situs.' });
   };
 
@@ -592,7 +685,9 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   );
 
   const nilaiSeksi = (k: KunciEditorSitus) => (draf as unknown as Record<string, unknown>)[k];
-  const gantiSeksi = (k: KunciEditorSitus, nilai: unknown) => setDraf({ ...(draf as KonfigurasiSitus), [k]: nilai } as KonfigurasiSitus);
+  const gantiSeksi = (k: KunciEditorSitus, nilai: unknown) => {
+    if (bolehUbah) setDraf({ ...draf, [k]: nilai } as KonfigurasiSitus);
+  };
 
   const seksiAktif = useMemo(
     () => BAGIAN_WEBSITE.filter((b) => (nilaiSeksi(b.kunci) as SeksiDaftar<ItemLoose>)?.isActive).length,
@@ -611,10 +706,10 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
   /** Dipanggil sebagai fungsi (bukan komponen) agar state kartu item tidak hilang saat mengetik. */
   const renderEditor = () => {
     if (kunci === 'tampilan') {
-      return <EditorTampilan cfg={draf} onGanti={(t) => setDraf({ ...draf, tampilan: t })} />;
+      return <EditorTampilan cfg={draf} onGanti={(t) => { if (bolehUbah) setDraf({ ...draf, tampilan: t }); }} />;
     }
     if (kunci === 'tataLetak') {
-      return <EditorTataLetak cfg={draf} onGanti={(t) => setDraf({ ...draf, tampilan: t })} />;
+      return <EditorTataLetak cfg={draf} onGanti={(t) => { if (bolehUbah) setDraf({ ...draf, tampilan: t }); }} />;
     }
     const bagian = BAGIAN_WEBSITE.find((b) => b.kunci === kunci);
     if (bagian) {
@@ -622,7 +717,7 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
         return (
           <EditorPemilihProduk
             seksi={nilaiSeksi('produk') as SeksiDaftar<ProdukWebsite>}
-            bolehUbah={bolehUbahPilihanProduk}
+            bolehUbah={bolehUbah}
             onGanti={(baru) => gantiSeksi('produk', baru)}
           />
         );
@@ -669,8 +764,8 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
     <div className="space-y-6">
       <DeveloperNotes
         items={[
-          'Simpan Draf dan Terbitkan disinkronkan real-time ke server & seluruh user melalui WebSocket + RBAC sesi aktif.',
-          'Live Preview memakai draf editor aktif; pengunjung /web langsung menerima pembaruan saat Terbitkan atau saat Product Catalog diperbarui.',
+          'Draf tersimpan di perangkat dan masuk antrean sinkronisasi; periksa status untuk memastikan server menerimanya.',
+          'Live Preview memakai draf aktif. Publikasi menunggu konfirmasi server; pembaruan realtime bergantung pada koneksi.',
           'Produk dari menu Commercial → Product Catalog otomatis muncul di Katalog Produk CMS Website untuk dipilih (Publish/Draft).'
         ]}
       />
@@ -701,7 +796,7 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
             <button
               type="button"
               onClick={simpan}
-              disabled={!belumTersimpan}
+              disabled={!bolehUbah || !belumTersimpan || drafRemoteTerbaru || sedangPublikasi}
               className={`inline-flex items-center gap-1.5 ${tombolPrimer} disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               <Save className="w-3.5 h-3.5" />
@@ -710,7 +805,8 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
             <button
               type="button"
               onClick={sinkron}
-              className={`inline-flex items-center gap-1.5 ${tombolSekunder}`}
+              disabled={!bolehUbah || drafRemoteTerbaru || sedangPublikasi}
+              className={`inline-flex items-center gap-1.5 ${tombolSekunder} disabled:opacity-40 disabled:cursor-not-allowed`}
             >
               <RefreshCw className="w-3.5 h-3.5" />
               Sinkron dari Data Aplikasi
@@ -718,9 +814,9 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
             {terbit?.isPublished && belumTerbit && (
               <button
                 type="button"
-                onClick={terbitkan}
-                disabled={!bolehTerbit}
-                title={bolehTerbit ? undefined : 'Hanya PJT / Admin IT yang dapat menerbitkan'}
+                onClick={() => void ubahTayang('terbit')}
+                disabled={!bolehTerbit || drafRemoteTerbaru || sedangPublikasi}
+                title={bolehTerbit ? undefined : 'Peran Anda tidak memiliki izin menerbitkan situs'}
                 className={`inline-flex items-center gap-1.5 ${tombolPrimer} disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 <UploadCloud className="w-3.5 h-3.5" />
@@ -730,9 +826,9 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
             {terbit?.isPublished ? (
               <button
                 type="button"
-                onClick={tahan}
-                disabled={!bolehTerbit}
-                title={bolehTerbit ? undefined : 'Hanya PJT / Admin IT yang dapat menahan tayang'}
+                onClick={() => void ubahTayang('tahan')}
+                disabled={!bolehTerbit || sedangPublikasi}
+                title={bolehTerbit ? undefined : 'Peran Anda tidak memiliki izin menahan tayang situs'}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 transition-colors cursor-pointer"
               >
                 <Lock className="w-3.5 h-3.5" />
@@ -741,9 +837,9 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
             ) : (
               <button
                 type="button"
-                onClick={terbitkan}
-                disabled={!bolehTerbit}
-                title={bolehTerbit ? undefined : 'Hanya PJT / Admin IT yang dapat menerbitkan'}
+                onClick={() => void ubahTayang('terbit')}
+                disabled={!bolehTerbit || drafRemoteTerbaru || sedangPublikasi}
+                title={bolehTerbit ? undefined : 'Peran Anda tidak memiliki izin menerbitkan situs'}
                 className={`inline-flex items-center gap-1.5 ${tombolPrimer} disabled:opacity-40 disabled:cursor-not-allowed`}
               >
                 <UploadCloud className="w-3.5 h-3.5" />
@@ -774,8 +870,9 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
           <div className="px-5 py-2.5 bg-slate-50 border-t border-slate-100 flex items-center gap-2">
             <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             <p className="text-xs text-slate-600">
-              Peran {peran} dapat menyunting dan menyimpan draf; penerbitan konten tayang dikhususkan untuk PJT dan Admin IT
-              dan tercatat dengan nama pengguna pada jejak audit.
+              {bolehUbah
+                ? `Peran ${peran} dapat menyunting draf, tetapi tidak memiliki izin menerbitkan situs.`
+                : `Peran ${peran} hanya dapat melihat konten website. Hubungi administrator jika membutuhkan izin menyunting.`}
             </p>
           </div>
         )}
@@ -783,20 +880,34 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
         {drafRemoteTerbaru && (
           <div className="px-5 py-2.5 border-t bg-blue-50 border-blue-100 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-blue-900">
-              Draf website di server baru saja diperbarui oleh pengguna lain. Anda memiliki suntingan lokal yang belum disimpan.
+              Draf website diperbarui oleh pengguna lain saat Anda memiliki suntingan lokal. Unduh draf lokal sebelum memuat versi terbaru; simpan dan terbitkan ditunda untuk mencegah penimpaan.
             </p>
-            <button
-              type="button"
-              onClick={() => tandaiTersimpan(db.getWebsiteDraft())}
-              className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
-            >
-              Muat Versi Server Terbaru
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => unduhBerkas(drafRef.current, 'website-draf-lokal.json')}
+                className="px-3 py-1 rounded-lg border border-blue-500 bg-white text-blue-700 text-xs font-semibold cursor-pointer"
+              >
+                Unduh Draf Lokal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Suntingan lokal yang belum disimpan akan diganti. Pastikan draf lokal sudah diunduh. Lanjutkan?')) {
+                    tandaiTersimpan(sinkronkanProdukKatalog(db.getWebsiteDraft()));
+                  }
+                }}
+                className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                Muat Versi Terbaru
+              </button>
+            </div>
           </div>
         )}
 
         {pesan && (
           <div
+            role={pesan.nada === 'waspada' ? 'alert' : 'status'}
             className={`px-5 py-2.5 border-t flex items-start gap-2 ${
               pesan.nada === 'ok' ? 'bg-emerald-50 border-emerald-100' : 'bg-amber-50 border-amber-100'
             }`}
@@ -906,7 +1017,7 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
           </div>
 
           {mode === 'sunting' && (
-            <div className="space-y-3">
+            <fieldset disabled={!bolehUbah} className="min-w-0 space-y-3">
               {renderEditor()}
               {belumTersimpan && (
                 <p className="text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
@@ -914,7 +1025,7 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
                   menayangkannya di /web.
                 </p>
               )}
-            </div>
+            </fieldset>
           )}
 
           {mode === 'pratinjau' && (

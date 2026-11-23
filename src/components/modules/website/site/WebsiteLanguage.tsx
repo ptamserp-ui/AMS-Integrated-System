@@ -26,8 +26,11 @@ const translations: Record<string, string> = {
   'Kurangi jumlah': 'Decrease quantity',
   'Tambah jumlah': 'Increase quantity',
   'Permintaan penawaran tercatat dengan nomor referensi': 'Your quotation request was recorded with reference number',
+  'Permintaan sebelumnya tercatat dengan nomor referensi': 'Your previous request was recorded with reference number',
   'Data kebutuhan Anda telah masuk ke antrean prospek komersial untuk diverifikasi PJT. Anda juga dapat langsung meneruskan salinan ke surel atau WhatsApp tim penjualan di bawah.':
     'Your request has been added to the commercial team’s queue for review by the Technical Lead. You can also send a copy directly to the sales team by email or WhatsApp below.',
+  'Isian formulir telah berubah; perubahan tersebut belum dikirim. Periksa dan kirim kembali jika diperlukan.':
+    'The form has changed; those changes have not been submitted. Review and resend if needed.',
   'Nama Instansi / Fasyankes': 'Organization / Healthcare Facility',
   'Contoh: RSUD Pasar Minggu / Klinik Utama': 'Example: Pasar Minggu Regional Hospital / Main Clinic',
   'Jenis Instansi': 'Organization Type',
@@ -40,10 +43,29 @@ const translations: Record<string, string> = {
   'Tuliskan kebutuhan aksesori, jadwal instalasi/uji fungsi, syarat TKDN, atau provinsi pengiriman.':
     'Include accessory requirements, installation/testing schedule, domestic-content requirements, or delivery province.',
   'Kirim Permintaan Penawaran': 'Send Quotation Request',
+  'Mengirim permintaan…': 'Sending request…',
+  'Pratinjau: permintaan tidak dikirim ke tim penjualan.': 'Preview: requests are not sent to the sales team.',
+  'Status pengiriman belum dapat dipastikan. Coba kirim lagi tanpa mengubah isi formulir.':
+    'The submission status could not be confirmed. Retry without changing the form.',
+  'Status pengiriman belum dapat dipastikan. Jangan muat ulang atau tutup halaman; coba kirim lagi tanpa mengubah isi formulir.':
+    'The submission status could not be confirmed. Do not reload or close this page; retry without changing the form.',
+  'Status permintaan sebelumnya belum dapat dipastikan dan isian telah berubah. Hubungi tim penjualan sebelum mengirim ulang.':
+    'The previous submission could not be confirmed and the form has changed. Contact the sales team before resending.',
+  'Permintaan belum dapat disimpan. Coba lagi atau gunakan surel/WhatsApp.':
+    'Your request could not be saved. Retry or use email/WhatsApp.',
+  'Formulir permintaan belum tersedia. Hubungi tim penjualan melalui surel atau WhatsApp.':
+    'The request form is unavailable. Contact the sales team by email or WhatsApp.',
+  'Penyimpanan permintaan tidak tersedia. Hubungi tim penjualan melalui surel atau WhatsApp.':
+    'Request storage is unavailable. Contact the sales team by email or WhatsApp.',
+  'Periksa isian permintaan dan batas panjang setiap kolom.': 'Check the request fields and their length limits.',
+  'Periksa nama, satuan, dan jumlah produk yang diminta.': 'Check the requested product names, units, and quantities.',
+  'Terlalu banyak permintaan. Coba lagi beberapa menit.': 'Too many requests. Please try again in a few minutes.',
   'Buka di Surel': 'Open in Email',
   'WhatsApp Tim Sales': 'WhatsApp Sales Team',
   'Tersalin': 'Copied',
   'Salin Teks RFQ': 'Copy RFQ Text',
+  'Teks permintaan tidak dapat disalin. Gunakan surel atau WhatsApp untuk meneruskannya.':
+    'The request could not be copied. Use email or WhatsApp to send it.',
   'Tidak ada produk yang cocok dengan pencarian Anda': 'No products match your search',
   'Coba ubah kata kunci, pilih grup katalog lain, atau kirimkan spesifikasi kebutuhan instansi Anda secara langsung kepada tim penjualan REMEDI.':
     'Try changing your search terms, choosing another catalog group, or sending your requirements directly to the REMEDI sales team.',

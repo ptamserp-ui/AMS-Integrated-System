@@ -1105,63 +1105,34 @@ export function selaraskanKontenOperasional(
   };
 }
 
-const KUNCI_SEKSI_DAFTAR: (keyof KonfigurasiSitus)[] = [
-  'slide',
-  'kepercayaan',
-  'solusi',
-  'statistik',
-  'produk',
-  'merek',
-  'perjalanan',
-  'institusi',
-  'kegiatan',
-  'promo',
-  'artikel',
-  'galeri',
-  'testimoni',
-  'faq',
-  'kantor',
-  'sosial'
-];
-
-/**
- * Pindahkan draf lama ke konten bawaan terbaru tanpa menghapus hasil suntingan: judul seksi dan
- * medan non-daftar memakai konten baru, sedangkan item terkunci dan item buatan tangan dari draf
- * lama tetap ikut. Dipakai saat VERSI_KONTEN_WEBSITE naik.
- */
+/** Lengkapi medan baru tanpa mengganti suntingan yang sudah ada pada draf lama. */
 export function padukanKonten(lama: KonfigurasiSitus, baru: KonfigurasiSitus): KonfigurasiSitus {
-  const hasil = { ...baru } as unknown as Record<string, SeksiDaftar<ItemWebsite>>;
-  for (const kunci of KUNCI_SEKSI_DAFTAR) {
-    const seksiBaru = hasil[kunci];
-    const seksiLama = (lama as unknown as Record<string, SeksiDaftar<ItemWebsite> | undefined>)[kunci];
-    if (!seksiBaru || !Array.isArray(seksiBaru.item)) continue;
-    if (kunci === 'produk') {
-      const indeksLama = new Map((seksiLama?.item ?? []).map((item) => [item.id, item]));
-      hasil[kunci] = {
-        ...seksiBaru,
-        isActive: seksiLama?.isActive ?? seksiBaru.isActive,
-        item: seksiBaru.item.map((item) => {
-          const sebelumnya = indeksLama.get(item.id);
-          return sebelumnya ? { ...item, isActive: sebelumnya.isActive } : item;
-        })
-      };
-      continue;
+  const lengkapi = (dasar: unknown, tersimpan: unknown): unknown => {
+    if (tersimpan === undefined || tersimpan === null) return dasar;
+    if (
+      dasar && tersimpan && typeof dasar === 'object' && typeof tersimpan === 'object' &&
+      !Array.isArray(dasar) && !Array.isArray(tersimpan)
+    ) {
+      const hasil: Record<string, unknown> = { ...dasar };
+      for (const [kunci, nilai] of Object.entries(tersimpan)) {
+        hasil[kunci] = lengkapi(hasil[kunci], nilai);
+      }
+      return hasil;
     }
-    hasil[kunci] = { ...seksiBaru, item: padukanItem(seksiLama?.item ?? [], seksiBaru.item) };
-  }
-  const konf = hasil as unknown as KonfigurasiSitus;
-  const logoLama = lama.identitas?.logoUrl;
-  const footerLogoLama = lama.identitas?.footerLogoUrl;
-  const faviconLama = lama.identitas?.faviconUrl;
-  const logoKustom = logoLama && logoLama !== '/site/logo-remedi-new-bw.png';
-  const footerLogoKustom = footerLogoLama && footerLogoLama !== '/site/logo-remedi-new-bw.png';
-  konf.identitas = {
-    ...konf.identitas,
-    logoUrl: logoKustom ? logoLama : baru.identitas.logoUrl,
-    footerLogoUrl: footerLogoKustom ? footerLogoLama : baru.identitas.footerLogoUrl,
-    faviconUrl: faviconLama || baru.identitas.faviconUrl
+    return tersimpan;
   };
-  return konf;
+  const hasil = lengkapi(baru, lama) as KonfigurasiSitus;
+  const indeksProduk = new Map((lama.produk?.item ?? []).map((item) => [item.id, item]));
+  return {
+    ...hasil,
+    produk: {
+      ...hasil.produk,
+      item: baru.produk.item.map((item) => {
+        const sebelumnya = indeksProduk.get(item.id);
+        return sebelumnya ? { ...item, isActive: sebelumnya.isActive } : item;
+      })
+    }
+  };
 }
 
 /* -------------------------------------------------------------------------- */

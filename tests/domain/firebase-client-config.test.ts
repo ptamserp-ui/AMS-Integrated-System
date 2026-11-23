@@ -78,6 +78,47 @@ describe('resolveFirebaseClientConfig', () => {
     }
   });
 
+  it('reports an oversized RFQ collection instead of treating it as backed up', async () => {
+    const { authFirebase, pushSyncEntryToFirestore } = await import('../../src/services/firebase');
+    const previousUser = authFirebase.currentUser;
+    Object.assign(authFirebase, { currentUser: { emailVerified: true } });
+    try {
+      await expect(pushSyncEntryToFirestore(
+        'sales_website_rfq', ['x'.repeat(920_000)], 1, 'admin-uji'
+      )).rejects.toThrow(/sales_website_rfq.*belum dapat dicadangkan/i);
+    } finally {
+      Object.assign(authFirebase, { currentUser: previousUser });
+    }
+  });
+
+  it('rejects a failed or incomplete server response when restoring Firebase data', async () => {
+    const { hydrateCloudStateOnServer } = await import('../../src/services/firebase');
+    const cloud = { entries: {}, roles: [], users: [] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ pesan: 'Konflik RFQ sintetis.' }, { status: 500 }))
+      .mockResolvedValueOnce(Response.json({}));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await expect(hydrateCloudStateOnServer(cloud, 'token-uji')).rejects.toThrow(/HTTP 500.*Konflik RFQ/i);
+      await expect(hydrateCloudStateOnServer(cloud, 'token-uji')).rejects.toThrow(/HTTP 200/i);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('logs a warning when restore succeeds but the static website copy fails', async () => {
+    const { hydrateCloudStateOnServer } = await import('../../src/services/firebase');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ok: true, peringatan: 'Salinan statis gagal.' })));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(hydrateCloudStateOnServer({ entries: {}, roles: [], users: [] }, 'token-uji')).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Salinan statis gagal.'));
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('uses the configured production project and rejects a project mismatch', () => {
     const productionEnv = {
       ...stagingEnv,

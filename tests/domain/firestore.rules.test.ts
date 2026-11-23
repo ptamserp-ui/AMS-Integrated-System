@@ -52,6 +52,20 @@ describe('Firestore Security Rules & Blueprint — Audit Delapan Pilar', () => {
     expect(archivesBlock).not.toContain('allow delete:');
   });
 
+  it('menerima dan memperbarui employeeId opsional tanpa menolak dokumen RBAC lama', () => {
+    const validator = rulesContent.split('function isValidRbacUser(data)')[1]?.split('function isValidArchiveConfig')[0] || '';
+    const usersBlock = rulesContent.split('match /ams_rbac_users/{userId}')[1]?.split('match /ams_archives')[0] || '';
+    expect(validator).toContain("'email', 'employeeId', 'roleId'");
+    expect(validator).toContain("!('employeeId' in data) || (data.employeeId is string && data.employeeId.size() <= 128)");
+    expect(usersBlock).toContain("'email', 'employeeId', 'roleId'");
+    const userSchema = blueprint.entities.RbacUserDoc as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(userSchema.properties.employeeId).toEqual({ type: 'string', maxLength: 128 });
+    expect(userSchema.required).not.toContain('employeeId');
+  });
+
   it('memvalidasi koleksi ams_media_assets untuk foto terpublikasi & internal secara ketat', () => {
     expect(rulesContent).toContain('function isValidMediaAsset(data)');
     const mediaBlock = rulesContent.split('match /ams_media_assets/{mediaId}')[1] || '';

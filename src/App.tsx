@@ -10,6 +10,7 @@ import DivisionWorkspace from './components/layout/DivisionWorkspace';
 import { terapkanFaviconAplikasi, useIdentitasVisualAplikasi } from './components/common/LogoAplikasi';
 import InitialLoadingScreen from './components/common/InitialLoadingScreen';
 import ErrorBoundary from './components/common/ErrorBoundary';
+import SyncAccessHold, { useSyncHoldReason } from './components/common/SyncAccessHold';
 import type { SalesTab } from './components/modules/commercial/SalesModule';
 import type { ITSubTabId } from './components/modules/supporting/ITModule';
 import type { GudangTabId } from './components/modules/operations/gudang/ui';
@@ -104,22 +105,11 @@ function isDivisionId(id: NavId): id is DivisionId {
   return DIVISION_ORDER.some((division) => division === id);
 }
 
-function punyaCacheErpLokal(): boolean {
-  try {
-    if (typeof localStorage === 'undefined') return false;
-    return (
-      localStorage.getItem('ams_alkes_izin_edar') !== null ||
-      localStorage.getItem('ams_alkes_stok_gudang') !== null
-    );
-  } catch {
-    return false;
-  }
-}
-
 export default function App() {
   const [sesi, setSesi] = useState<SesiLogin | null>(() => bacaSesi());
-  const [memeriksaSesi, setMemeriksaSesi] = useState<boolean>(() => Boolean(bacaSesi()) && !punyaCacheErpLokal());
+  const [memeriksaSesi, setMemeriksaSesi] = useState<boolean>(() => Boolean(bacaSesi()));
   const [statusPemuatan, setStatusPemuatan] = useState('Menunggu inisialisasi koneksi...');
+  const alasanTahan = useSyncHoldReason();
   const identitasVisual = useIdentitasVisualAplikasi();
 
   useEffect(() => {
@@ -136,7 +126,7 @@ export default function App() {
       setStatusPemuatan('Memverifikasi token sesi & hak akses pengguna (RBAC)...');
       const segar = await ambilSesiServer();
       if (segar) {
-        db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
+        db.prepareSessionSync(segar);
         setStatusPemuatan('Menyinkronkan state database real-time...');
         await db.syncFromServer(false);
       } else {
@@ -144,7 +134,7 @@ export default function App() {
         await db.hydratePublicSettingsFromServer();
       }
       if (aktif) {
-        setSesi(segar);
+        setSesi(segar && bacaSesi()?.token === segar.token ? segar : null);
         setMemeriksaSesi(false);
       }
     };
@@ -169,20 +159,27 @@ export default function App() {
   useEffect(() => {
     if (!sesi?.token) return;
     const unsubRbac = db.subscribeRbacUpdated(() => {
-      void ambilSesiServer().then((segar) => {
-        if (segar) {
-          db.prepareSessionSync(segar.userId, `${segar.peran}:${JSON.stringify(segar.permissions)}`);
-          void db.syncFromServer(false);
-        }
-        setSesi(segar);
-      });
+      setMemeriksaSesi(true);
+      void segarkanSesi().finally(() => setMemeriksaSesi(false));
     });
     return unsubRbac;
   }, [sesi?.token]);
 
+  const segarkanSesi = async () => {
+    const segar = await ambilSesiServer();
+    if (segar) {
+      db.prepareSessionSync(segar);
+      await db.syncFromServer(false);
+    }
+    setSesi(segar && bacaSesi()?.token === segar.token ? segar : null);
+  };
+
   const tanganiMasuk = async (sesiBaru: SesiLogin) => {
-    db.prepareSessionSync(sesiBaru.userId, `${sesiBaru.peran}:${JSON.stringify(sesiBaru.permissions)}`);
-    if (!sesiBaru.isHiddenDeveloper) {
+    setMemeriksaSesi(true);
+    db.prepareSessionSync(sesiBaru);
+    await db.syncFromServer(false);
+    const sesiAktif = bacaSesi()?.token === sesiBaru.token ? sesiBaru : null;
+    if (sesiAktif && !db.getSyncHoldReason() && !sesiAktif.isHiddenDeveloper) {
       db.logAudit(
         'Autentikasi & Akses',
         'Masuk berhasil (RBAC server terverifikasi)',
@@ -192,10 +189,17 @@ export default function App() {
         [{ kolom: 'sesi', nilaiLama: 'Keluar', nilaiBaru: `Masuk ${sesiBaru.masukPada}` }]
       );
     }
-    db.connectRealtimeSync(sesiBaru.token || null);
-    setSesi(sesiBaru);
+    db.connectRealtimeSync(sesiAktif?.token || null);
+    setSesi(sesiAktif);
     setMemeriksaSesi(false);
-    void db.syncFromServer(false);
+  };
+
+  const tanganiKeluar = () => {
+    void keluarDariServer().then((hasil) => {
+      setSesi(null);
+      db.connectRealtimeSync(null);
+      if (!hasil.ok && hasil.pesan) window.alert(hasil.pesan);
+    });
   };
 
   if (memeriksaSesi) {
@@ -210,20 +214,16 @@ export default function App() {
     );
   }
 
+  if (alasanTahan) {
+    return <SyncAccessHold reason={alasanTahan} onRetry={segarkanSesi} onLogout={tanganiKeluar} />;
+  }
+
   return (
     <Dasbor
+      key={`${sesi.userId}:${sesi.peran}:${sesi.employeeId || ''}:${JSON.stringify(sesi.permissions)}`}
       sesi={sesi}
-      onSegarkanSesi={async () => {
-        const segar = await ambilSesiServer();
-        setSesi(segar);
-      }}
-      onKeluar={() => {
-        void keluarDariServer().then((hasil) => {
-          setSesi(null);
-          db.connectRealtimeSync(null);
-          if (!hasil.ok && hasil.pesan) window.alert(hasil.pesan);
-        });
-      }}
+      onSegarkanSesi={segarkanSesi}
+      onKeluar={tanganiKeluar}
     />
   );
 }

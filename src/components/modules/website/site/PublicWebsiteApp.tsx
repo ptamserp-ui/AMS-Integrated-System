@@ -6,6 +6,7 @@ import {
   bacaSnapshotInline,
   bacaWebsiteTerbitLokal,
   muatSnapshot,
+  muatSnapshotDenganStatus,
   punyaDataOperasionalLokal,
   selesaikanGambar,
   terapkanFaviconAplikasi
@@ -14,13 +15,9 @@ import PublicWebsite from './PublicWebsite';
 import ErrorBoundary from '../../../common/ErrorBoundary';
 
 export type StatusTayangPublik = 'tayang' | 'belum' | 'tahan';
-type Status = 'memuat' | StatusTayangPublik;
+type Status = 'memuat' | 'gagal' | StatusTayangPublik;
 
 const ADALAH_PRATINJAU = new URLSearchParams(window.location.search).get('pratinjau') === '1';
-
-function capWaktuSnapshot(cfg: KonfigurasiSitus): number {
-  return Math.max(cfg.lastPublishedAt ?? 0, cfg.lastModifiedAt ?? 0);
-}
 
 /**
  * Pasang pendengar real-time terhadap perubahan status stok gudang, izin edar, recall,
@@ -98,24 +95,28 @@ export function useKonfigurasiOperasionalSinkron(dasar: KonfigurasiSitus | null)
   return hasil;
 }
 
-/** Rangkai sumber konten tayang: pilih snapshot paling mutakhir lalu selaraskan bila ada data operasional lokal. */
+/** Utamakan snapshot server, lalu selaraskan bila ada data operasional lokal. */
 export async function tentukanKontenTayang(): Promise<{
   konfigurasi: KonfigurasiSitus | null;
   status: StatusTayangPublik;
 }> {
   const lokalRingan = bacaWebsiteTerbitLokal();
   const inlineSnapshot = bacaSnapshotInline();
-  const dariServer =
-    (await muatSnapshot('/api/website/published')) ??
-    (await muatSnapshot('/website-published.json')) ??
-    inlineSnapshot;
+  const pembatalCadangan = new AbortController();
+  let cadangan: Promise<KonfigurasiSitus | null> | undefined;
+  const mulaiCadangan = () => cadangan ??= muatSnapshot('/website-published.json', pembatalCadangan.signal);
+  const timerCadangan = setTimeout(() => void mulaiCadangan(), 300);
+  let dariServer: KonfigurasiSitus | null;
+  try {
+    const hasilApi = await muatSnapshotDenganStatus('/api/website/published');
+    if (hasilApi.belumAda) return { konfigurasi: null, status: 'belum' };
+    dariServer = hasilApi.snapshot ?? (await mulaiCadangan()) ?? inlineSnapshot;
+  } finally {
+    clearTimeout(timerCadangan);
+    pembatalCadangan.abort();
+  }
 
-  const terpilih =
-    dariServer && lokalRingan
-      ? capWaktuSnapshot(lokalRingan) > capWaktuSnapshot(dariServer)
-        ? lokalRingan
-        : dariServer
-      : dariServer ?? lokalRingan;
+  const terpilih = dariServer ?? lokalRingan;
 
   if (!terpilih) return { konfigurasi: null, status: 'belum' };
 
@@ -138,14 +139,7 @@ export async function tentukanKontenTayang(): Promise<{
 }
 
 function bacaKontenAwalSinkron(): { konfigurasi: KonfigurasiSitus | null; status: Status } {
-  const inline = bacaSnapshotInline();
-  const lokal = bacaWebsiteTerbitLokal();
-  const kandidat =
-    inline && lokal
-      ? capWaktuSnapshot(lokal) >= capWaktuSnapshot(inline)
-        ? lokal
-        : inline
-      : inline ?? lokal;
+  const kandidat = bacaSnapshotInline();
   if (!kandidat) {
     return { konfigurasi: null, status: 'memuat' };
   }
@@ -185,10 +179,19 @@ export default function PublicWebsiteApp() {
     let publicWs: WebSocket | null = null;
     let publicReconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let diketahuiRevision = 0;
+    let urutanMuat = 0;
 
     const muatKonten = () => {
+      const urutan = ++urutanMuat;
       tentukanKontenTayang().then((hasil) => {
-        if (!batal) setIsi(hasil);
+        if (!batal && urutan === urutanMuat) setIsi(hasil);
+      }).catch((error: unknown) => {
+        console.error('Gagal memuat konten situs publik:', error);
+        if (!batal && urutan === urutanMuat) {
+          setIsi((sebelumnya) => sebelumnya.status === 'memuat'
+            ? { konfigurasi: null, status: 'gagal' }
+            : sebelumnya);
+        }
       });
     };
 
@@ -239,6 +242,7 @@ export default function PublicWebsiteApp() {
               diketahuiRevision = Math.max(diketahuiRevision, msg.revision);
             }
             if (msg.type === 'sync:update' && msg.key === 'website_published' && adalahKonfigurasiSitus(msg.value)) {
+              urutanMuat += 1;
               setIsi({
                 konfigurasi: msg.value,
                 status: msg.value.isPublished ? 'tayang' : 'tahan'
@@ -247,6 +251,7 @@ export default function PublicWebsiteApp() {
             }
             if (msg.type === 'sync:batch-update' && msg.entries?.website_published?.value && adalahKonfigurasiSitus(msg.entries.website_published.value)) {
               const cfg = msg.entries.website_published.value;
+              urutanMuat += 1;
               setIsi({
                 konfigurasi: cfg,
                 status: cfg.isPublished ? 'tayang' : 'tahan'
@@ -291,10 +296,9 @@ export default function PublicWebsiteApp() {
       berhentiTerbit = db.subscribeKoleksi(['website_published'], muatKonten);
     };
 
+    pasangWsPublikRingan();
     if (punyaDataOperasionalLokal()) {
       void hubungkanOperasional();
-    } else {
-      pasangWsPublikRingan();
     }
 
     return () => {
@@ -365,7 +369,9 @@ export default function PublicWebsiteApp() {
   }
 
   const pesan =
-    isi.status === 'tahan'
+    isi.status === 'gagal'
+      ? 'Konten situs tidak dapat dimuat. Periksa koneksi dan coba muat ulang halaman.'
+      : isi.status === 'tahan'
       ? 'Konten situs sedang ditahan (on hold). Halaman kembali tayang setelah penerbitan berikutnya.'
       : 'Belum ada konten yang diterbitkan untuk situs publik ini.';
 
@@ -375,7 +381,7 @@ export default function PublicWebsiteApp() {
         <div className="mx-auto w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center mb-5">
           <Construction className="w-7 h-7 text-amber-600" />
         </div>
-        <h1 className="text-lg font-bold text-slate-900">Situs Publik Belum Tayang</h1>
+        <h1 className="text-lg font-bold text-slate-900">{isi.status === 'gagal' ? 'Situs Tidak Dapat Dimuat' : 'Situs Publik Belum Tayang'}</h1>
         <p className="text-sm text-slate-600 mt-2 leading-relaxed">{pesan}</p>
         <a
           href="/"

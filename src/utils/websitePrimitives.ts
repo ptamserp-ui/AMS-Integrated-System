@@ -1,6 +1,7 @@
 import type { IzinEdarAlkes, KonfigurasiSitus, ProdukWebsite, TautanWebsite } from '../types';
 
 export const WEBSITE_MEDIA_KEY = 'ams_alkes_website_media_v1';
+export const KUNCI_PENDING_MEDIA = 'ams_alkes_pending_media_uploads_v1';
 export const STORAGE_PREFIX_PUBLIK = 'ams_alkes_';
 export const TAUTAN_KATALOG_RUJUKAN = 'https://remediams.com/product/';
 export const TAUTAN_KATALOG_PDF_RUJUKAN = 'https://drive.google.com/file/d/1w2ATfJkJczNrtZn5Ajk4jpl9NGINB7fT/view?usp=drive_link';
@@ -188,26 +189,149 @@ export function selesaikanGambar(referensi?: string): string | undefined {
   return media?.dataUrl ?? `/api/website/media/${encodeURIComponent(id)}`;
 }
 
-export const adalahKonfigurasiSitus = (nilai: unknown): nilai is KonfigurasiSitus => {
-  if (!nilai || typeof nilai !== 'object') return false;
-  const kandidat = nilai as Record<string, unknown>;
-  const identitas = kandidat.identitas as Record<string, unknown> | undefined;
-  const hero = kandidat.hero as Record<string, unknown> | undefined;
-  return Boolean(identitas && typeof identitas.nama === 'string' && hero && typeof hero.judul === 'string');
+const objekSitus = (nilai: unknown): nilai is Record<string, unknown> =>
+  Boolean(nilai && typeof nilai === 'object' && !Array.isArray(nilai));
+
+const medanTeksOpsional = (objek: Record<string, unknown>, medan: readonly string[]): boolean =>
+  medan.every((kunci) => objek[kunci] == null || typeof objek[kunci] === 'string');
+
+const daftarTeksOpsional = (nilai: unknown): boolean =>
+  nilai == null || (Array.isArray(nilai) && nilai.every((item) => typeof item === 'string'));
+
+const tautanSitusValid = (nilai: unknown): boolean =>
+  nilai == null || (
+    objekSitus(nilai) &&
+    typeof nilai.tipe === 'string' &&
+    ['whatsapp', 'url', 'halaman', 'email', 'telepon'].includes(nilai.tipe) &&
+    medanTeksOpsional(nilai, ['nilai'])
+  );
+
+const MEDAN_ITEM_SITUS = [
+  'nama', 'label', 'judul', 'deskripsi', 'keterangan', 'teks', 'eyebrow', 'subjudul',
+  'teksCta', 'teksCtaUtama', 'teksCtaCadangan', 'imageUrl', 'kategori', 'kategoriKey',
+  'kategoriRegulasi', 'tipeModel', 'kelasRisiko', 'nomorIzinEdar', 'statusIzinEdar',
+  'produsen', 'negaraAsal', 'spesifikasi', 'kodeSKU', 'varianId', 'satuan', 'zonaSuhu',
+  'hargaTayang', 'referensiHarga', 'badge', 'dokumenUrl', 'tautanLkpp', 'tautanBrosur',
+  'tautanVideo', 'tkdn', 'tahap', 'contoh', 'jenis', 'lokasi', 'tanggalMulai',
+  'tanggalSelesai', 'status', 'namaAlkes', 'potongan', 'periode', 'ringkasan', 'tanggal',
+  'kutipan', 'penulis', 'jabatan', 'institusi', 'pertanyaan', 'jawaban', 'alamat',
+  'telepon', 'email', 'penanggungJawab', 'provinsiDilayani', 'url', 'nilai'
+] as const;
+
+const itemSitusValid = (nilai: unknown): nilai is Record<string, unknown> =>
+  objekSitus(nilai) &&
+  typeof nilai.id === 'string' &&
+  typeof nilai.isActive === 'boolean' &&
+  medanTeksOpsional(nilai, MEDAN_ITEM_SITUS) &&
+  tautanSitusValid(nilai.tautan) &&
+  tautanSitusValid(nilai.tautanCtaUtama) &&
+  tautanSitusValid(nilai.tautanCtaCadangan);
+
+const kepalaSitusValid = (nilai: unknown): boolean =>
+  objekSitus(nilai) &&
+  typeof nilai.judul === 'string' &&
+  medanTeksOpsional(nilai, ['eyebrow', 'subjudul', 'teksTautan']) &&
+  tautanSitusValid(nilai.tautan);
+
+const kolomTautanValid = (nilai: unknown): boolean =>
+  objekSitus(nilai) &&
+  typeof nilai.id === 'string' &&
+  typeof nilai.judul === 'string' &&
+  Array.isArray(nilai.tautan) &&
+  nilai.tautan.every((item) => itemSitusValid(item) && typeof item.label === 'string');
+
+const DAFTAR_SEKSI_SITUS = [
+  'slide', 'kepercayaan', 'solusi', 'statistik', 'produk', 'merek', 'perjalanan',
+  'institusi', 'kegiatan', 'promo', 'artikel', 'galeri', 'testimoni', 'faq', 'kantor', 'sosial'
+] as const;
+
+/** Periksa struktur yang digunakan renderer, termasuk snapshot lama tanpa tampilan atau varian SKU. */
+export const adalahKonfigurasiSitus = (nilai: unknown): nilai is KonfigurasiSitus & Record<string, unknown> => {
+  if (!objekSitus(nilai) || typeof nilai.isPublished !== 'boolean' ||
+      typeof nilai.lastModifiedAt !== 'number' || !Number.isFinite(nilai.lastModifiedAt)) return false;
+  const { identitas, header, hero, menu, konsultasi, tentang, kontak, footerKolom } = nilai;
+  if (!objekSitus(identitas) || typeof identitas.nama !== 'string' ||
+      !medanTeksOpsional(identitas, ['tagline', 'judulSitus', 'metaDeskripsi', 'logoUrl', 'footerLogoUrl', 'faviconUrl'])) return false;
+  if (!objekSitus(header) ||
+      !medanTeksOpsional(header, ['utamaTeks', 'cadanganTeks', 'portalTeks', 'portalUrl']) ||
+      !tautanSitusValid(header.utamaTautan) || !tautanSitusValid(header.cadanganTautan)) return false;
+  if (!objekSitus(hero) || typeof hero.isActive !== 'boolean' || typeof hero.judul !== 'string' ||
+      !medanTeksOpsional(hero, ['badge', 'subjudul', 'gambarUrl', 'teksCtaUtama', 'teksCtaCadangan']) ||
+      !tautanSitusValid(hero.tautanCtaUtama) || !tautanSitusValid(hero.tautanCtaCadangan) ||
+      (hero.banner != null && (!Array.isArray(hero.banner) || !hero.banner.every(itemSitusValid)))) return false;
+  if (!Array.isArray(menu) || !menu.every((item) =>
+    itemSitusValid(item) && typeof item.label === 'string' &&
+    (item.kolom == null || (Array.isArray(item.kolom) && item.kolom.every(kolomTautanValid)))
+  )) return false;
+  for (const kunci of DAFTAR_SEKSI_SITUS) {
+    const seksi = nilai[kunci];
+    if (!objekSitus(seksi) || typeof seksi.isActive !== 'boolean' || !kepalaSitusValid(seksi.kepala) ||
+        !Array.isArray(seksi.item) || !seksi.item.every(itemSitusValid)) return false;
+  }
+  const produk = nilai.produk as { item: Record<string, unknown>[] };
+  if (!produk.item.every((item) =>
+    ['nama', 'kategori', 'produsen', 'nomorIzinEdar'].every((kunci) => typeof item[kunci] === 'string') &&
+    daftarTeksOpsional(item.poinJual) && daftarTeksOpsional(item.peruntukan) &&
+    daftarTeksOpsional(item.imageUrls) &&
+    (item.varianSku == null || (Array.isArray(item.varianSku) && item.varianSku.every((varian) =>
+      objekSitus(varian) && typeof varian.id === 'string' && medanTeksOpsional(varian, MEDAN_ITEM_SITUS)
+    ))) &&
+    (item.tanyaJawabTeknis == null || (Array.isArray(item.tanyaJawabTeknis) && item.tanyaJawabTeknis.every((tanyaJawab) =>
+      objekSitus(tanyaJawab) && typeof tanyaJawab.pertanyaan === 'string' && typeof tanyaJawab.jawaban === 'string'
+    )))
+  )) return false;
+  const merek = nilai.merek as { item: Record<string, unknown>[] };
+  if (!merek.item.every((item) => typeof item.nama === 'string')) return false;
+  if (!objekSitus(konsultasi) || typeof konsultasi.isActive !== 'boolean' ||
+      !kepalaSitusValid(konsultasi.kepala) ||
+      !medanTeksOpsional(konsultasi, ['catatan', 'teksCta']) || !tautanSitusValid(konsultasi.tautan)) return false;
+  if (!objekSitus(tentang) || typeof tentang.isActive !== 'boolean' || !kepalaSitusValid(tentang.kepala) ||
+      !Array.isArray(tentang.paragraf) || !tentang.paragraf.every((item) => typeof item === 'string') ||
+      !Array.isArray(tentang.capaian) || !tentang.capaian.every((item) =>
+        objekSitus(item) && typeof item.nilai === 'string' && typeof item.label === 'string'
+      ) || !medanTeksOpsional(tentang, ['imageUrl'])) return false;
+  if (!objekSitus(kontak) || typeof kontak.telepon !== 'string' || typeof kontak.email !== 'string' ||
+      typeof kontak.pesanPembukaWA !== 'string' ||
+      !medanTeksOpsional(kontak, ['whatsapp', 'jamOperasional', 'alamatKantor', 'tautanPeta'])) return false;
+  return Array.isArray(footerKolom) && footerKolom.every(kolomTautanValid) &&
+    medanTeksOpsional(nilai, ['footerCatatan', 'lastModifiedBy']);
 };
 
-export async function muatSnapshot(url: string): Promise<KonfigurasiSitus | null> {
+export async function muatSnapshotDenganStatus(
+  url: string,
+  signal?: AbortSignal
+): Promise<{ snapshot: KonfigurasiSitus | null; belumAda: boolean }> {
+  const controller = new AbortController();
+  const batalkan = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener('abort', batalkan, { once: true });
+  const timer = setTimeout(() => controller.abort(), 5000);
   try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) return null;
+    const res = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    if (!res.ok && res.status !== 404) return { snapshot: null, belumAda: false };
     const teks = await res.text();
     const data = JSON.parse(teks) as unknown;
-    if (adalahKonfigurasiSitus(data)) return data;
+    if (!res.ok) {
+      return {
+        snapshot: null,
+        belumAda: objekSitus(data) && data.error === 'WEBSITE_NOT_PUBLISHED'
+      };
+    }
+    if (adalahKonfigurasiSitus(data)) return { snapshot: data, belumAda: false };
     const pembungkus = (data as { config?: unknown })?.config;
-    return adalahKonfigurasiSitus(pembungkus) ? pembungkus : null;
+    if (adalahKonfigurasiSitus(pembungkus)) return { snapshot: pembungkus, belumAda: false };
+    console.error('[website] Snapshot yang diterima tidak valid:', url);
+    return { snapshot: null, belumAda: false };
   } catch {
-    return null;
+    return { snapshot: null, belumAda: false };
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', batalkan);
   }
+}
+
+export async function muatSnapshot(url: string, signal?: AbortSignal): Promise<KonfigurasiSitus | null> {
+  return (await muatSnapshotDenganStatus(url, signal)).snapshot;
 }
 
 /** Baca snapshot situs yang disuntikkan server ke window.__AMS_PUBLIC_SITE__ saat render awal. */

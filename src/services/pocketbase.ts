@@ -150,6 +150,9 @@ import {
   type ManifestAsalData,
   type RingkasanAsalKoleksi
 } from '../utils/dataOrigin';
+import { buatIdentitasSinkronisasi, HEADER_IDENTITAS_SYNC } from '../utils/identitasSinkronisasi';
+import { KUNCI_PENDING_MEDIA } from '../utils/websitePrimitives';
+import type { SesiLogin } from '../utils/autentikasi';
 
 import {
   INITIAL_IZIN_EDAR,
@@ -237,6 +240,7 @@ import {
   deleteSyncEntryFromFirestore,
   fetchPublicSiteFromFirestore,
   getFirebaseProjectInfo,
+  hydrateCloudStateOnServer,
   pullAllCloudStateFromFirestore,
   pushArchiveConfigToFirestore,
   pushPublicSiteToFirestore,
@@ -288,17 +292,20 @@ const KANAL_REALTIME_AMS = 'ams_alkes_realtime_v1';
 const KUNCI_SESI_AUTH = 'ams_alkes_sesi_login_v2';
 const KUNCI_ANTREAN_SYNC = '__ams_pending_sync_v1';
 const KUNCI_LAST_SYNC_USER = '__ams_last_sync_user_v1';
+const KUNCI_TAHAN_RESET_SYNC = '__ams_sync_reset_hold_v1';
 const KUNCI_MANIFEST_DATA = 'sistem_data_manifest';
 const LEGACY_RBAC_SYNC_KEYS = new Set(['rb_akun', 'rb_role']);
+const KUNCI_WEBSITE_OTORITATIF_SERVER = new Set(['website_draft', 'website_published', 'sales_website_rfq']);
 
 function isLegacyRbacSyncKey(key: string): boolean {
   return LEGACY_RBAC_SYNC_KEYS.has(key);
 }
 
 type SyncOp = { type: 'put'; value: unknown } | { type: 'delete' };
+type SesiSinkronisasi = Pick<SesiLogin, 'userId' | 'peran' | 'permissions' | 'employeeId'>;
 export type StatusSinkronisasi = 'idle' | 'syncing' | 'pending' | 'offline' | 'error';
 
-class AMSDatabaseManager {
+export class AMSDatabaseManager {
   private listeners: Map<string, Set<() => void>> = new Map();
   private remoteListeners: Set<(keys: string[], reason: string) => void> = new Set();
   private rbacListeners: Set<() => void> = new Set();
@@ -332,6 +339,11 @@ class AMSDatabaseManager {
   private lastSyncError: string | null = null;
   private lastRejectedKey: string | null = null;
   private initialServerHydrationDone: boolean = false;
+  private syncIdentity: string | null = null;
+  private syncEpoch: number = 0;
+  private syncScopeVerified: boolean = false;
+  private syncHoldReason: string | null = null;
+  private pendingSyncCorrupted: boolean = false;
   private isOnlineBrowser: boolean =
     typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
   private activeDbDriver: 'firebase' | 'pocketbase' = 'firebase';
@@ -424,8 +436,13 @@ class AMSDatabaseManager {
     this.firebaseUnsubRealtime = attachFirestoreRealtimeSync({
       onEntriesChanged: (entries) => {
         const changed: string[] = [];
+        let perluBacaServer = false;
         for (const [key, entry] of Object.entries(entries)) {
           if (isLegacyRbacSyncKey(key)) continue;
+          if (KUNCI_WEBSITE_OTORITATIF_SERVER.has(key)) {
+            perluBacaServer = true;
+            continue;
+          }
           if (this.pendingSyncKeys.has(key)) continue;
           if (this.applyRemoteEntry(key, entry.value, undefined, true, false)) {
             changed.push(key);
@@ -435,15 +452,24 @@ class AMSDatabaseManager {
           this.firebaseSyncedAt = new Date().toISOString();
           this.emitRemoteUpdate(changed, 'firebase-firestore');
         }
+        if (perluBacaServer && this.getAuthTokenFromStorage()) void this.syncFromServer(false);
       },
       onEntriesRemoved: (removedKeys) => {
+        let perluBacaServer = false;
+        let berubah = false;
         for (const key of removedKeys) {
+          if (KUNCI_WEBSITE_OTORITATIF_SERVER.has(key)) {
+            perluBacaServer = true;
+            continue;
+          }
           if (isLegacyRbacSyncKey(key) || this.pendingSyncKeys.has(key)) continue;
           this.applyRemoteDelete(key, 'firebase-firestore');
+          berubah = true;
         }
-        if (removedKeys.length > 0) {
+        if (berubah) {
           this.firebaseSyncedAt = new Date().toISOString();
         }
+        if (perluBacaServer && this.getAuthTokenFromStorage()) void this.syncFromServer(false);
       },
       onRbacChanged: () => {
         this.rbacActivityListeners.forEach((cb) => {
@@ -467,35 +493,111 @@ class AMSDatabaseManager {
       const raw = localStorage.getItem(KUNCI_ANTREAN_SYNC);
       if (!raw) return;
       const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        let antreanDibersihkan = false;
-        parsed.forEach((k) => {
-          if (typeof k !== 'string' || !k) return;
-          if (isLegacyRbacSyncKey(k)) {
-            antreanDibersihkan = true;
-            return;
-          }
-          this.pendingSyncKeys.add(k);
-        });
-        if (antreanDibersihkan) this.simpanAntreanSyncPersisten();
+      if (!Array.isArray(parsed) || parsed.some((key) => typeof key !== 'string' || !key)) {
+        throw new Error('Daftar antrean sinkronisasi tidak valid.');
       }
-    } catch {
-      /* abaikan antrean rusak */
+      parsed.forEach((key: string) => this.pendingSyncKeys.add(key));
+    } catch (error) {
+      this.pendingSyncCorrupted = true;
+      this.syncHoldReason = 'Antrean offline tidak dapat dibaca. Jangan hapus data browser; hubungi administrator.';
+      console.error('Gagal membaca antrean sinkronisasi:', error);
     }
   }
 
   private simpanAntreanSyncPersisten() {
     try {
       if (typeof localStorage === 'undefined') return;
+      if (this.pendingSyncCorrupted) throw new Error('Antrean offline yang rusak tidak boleh ditimpa.');
       const daftar = Array.from(this.pendingSyncKeys);
       if (daftar.length === 0) {
         localStorage.removeItem(KUNCI_ANTREAN_SYNC);
       } else {
         localStorage.setItem(KUNCI_ANTREAN_SYNC, JSON.stringify(daftar));
       }
-    } catch {
-      /* abaikan bila storage penuh */
+    } catch (error) {
+      console.error('Gagal menyimpan antrean sinkronisasi:', error);
+      this.tahanSinkronisasi('Antrean offline tidak dapat disimpan dengan aman. Jangan tutup atau hapus data browser; hubungi administrator.');
     }
+  }
+
+  private jumlahAntreanMedia(): number {
+    if (typeof localStorage === 'undefined') return 0;
+    try {
+      const raw = localStorage.getItem(KUNCI_PENDING_MEDIA);
+      if (!raw) return 0;
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? parsed.length : -1;
+    } catch {
+      return -1;
+    }
+  }
+
+  public hasPendingOfflineChanges(): boolean {
+    return this.pendingSyncCorrupted || this.pendingSyncKeys.size > 0 || this.jumlahAntreanMedia() !== 0;
+  }
+
+  private identitasSesiMasihSama(identity: string): boolean {
+    try {
+      if (typeof localStorage === 'undefined') return false;
+      const raw = localStorage.getItem(KUNCI_SESI_AUTH);
+      if (!raw || localStorage.getItem(KUNCI_LAST_SYNC_USER) !== identity) return false;
+      const sesi = JSON.parse(raw) as Partial<SesiSinkronisasi>;
+      if (!sesi.userId || !sesi.peran || !sesi.permissions) return false;
+      return buatIdentitasSinkronisasi(sesi.userId, sesi.peran, sesi.permissions, sesi.employeeId) === identity;
+    } catch {
+      return false;
+    }
+  }
+
+  private konteksSyncMasihSama(identity: string, epoch: number): boolean {
+    return this.syncIdentity === identity &&
+      this.syncEpoch === epoch &&
+      this.identitasSesiMasihSama(identity);
+  }
+
+  public identitasSyncSiap(): string | null {
+    const identity = this.syncIdentity;
+    if (!identity || !this.syncScopeVerified || this.syncHoldReason) return null;
+    if (this.identitasSesiMasihSama(identity)) return identity;
+    if (this.hasPendingOfflineChanges()) {
+      this.tahanSinkronisasi('Sesi berubah saat masih ada perubahan offline. Pulihkan akun dan hak akses semula.');
+    } else {
+      this.syncScopeVerified = false;
+    }
+    return null;
+  }
+
+  public isIdentitasSyncSiap(identity: string): boolean {
+    return this.identitasSyncSiap() === identity;
+  }
+
+  public getSyncHoldReason(): string | null {
+    return this.syncHoldReason;
+  }
+
+  public tahanSinkronisasi(pesan: string, perluRekonsiliasi = false): void {
+    this.syncScopeVerified = false;
+    this.syncEpoch += 1;
+    this.syncHoldReason = pesan;
+    for (const timer of this.syncRetryTimers.values()) clearTimeout(timer);
+    this.syncRetryTimers.clear();
+    if (perluRekonsiliasi && typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(KUNCI_TAHAN_RESET_SYNC, pesan);
+      } catch (error) {
+        console.error('Gagal menyimpan penanda rekonsiliasi sinkronisasi:', error);
+      }
+    }
+    this.updateConnectionStatusLabel();
+  }
+
+  private mulaiVerifikasiUlangSync(): void {
+    this.syncScopeVerified = false;
+    this.syncEpoch += 1;
+    if (this.hasPendingOfflineChanges()) {
+      this.syncHoldReason = 'Memeriksa kembali identitas dan hak akses sebelum mengirim perubahan offline.';
+    }
+    this.updateConnectionStatusLabel();
   }
 
   private getAuthTokenFromStorage(): string | null {
@@ -527,6 +629,7 @@ class AMSDatabaseManager {
         return;
       }
       if (e.key === KUNCI_SESI_AUTH) {
+        this.mulaiVerifikasiUlangSync();
         if (!e.newValue) {
           this.currentWsToken = null;
           window.dispatchEvent(new CustomEvent('ams:auth-expired'));
@@ -538,6 +641,15 @@ class AMSDatabaseManager {
               /* abaikan */
             }
           });
+        }
+        return;
+      }
+      if (e.key === KUNCI_ANTREAN_SYNC || e.key === KUNCI_LAST_SYNC_USER) {
+        this.muatAntreanSyncPersisten();
+        if (this.syncIdentity && this.hasPendingOfflineChanges() && !this.identitasSesiMasihSama(this.syncIdentity)) {
+          this.tahanSinkronisasi('Akun pada tab lain berubah saat masih ada perubahan offline. Pulihkan akun semula.');
+        } else {
+          this.updateConnectionStatusLabel();
         }
         return;
       }
@@ -560,12 +672,8 @@ class AMSDatabaseManager {
     window.addEventListener('online', () => {
       this.isOnlineBrowser = true;
       this.updateConnectionStatusLabel();
-      void this.flushPendingSync();
-      void import('../utils/mediaUpload')
-        .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
-        .catch(() => {});
       if (this.wsShouldConnect) {
-        void this.syncFromServer(true);
+        void this.syncFromServer(false);
       }
     });
 
@@ -578,14 +686,8 @@ class AMSDatabaseManager {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           this.isOnlineBrowser = typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
-          if (this.pendingSyncKeys.size > 0) {
-            void this.flushPendingSync();
-          }
-          void import('../utils/mediaUpload')
-            .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
-            .catch(() => {});
           if (this.wsShouldConnect) {
-            void this.syncFromServer(true);
+            void this.syncFromServer(false);
           }
         }
       });
@@ -664,7 +766,10 @@ class AMSDatabaseManager {
   }
 
   private updateConnectionStatusLabel() {
-    if (!this.isOnlineBrowser) {
+    if (this.syncHoldReason) {
+      this.syncStateStatus = 'error';
+      this.connectionStatusText = this.syncHoldReason;
+    } else if (!this.isOnlineBrowser) {
       this.syncStateStatus = 'offline';
       this.connectionStatusText =
         this.pendingSyncKeys.size > 0
@@ -773,6 +878,8 @@ class AMSDatabaseManager {
       pendingCount: this.pendingSyncKeys.size,
       pendingKeys: Array.from(this.pendingSyncKeys),
       syncState: this.syncStateStatus,
+      syncHoldReason: this.syncHoldReason,
+      pendingMediaCount: this.jumlahAntreanMedia(),
       lastSyncError: this.lastSyncError,
       lastRejectedKey: this.lastRejectedKey,
       pocketbaseUrl: PB_URL
@@ -897,19 +1004,27 @@ class AMSDatabaseManager {
     });
   }
 
-  private bacaOperasiDariLocalStorage(key: string): SyncOp {
+  private bacaOperasiDariLocalStorage(key: string): SyncOp | null {
     try {
-      if (typeof localStorage === 'undefined') return { type: 'delete' };
+      if (typeof localStorage === 'undefined') throw new Error('Penyimpanan lokal tidak tersedia.');
       const raw = localStorage.getItem(STORAGE_PREFIX + key);
       if (raw === null) return { type: 'delete' };
       return { type: 'put', value: JSON.parse(raw) };
-    } catch {
-      return { type: 'delete' };
+    } catch (error) {
+      console.error(`Gagal membaca perubahan offline ${key}:`, error);
+      this.tahanSinkronisasi('Perubahan offline tidak dapat dibaca. Jangan hapus data browser; hubungi administrator.');
+      return null;
     }
   }
 
+  private operasiMasihTersimpan(key: string, op: SyncOp): boolean {
+    if (typeof localStorage === 'undefined') return false;
+    const raw = localStorage.getItem(STORAGE_PREFIX + key);
+    return op.type === 'delete' ? raw === null : raw === JSON.stringify(op.value);
+  }
+
   private jadwalkanUlangSync(key: string) {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !this.identitasSyncSiap()) return;
     if (this.syncRetryTimers.has(key)) return;
     const percobaan = (this.syncRetryCounts.get(key) ?? 0) + 1;
     this.syncRetryCounts.set(key, percobaan);
@@ -917,7 +1032,7 @@ class AMSDatabaseManager {
     const timer = setTimeout(() => {
       this.syncRetryTimers.delete(key);
       if (!this.pendingSyncKeys.has(key)) return;
-      if (!this.activeSyncKeys.has(key)) {
+      if (!this.activeSyncKeys.has(key) && this.identitasSyncSiap()) {
         void this.drainKeySync(key);
       }
     }, jeda);
@@ -938,18 +1053,23 @@ class AMSDatabaseManager {
     this.syncRetryCounts.delete(key);
     this.updateConnectionStatusLabel();
 
-    if (!this.getAuthTokenFromStorage() || !this.isOnlineBrowser) return;
+    if (!this.getAuthTokenFromStorage() || !this.isOnlineBrowser || !this.identitasSyncSiap()) return;
     if (this.activeSyncKeys.has(key)) return;
     void this.drainKeySync(key);
   }
 
   private async drainKeySync(key: string) {
     if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    const identity = this.identitasSyncSiap();
+    if (!identity) return;
+    const epoch = this.syncEpoch;
     this.activeSyncKeys.add(key);
     this.updateConnectionStatusLabel();
     try {
       while (this.pendingSyncKeys.has(key) || this.latestSyncOp.has(key)) {
+        if (!this.konteksSyncMasihSama(identity, epoch) || !this.identitasSyncSiap()) break;
         const op = this.latestSyncOp.get(key) ?? this.bacaOperasiDariLocalStorage(key);
+        if (!op) break;
         this.latestSyncOp.set(key, op);
 
         const token = this.getAuthTokenFromStorage();
@@ -961,7 +1081,8 @@ class AMSDatabaseManager {
           const url = `/api/sync/keys/${encodeURIComponent(key)}`;
           const headers: Record<string, string> = {
             Authorization: `Bearer ${token}`,
-            'X-Sync-Client-Id': this.clientTabId
+            'X-Sync-Client-Id': this.clientTabId,
+            [HEADER_IDENTITAS_SYNC]: encodeURIComponent(identity)
           };
           let res: Response;
           if (op.type === 'put') {
@@ -980,25 +1101,24 @@ class AMSDatabaseManager {
             });
           }
 
+          if (!this.konteksSyncMasihSama(identity, epoch)) break;
           if (res.status === 401 && typeof window !== 'undefined') {
+            this.mulaiVerifikasiUlangSync();
             window.dispatchEvent(new CustomEvent('ams:auth-expired'));
             this.lastSyncError = 'Sesi berakhir';
             break;
           }
 
-          if (res.status === 400 || res.status === 403) {
+          if ([400, 403, 409, 410].includes(res.status)) {
             const errPayload = (await res.json().catch(() => null)) as { pesan?: string } | null;
+            if (!this.konteksSyncMasihSama(identity, epoch)) break;
             this.lastSyncError = errPayload?.pesan || `HTTP ${res.status}`;
             this.lastRejectedKey = key;
-            if (this.latestSyncOp.get(key) === op) {
-              this.latestSyncOp.delete(key);
-              this.pendingSyncKeys.delete(key);
-              this.syncRetryCounts.delete(key);
-              this.simpanAntreanSyncPersisten();
+            if (res.status !== 400) {
+              this.tahanSinkronisasi(`Server menolak perubahan offline: ${this.lastSyncError}`);
             }
             this.updateConnectionStatusLabel();
-            void this.syncFromServer(false);
-            continue;
+            break;
           }
 
           if (!res.ok) {
@@ -1010,7 +1130,10 @@ class AMSDatabaseManager {
           const payload = (await res.json().catch(() => null)) as {
             version?: number;
             revision?: number;
+            peringatan?: unknown;
           } | null;
+          if (!this.konteksSyncMasihSama(identity, epoch)) break;
+          if (typeof payload?.peringatan === 'string') console.warn('[sync] ' + payload.peringatan);
           if (typeof payload?.version === 'number') {
             this.serverVersions[key] = Math.max(this.serverVersions[key] ?? 0, payload.version);
           }
@@ -1027,11 +1150,13 @@ class AMSDatabaseManager {
           }
 
           // Hapus hanya bila belum ada mutasi baru yang masuk selama request berjalan
-          if (this.latestSyncOp.get(key) === op) {
+          if (this.latestSyncOp.get(key) === op && this.operasiMasihTersimpan(key, op)) {
             this.latestSyncOp.delete(key);
             this.pendingSyncKeys.delete(key);
             this.syncRetryCounts.delete(key);
             this.simpanAntreanSyncPersisten();
+          } else if (this.latestSyncOp.get(key) === op) {
+            this.latestSyncOp.delete(key);
           }
         } catch {
           this.lastSyncError = 'Koneksi server terputus';
@@ -1050,9 +1175,11 @@ class AMSDatabaseManager {
       return { synced: 0, remaining: this.pendingSyncKeys.size };
     }
     const token = this.getAuthTokenFromStorage();
-    if (!token || !this.isOnlineBrowser) {
+    const identity = this.identitasSyncSiap();
+    if (!token || !this.isOnlineBrowser || !identity) {
       return { synced: 0, remaining: this.pendingSyncKeys.size };
     }
+    const epoch = this.syncEpoch;
 
     const keys = Array.from(this.pendingSyncKeys).filter((k) => !this.activeSyncKeys.has(k));
     if (keys.length === 0) {
@@ -1079,6 +1206,11 @@ class AMSDatabaseManager {
         this.syncRetryTimers.delete(k);
       }
       const op = this.latestSyncOp.get(k) ?? this.bacaOperasiDariLocalStorage(k);
+      if (!op) {
+        for (const activeKey of keys) this.activeSyncKeys.delete(activeKey);
+        this.updateConnectionStatusLabel();
+        return { synced: 0, remaining: this.pendingSyncKeys.size };
+      }
       this.latestSyncOp.set(k, op);
       snapshotOps.set(k, op);
       if (op.type === 'put') updates[k] = op.value;
@@ -1094,12 +1226,17 @@ class AMSDatabaseManager {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
-          'X-Sync-Client-Id': this.clientTabId
+          'X-Sync-Client-Id': this.clientTabId,
+          [HEADER_IDENTITAS_SYNC]: encodeURIComponent(identity)
         },
         body: JSON.stringify({ updates, deletes, clientId: this.clientTabId })
       });
 
+      if (!this.konteksSyncMasihSama(identity, epoch)) {
+        return { synced: 0, remaining: this.pendingSyncKeys.size };
+      }
       if (res.status === 401) {
+        this.mulaiVerifikasiUlangSync();
         window.dispatchEvent(new CustomEvent('ams:auth-expired'));
         this.lastSyncError = 'Sesi berakhir';
         return { synced: 0, remaining: this.pendingSyncKeys.size };
@@ -1109,7 +1246,12 @@ class AMSDatabaseManager {
         const payload = (await res.json().catch(() => null)) as {
           revision?: number;
           versions?: Record<string, number>;
+          peringatan?: unknown;
         } | null;
+        if (!this.konteksSyncMasihSama(identity, epoch)) {
+          return { synced: 0, remaining: this.pendingSyncKeys.size };
+        }
+        if (typeof payload?.peringatan === 'string') console.warn('[sync] ' + payload.peringatan);
         if (typeof payload?.revision === 'number') {
           this.serverRevision = Math.max(this.serverRevision, payload.revision);
         }
@@ -1127,11 +1269,13 @@ class AMSDatabaseManager {
           if (this.activeDbDriver === 'firebase' && snapOp && authFirebase.currentUser?.emailVerified) {
             void this.mirrorOpToFirestore(k, snapOp, payload?.versions?.[k] ?? this.serverVersions[k] ?? 1);
           }
-          if (this.latestSyncOp.get(k) === snapOp) {
+          if (snapOp && this.latestSyncOp.get(k) === snapOp && this.operasiMasihTersimpan(k, snapOp)) {
             this.latestSyncOp.delete(k);
             this.pendingSyncKeys.delete(k);
             this.syncRetryCounts.delete(k);
             synced += 1;
+          } else if (this.latestSyncOp.get(k) === snapOp) {
+            this.latestSyncOp.delete(k);
           }
         }
         this.simpanAntreanSyncPersisten();
@@ -1141,6 +1285,7 @@ class AMSDatabaseManager {
           this.activeSyncKeys.delete(k);
         }
         for (const k of keys) {
+          if (!this.identitasSyncSiap()) break;
           await this.drainKeySync(k);
           if (!this.pendingSyncKeys.has(k)) synced += 1;
         }
@@ -1170,56 +1315,79 @@ class AMSDatabaseManager {
   }
 
   public async syncNow(): Promise<{ ok: boolean; uploaded: number; downloaded: number; remaining: number }> {
-    const push = await this.flushPendingSync();
+    const sebelumnya = this.pendingSyncKeys.size;
     const pull = await this.syncFromServer(false);
+    const push = await this.flushPendingSync();
+    const pendingMedia = this.jumlahAntreanMedia();
     return {
-      ok: push.remaining === 0,
-      uploaded: push.synced,
+      ok: this.syncScopeVerified && push.remaining === 0 && pendingMedia === 0 && !this.syncHoldReason,
+      uploaded: Math.max(push.synced, sebelumnya - push.remaining),
       downloaded: pull.length,
-      remaining: push.remaining
+      remaining: push.remaining + Math.max(0, pendingMedia)
     };
   }
 
-  public prepareSessionSync(userId?: string | null, accessScope = ''): void {
+  public prepareSessionSync(sesi: SesiSinkronisasi): void {
+    this.syncEpoch += 1;
+    this.syncScopeVerified = false;
+    this.syncIdentity = buatIdentitasSinkronisasi(sesi.userId, sesi.peran, sesi.permissions, sesi.employeeId);
     this.serverVersions = {};
     this.initialServerHydrationDone = false;
     this.lastSyncError = null;
     this.lastRejectedKey = null;
-    if (typeof localStorage === 'undefined') return;
+    this.muatAntreanSyncPersisten();
     try {
-      const syncIdentity = userId ? `${userId}:${accessScope}` : '';
-      const prevUserId = localStorage.getItem(KUNCI_LAST_SYNC_USER);
-      if (userId) {
-        if (prevUserId && prevUserId !== syncIdentity) {
-          this.pendingSyncKeys.clear();
-          this.latestSyncOp.clear();
-          for (const timer of this.syncRetryTimers.values()) {
-            clearTimeout(timer);
-          }
-          this.syncRetryTimers.clear();
-          this.syncRetryCounts.clear();
-          this.simpanAntreanSyncPersisten();
-          this.isApplyingRemote = true;
-          try {
-            for (let i = localStorage.length - 1; i >= 0; i--) {
-              const k = localStorage.key(i);
-              if (k && k.startsWith(STORAGE_PREFIX) && k !== KUNCI_SESI_AUTH) {
-                localStorage.removeItem(k);
-              }
-            }
-          } finally {
-            this.isApplyingRemote = false;
-          }
-        }
-        localStorage.setItem(KUNCI_LAST_SYNC_USER, syncIdentity);
+      if (typeof localStorage === 'undefined') throw new Error('Penyimpanan lokal tidak tersedia.');
+      const alasanRekonsiliasi = localStorage.getItem(KUNCI_TAHAN_RESET_SYNC);
+      if (alasanRekonsiliasi) {
+        this.tahanSinkronisasi(alasanRekonsiliasi);
+        return;
       }
-    } catch {
-      /* abaikan error storage */
+      if (this.pendingSyncCorrupted || this.jumlahAntreanMedia() < 0) {
+        this.tahanSinkronisasi('Antrean offline tidak dapat dibaca. Jangan hapus data browser; hubungi administrator.');
+        return;
+      }
+      const identitasSebelumnya = localStorage.getItem(KUNCI_LAST_SYNC_USER);
+      if (identitasSebelumnya !== this.syncIdentity && this.hasPendingOfflineChanges()) {
+        const antreanLama = !identitasSebelumnya?.startsWith('[');
+        this.tahanSinkronisasi(
+          antreanLama
+            ? 'Identitas asal antrean offline lama belum dapat diverifikasi. Jangan hapus data browser; hubungi administrator.'
+            : 'Akun, peran, izin, atau ID karyawan berubah saat masih ada perubahan offline. Pulihkan akses semula bersama administrator.'
+        );
+        return;
+      }
+      if (identitasSebelumnya && identitasSebelumnya !== this.syncIdentity) {
+        this.latestSyncOp.clear();
+        for (const timer of this.syncRetryTimers.values()) clearTimeout(timer);
+        this.syncRetryTimers.clear();
+        this.syncRetryCounts.clear();
+        this.isApplyingRemote = true;
+        try {
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith(STORAGE_PREFIX) && k !== KUNCI_SESI_AUTH) {
+              localStorage.removeItem(k);
+            }
+          }
+        } finally {
+          this.isApplyingRemote = false;
+        }
+      }
+      localStorage.setItem(KUNCI_LAST_SYNC_USER, this.syncIdentity);
+      this.syncHoldReason = null;
+    } catch (error) {
+      console.error('Gagal menyiapkan identitas sinkronisasi:', error);
+      this.tahanSinkronisasi('Identitas sinkronisasi tidak dapat disimpan dengan aman. Hubungi administrator.');
+      return;
     }
     this.updateConnectionStatusLabel();
   }
 
   public resetSessionSyncState(): void {
+    this.syncEpoch += 1;
+    this.syncIdentity = null;
+    this.syncScopeVerified = false;
     this.initialServerHydrationDone = false;
     this.serverVersions = {};
     this.lastSyncError = null;
@@ -1235,6 +1403,20 @@ class AMSDatabaseManager {
     forceApply = false
   ): boolean {
     if (isLegacyRbacSyncKey(key)) return false;
+    if (
+      key === KUNCI_MANIFEST_DATA &&
+      value && typeof value === 'object' &&
+      (value as Partial<ManifestAsalData>).dummyDihapus &&
+      !this.getManifestData().dummyDihapus &&
+      this.hasPendingOfflineChanges()
+    ) {
+      this.tahanSinkronisasi(
+        'Data server dibersihkan saat perubahan offline masih tertunda. Jangan hapus data browser; hubungi administrator untuk rekonsiliasi.',
+        true
+      );
+      return false;
+    }
+    if (this.pendingSyncKeys.has(key)) return false;
     if (typeof localStorage === 'undefined') return false;
     if (!forceApply && typeof version === 'number' && (this.serverVersions[key] ?? 0) >= version) {
       return false;
@@ -1261,6 +1443,7 @@ class AMSDatabaseManager {
 
   private applyRemoteDelete(key: string, reason = 'ws'): boolean {
     if (isLegacyRbacSyncKey(key)) return false;
+    if (this.pendingSyncKeys.has(key)) return false;
     delete this.serverVersions[key];
     if (typeof localStorage === 'undefined') return false;
     const hadKey = localStorage.getItem(STORAGE_PREFIX + key) !== null;
@@ -1280,6 +1463,7 @@ class AMSDatabaseManager {
   public async hydratePublicSettingsFromServer(): Promise<string[]> {
     if (typeof window === 'undefined' || typeof fetch !== 'function') return [];
     const changed: string[] = [];
+    let adaSnapshotServer = false;
     try {
       const res = await fetch('/api/sync/public-settings', { cache: 'no-store' });
       if (res.ok) {
@@ -1291,6 +1475,7 @@ class AMSDatabaseManager {
           this.serverRevision = Math.max(this.serverRevision, data.revision);
         }
         for (const [key, entry] of Object.entries(data.entries || {})) {
+          if (key === 'website_published' && entry.value) adaSnapshotServer = true;
           if (this.applyRemoteEntry(key, entry.value, entry.version, true)) {
             changed.push(key);
           }
@@ -1301,7 +1486,7 @@ class AMSDatabaseManager {
     }
 
     // Jika baru re-publish & snapshot server belum ada atau ingin membandingkan Firestore publik
-    if (this.activeDbDriver === 'firebase') {
+    if (!adaSnapshotServer && this.activeDbDriver === 'firebase') {
       try {
         const pubSite = await fetchPublicSiteFromFirestore();
         if (pubSite && pubSite.identitas && pubSite.hero) {
@@ -1327,13 +1512,28 @@ class AMSDatabaseManager {
     if (!token) {
       return this.hydratePublicSettingsFromServer();
     }
+    const identity = this.syncIdentity;
+    if (!identity) return [];
+    if (!this.identitasSesiMasihSama(identity)) {
+      if (!this.syncHoldReason && this.hasPendingOfflineChanges()) {
+        this.tahanSinkronisasi('Sesi berubah saat masih ada perubahan offline. Pulihkan akun dan hak akses semula.');
+      }
+      return [];
+    }
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(KUNCI_TAHAN_RESET_SYNC)) return [];
+    const epoch = this.syncEpoch;
     try {
-      const hasKnown = deltaOnly && Object.keys(this.serverVersions).length > 0;
+      const hasKnown = deltaOnly && this.syncScopeVerified && Object.keys(this.serverVersions).length > 0;
       const knownKeys = new Set(Object.keys(this.serverVersions));
+      for (const key of this.pendingSyncKeys) knownKeys.add(key);
       if (typeof localStorage !== 'undefined') {
         for (let i = 0; i < localStorage.length; i++) {
           const storageKey = localStorage.key(i);
-          if (storageKey?.startsWith(STORAGE_PREFIX)) {
+          if (
+            storageKey?.startsWith(STORAGE_PREFIX) &&
+            storageKey !== KUNCI_SESI_AUTH &&
+            storageKey !== KUNCI_PENDING_MEDIA
+          ) {
             knownKeys.add(storageKey.slice(STORAGE_PREFIX.length));
           }
         }
@@ -1346,50 +1546,86 @@ class AMSDatabaseManager {
         method: 'GET',
         credentials: 'include',
         cache: 'no-store',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: {
+          Authorization: `Bearer ${token}`,
+          [HEADER_IDENTITAS_SYNC]: encodeURIComponent(identity)
+        }
       });
+      if (!this.konteksSyncMasihSama(identity, epoch)) return [];
       if (res.status === 401) {
+        this.mulaiVerifikasiUlangSync();
         window.dispatchEvent(new CustomEvent('ams:auth-expired'));
         return [];
       }
-      if (!res.ok) return [];
+      if (res.status === 409) {
+        this.tahanSinkronisasi('Identitas atau hak akses server berubah. Periksa ulang sesi bersama administrator.');
+        return [];
+      }
+      if (!res.ok) {
+        this.lastSyncError = `Gagal memeriksa hak sinkronisasi (HTTP ${res.status})`;
+        this.updateConnectionStatusLabel();
+        return [];
+      }
       const data = (await res.json()) as {
         revision?: number;
         entries?: Record<string, { value: unknown; version: number }>;
         allowedKeys?: string[];
+        writableKeys?: string[];
+        deletableKeys?: string[];
       };
+      if (!this.konteksSyncMasihSama(identity, epoch)) return [];
+      if (!Array.isArray(data.allowedKeys) || !Array.isArray(data.writableKeys) || !Array.isArray(data.deletableKeys)) {
+        const pesan = 'Server belum menyediakan verifikasi hak antrean offline. Hubungi administrator.';
+        if (this.hasPendingOfflineChanges()) this.tahanSinkronisasi(pesan);
+        else {
+          this.lastSyncError = pesan;
+          this.updateConnectionStatusLabel();
+        }
+        return [];
+      }
+      const writable = new Set(data.writableKeys);
+      const deletable = new Set(data.deletableKeys);
+      for (const key of this.pendingSyncKeys) {
+        const op = this.latestSyncOp.get(key) ?? this.bacaOperasiDariLocalStorage(key);
+        if (!op) return [];
+        if (!(op.type === 'put' ? writable.has(key) : deletable.has(key))) {
+          this.lastRejectedKey = key;
+          this.tahanSinkronisasi('Hak akses untuk perubahan offline tidak lagi tersedia. Pulihkan akses semula bersama administrator.');
+          return [];
+        }
+      }
       if (typeof data.revision === 'number') {
         this.serverRevision = Math.max(this.serverRevision, data.revision);
       }
       const changed: string[] = [];
       const remoteEntries = data.entries || {};
-      if (Array.isArray(data.allowedKeys)) {
-        const allowed = new Set(data.allowedKeys);
-        let queueChanged = false;
-        for (const key of knownKeys) {
-          if (allowed.has(key)) continue;
-          this.pendingSyncKeys.delete(key);
-          this.latestSyncOp.delete(key);
-          const retryTimer = this.syncRetryTimers.get(key);
-          if (retryTimer) clearTimeout(retryTimer);
-          this.syncRetryTimers.delete(key);
-          this.syncRetryCounts.delete(key);
-          delete this.serverVersions[key];
-          queueChanged = true;
-          if (this.applyRemoteDelete(key, 'permission-revoked')) changed.push(key);
-        }
-        if (queueChanged) this.simpanAntreanSyncPersisten();
-      }
-      const prevKnownKeys = Object.keys(this.serverVersions);
       const remoteManifest = remoteEntries[KUNCI_MANIFEST_DATA]?.value as Partial<ManifestAsalData> | undefined;
       const remotePurged = Boolean(remoteManifest?.dummyDihapus);
+      if (remotePurged && !this.getManifestData().dummyDihapus && this.hasPendingOfflineChanges()) {
+        this.tahanSinkronisasi(
+          'Data server dibersihkan saat perubahan offline masih tertunda. Jangan hapus data browser; hubungi administrator untuk rekonsiliasi.',
+          true
+        );
+        return [];
+      }
+      this.syncScopeVerified = true;
+      this.syncHoldReason = null;
+      this.lastSyncError = null;
+      this.lastRejectedKey = null;
+      const allowed = new Set(data.allowedKeys);
+      for (const key of knownKeys) {
+        if (allowed.has(key) || this.pendingSyncKeys.has(key)) continue;
+        delete this.serverVersions[key];
+        if (this.applyRemoteDelete(key, 'permission-revoked')) changed.push(key);
+      }
+      const prevKnownKeys = Object.keys(this.serverVersions);
 
       const forceApply = !deltaOnly;
 
       // Pastikan manifest diterapkan terlebih dahulu agar penanda dummyDihapus aktif sebelum koleksi lain
       if (remoteEntries[KUNCI_MANIFEST_DATA]) {
         const me = remoteEntries[KUNCI_MANIFEST_DATA];
-        if (!this.pendingSyncKeys.has(KUNCI_MANIFEST_DATA) || remotePurged) {
+        if (!this.pendingSyncKeys.has(KUNCI_MANIFEST_DATA)) {
           if (this.applyRemoteEntry(KUNCI_MANIFEST_DATA, me.value, me.version, true, forceApply)) {
             changed.push(KUNCI_MANIFEST_DATA);
           }
@@ -1399,7 +1635,7 @@ class AMSDatabaseManager {
       for (const [key, entry] of Object.entries(remoteEntries)) {
         if (key === KUNCI_MANIFEST_DATA) continue;
         // Jangan timpa kunci yang belum selesai dikirim ke server kecuali server baru saja melakukan purge
-        if (this.pendingSyncKeys.has(key) && !remotePurged) {
+        if (this.pendingSyncKeys.has(key)) {
           continue;
         }
         if (this.applyRemoteEntry(key, entry.value, entry.version, true, forceApply)) {
@@ -1422,14 +1658,28 @@ class AMSDatabaseManager {
       }
 
       this.lastSyncedAt = new Date().toISOString();
+      this.updateConnectionStatusLabel();
       if (changed.length > 0) {
         this.emitRemoteUpdate(changed, deltaOnly ? 'delta' : 'hydrate');
       }
-      if (this.pendingSyncKeys.size > 0 && !remotePurged) {
-        void this.flushPendingSync();
+      if (this.pendingSyncKeys.size > 0) {
+        await this.flushPendingSync();
+      }
+      for (const key of knownKeys) {
+        if (!allowed.has(key) && !this.pendingSyncKeys.has(key)) {
+          if (this.applyRemoteDelete(key, 'permission-revoked') && !changed.includes(key)) changed.push(key);
+        }
+      }
+      if (this.identitasSyncSiap() && this.jumlahAntreanMedia() > 0) {
+        void import('../utils/mediaUpload')
+          .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
+          .catch((error) => console.error('Gagal memulai sinkronisasi media tertunda:', error));
       }
       return changed;
-    } catch {
+    } catch (error) {
+      console.error('Gagal memeriksa sinkronisasi server:', error);
+      this.lastSyncError = 'Tidak dapat memeriksa sinkronisasi server';
+      this.updateConnectionStatusLabel();
       return [];
     }
   }
@@ -1496,10 +1746,7 @@ class AMSDatabaseManager {
             /* abaikan bila socket baru putus */
           }
         }
-        void this.flushPendingSync().then(() => this.syncFromServer(true));
-        void import('../utils/mediaUpload')
-          .then(({ flushPendingMediaUploads }) => flushPendingMediaUploads())
-          .catch(() => {});
+        void this.syncFromServer(false);
       };
 
       socket.onmessage = (ev: MessageEvent) => {
@@ -1592,6 +1839,14 @@ class AMSDatabaseManager {
           }
 
           if (msg.type === 'sync:reset') {
+            this.muatAntreanSyncPersisten();
+            if (this.hasPendingOfflineChanges()) {
+              this.tahanSinkronisasi(
+                'Data server di-reset saat perubahan offline masih tertunda. Jangan hapus data browser; hubungi administrator untuk rekonsiliasi.',
+                true
+              );
+              return;
+            }
             this.serverVersions = {};
             if (typeof msg.revision === 'number') {
               this.serverRevision = Math.max(this.serverRevision, msg.revision);
@@ -1619,6 +1874,9 @@ class AMSDatabaseManager {
           }
 
           if (msg.type === 'rbac:updated' || msg.type === 'rbac:setup-updated') {
+            if (msg.type === 'rbac:updated' && this.syncIdentity) {
+              this.mulaiVerifikasiUlangSync();
+            }
             this.rbacListeners.forEach((cb) => {
               try {
                 cb();
@@ -1666,6 +1924,7 @@ class AMSDatabaseManager {
           }
 
           if (msg.type === 'rbac:session-revoked') {
+            this.mulaiVerifikasiUlangSync();
             this.currentWsToken = null;
             try {
               if (typeof localStorage !== 'undefined') {
@@ -1799,6 +2058,9 @@ class AMSDatabaseManager {
     skipRemoteSync = false,
     notifyListeners = true
   ): void {
+    if (this.syncHoldReason && !skipRemoteSync) {
+      throw new Error('Perubahan offline ditahan sampai akses dipulihkan.');
+    }
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(STORAGE_PREFIX + KUNCI_MANIFEST_DATA, JSON.stringify(manifest));
@@ -1824,6 +2086,7 @@ class AMSDatabaseManager {
       }
       const stored = localStorage.getItem(STORAGE_PREFIX + key);
       if (!stored) {
+        if (this.pendingSyncKeys.has(key)) return [];
         const manifest = this.getManifestData();
         const def = PETA_KATALOG_KOLEKSI.get(key);
         const seedAwal = manifest.dummyDihapus && def?.kategori === 'operasional' ? ([] as T[]) : initial;
@@ -1837,6 +2100,9 @@ class AMSDatabaseManager {
   }
 
   private setCollection<T>(key: string, data: T[]): void {
+    if (this.syncHoldReason && !this.isApplyingRemote) {
+      throw new Error('Perubahan offline ditahan sampai akses dipulihkan.');
+    }
     try {
       if (typeof localStorage === 'undefined') {
         this.notify(key);
@@ -2403,7 +2669,11 @@ class AMSDatabaseManager {
 
   // 1.2 Lead & Opportunity Pipelines
   public getProspek(): ProspekAlkes[] {
-    return this.getCollection<ProspekAlkes>('sales_prospek', INITIAL_PROSPEK_ALKES);
+    const prospek = this.getCollection<ProspekAlkes>('sales_prospek', INITIAL_PROSPEK_ALKES);
+    const rfq = this.getJson<ProspekAlkes[]>('sales_website_rfq');
+    if (!Array.isArray(rfq)) return prospek;
+    const ada = new Set(prospek.map((item) => item.id));
+    return [...rfq.filter((item) => item && !ada.has(item.id)), ...prospek];
   }
   public saveProspek(items: ProspekAlkes[]) {
     this.setCollection('sales_prospek', items);
@@ -4229,6 +4499,9 @@ class AMSDatabaseManager {
   }
 
   private setJson<T>(key: string, data: T): void {
+    if (this.syncHoldReason && !this.isApplyingRemote) {
+      throw new Error('Perubahan offline ditahan sampai akses dipulihkan.');
+    }
     try {
       if (typeof localStorage === 'undefined') {
         this.notify(key);
@@ -4255,6 +4528,9 @@ class AMSDatabaseManager {
   }
 
   public removeSettingJson(key: string): void {
+    if (this.syncHoldReason && !this.isApplyingRemote) {
+      throw new Error('Perubahan offline ditahan sampai akses dipulihkan.');
+    }
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.removeItem(STORAGE_PREFIX + key);
@@ -4403,6 +4679,16 @@ class AMSDatabaseManager {
     return this.getJson<KonfigurasiSitus>('website_published');
   }
 
+  private simpanJsonWebsite<T>(key: string, data: T): void {
+    this.setJson(key, data);
+    if (JSON.stringify(this.getJson<T>(key)) !== JSON.stringify(data)) {
+      throw new Error('Draf tidak dapat disimpan di perangkat. Periksa ruang dan izin penyimpanan browser.');
+    }
+    if (this.syncHoldReason) {
+      throw new Error('Draf tersimpan di perangkat, tetapi antrean sinkronisasi ditahan. Hubungi administrator.');
+    }
+  }
+
   public simpanWebsiteDraft(draf: KonfigurasiSitus, pengguna: string, peran: string) {
     const lama = this.getWebsiteDraft();
     const baru: KonfigurasiSitus = {
@@ -4410,10 +4696,8 @@ class AMSDatabaseManager {
       lastModifiedAt: Date.now(),
       lastModifiedBy: pengguna
     };
-    if (this.getJson<number>('website_content_v') !== VERSI_KONTEN_WEBSITE) {
-      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
-    }
-    this.setJson('website_draft', baru);
+    this.simpanJsonWebsite('website_content_v', VERSI_KONTEN_WEBSITE);
+    this.simpanJsonWebsite('website_draft', baru);
     this.logAudit(
       'Website — Konten Situs Publik',
       'Penyimpanan draf konten website',
@@ -4425,15 +4709,13 @@ class AMSDatabaseManager {
     return baru;
   }
 
-  public sinkronkanWebsiteDraft(pengguna: string, peran: string) {
+  public sinkronkanWebsiteDraft(pengguna: string, peran: string, drafAktif?: KonfigurasiSitus) {
     const lama = this.getWebsiteDraft();
-    const baru = sinkronkanKonten(lama, this.getSumberKontenWebsite());
+    const baru = sinkronkanKonten(drafAktif ?? lama, this.getSumberKontenWebsite());
     baru.lastModifiedAt = Date.now();
     baru.lastModifiedBy = pengguna;
-    if (this.getJson<number>('website_content_v') !== VERSI_KONTEN_WEBSITE) {
-      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
-    }
-    this.setJson('website_draft', baru);
+    this.simpanJsonWebsite('website_content_v', VERSI_KONTEN_WEBSITE);
+    this.simpanJsonWebsite('website_draft', baru);
     this.logAudit(
       'Website — Konten Situs Publik',
       'Sinkronisasi konten situs dengan data aplikasi (izin edar, sertifikat, pelanggan, kampanye)',
@@ -4445,53 +4727,37 @@ class AMSDatabaseManager {
     return { lama, baru };
   }
 
-  /** Terbitkan: salinan draf menjadi snapshot tayang dan tercatat pada audit trail. */
-  public terbitkanWebsite(pengguna: string, peran: string) {
-    const draf = this.getWebsiteDraft();
-    const lama = this.getWebsiteTerbit();
-    const snapshot: KonfigurasiSitus = {
-      ...draf,
-      isPublished: true,
-      lastPublishedAt: Date.now()
-    };
-    if (this.getJson<number>('website_content_v') !== VERSI_KONTEN_WEBSITE) {
-      this.setJson('website_content_v', VERSI_KONTEN_WEBSITE);
+  /** Catat snapshot yang telah diterima server, tanpa mengantrekan publikasi kedua. */
+  public catatWebsiteTerbit(snapshot: KonfigurasiSitus, pengguna: string, peran: string, version?: number) {
+    if (this.pendingSyncKeys.has('website_published')) {
+      throw new Error('Masih ada publikasi lama dalam antrean. Hubungi administrator sebelum memperbarui cache.');
     }
-    this.setJson('website_published', snapshot);
-    this.setJson('website_draft', { ...draf, isPublished: true, lastPublishedAt: snapshot.lastPublishedAt });
-    this.logAudit(
-      'Website — Konten Situs Publik',
-      'Penerbitan konten situs publik (snapshot tayang diperbarui)',
-      `TERBIT-${new Date().toISOString().split('T')[0]}`,
-      pengguna,
-      peran,
-      [
-        { kolom: 'isPublished', nilaiLama: lama ? String(lama.isPublished) : 'belum pernah terbit', nilaiBaru: 'true' },
-        { kolom: 'lastPublishedAt', nilaiLama: lama?.lastPublishedAt ? new Date(lama.lastPublishedAt).toLocaleString('id-ID') : '-', nilaiBaru: new Date(snapshot.lastPublishedAt!).toLocaleString('id-ID') },
-        ...diffKonfigurasi(lama ?? snapshot, snapshot)
-      ]
-    );
-    return snapshot;
-  }
-
-  public tahanWebsite(pengguna: string, peran: string) {
+    if (typeof version === 'number' && (this.serverVersions.website_published ?? 0) > version) {
+      throw new Error('Ada publikasi server yang lebih baru. Periksa kembali status situs.');
+    }
     const lama = this.getWebsiteTerbit();
-    if (!lama) return null;
-    const baru: KonfigurasiSitus = { ...lama, isPublished: false, lastPublishedAt: undefined };
-    this.setJson('website_published', baru);
-    this.setJson('website_draft', { ...this.getWebsiteDraft(), isPublished: false });
+    this.applyRemoteEntry('website_published', snapshot, version, true, true);
+    if (JSON.stringify(this.getWebsiteTerbit()) !== JSON.stringify(snapshot)) {
+      throw new Error('Snapshot server tidak dapat disimpan di cache perangkat.');
+    }
+    const draf = this.getWebsiteDraft();
+    this.simpanJsonWebsite('website_draft', {
+      ...draf,
+      isPublished: snapshot.isPublished,
+      lastPublishedAt: snapshot.lastPublishedAt
+    });
     this.logAudit(
       'Website — Konten Situs Publik',
-      'Penahanan konten situs publik (halaman tidak lagi tayang)',
-      'TAHAN-WEBSITE',
+      snapshot.isPublished ? 'Penerbitan konten situs publik (snapshot tayang diperbarui)' : 'Penahanan konten situs publik (halaman tidak lagi tayang)',
+      snapshot.isPublished ? `TERBIT-${new Date().toISOString().split('T')[0]}` : 'TAHAN-WEBSITE',
       pengguna,
       peran,
       [
-        { kolom: 'isPublished', nilaiLama: String(lama.isPublished), nilaiBaru: 'false' },
-        { kolom: 'lastPublishedAt', nilaiLama: lama.lastPublishedAt ? new Date(lama.lastPublishedAt).toLocaleString('id-ID') : '-', nilaiBaru: '-' }
+        { kolom: 'isPublished', nilaiLama: lama ? String(lama.isPublished) : 'belum pernah terbit', nilaiBaru: String(snapshot.isPublished) },
+        { kolom: 'lastPublishedAt', nilaiLama: lama?.lastPublishedAt ? new Date(lama.lastPublishedAt).toLocaleString('id-ID') : '-', nilaiBaru: snapshot.lastPublishedAt ? new Date(snapshot.lastPublishedAt).toLocaleString('id-ID') : '-' },
+        ...(snapshot.isPublished ? diffKonfigurasi(lama ?? snapshot, snapshot) : [])
       ]
     );
-    return baru;
   }
 
   /** True bila draf berbeda dari snapshot terbit (untuk penanda "belum diterbitkan"). */
@@ -4751,6 +5017,16 @@ class AMSDatabaseManager {
     revision: number;
     pesan: string;
   }> {
+    this.muatAntreanSyncPersisten();
+    if (this.hasPendingOfflineChanges()) {
+      return {
+        ok: false,
+        terhapusDummy: 0,
+        dipertahankanUser: 0,
+        revision: this.serverRevision,
+        pesan: 'Pembersihan ditunda karena masih ada perubahan atau media offline yang belum tersinkron.'
+      };
+    }
     const pertahankanEditUser = opsi.pertahankanEditUser ?? true;
     const pertahankanStrukturGudang = opsi.pertahankanStrukturGudang ?? false;
     const pelaku = opsi.pelaku || 'Administrator Sistem';
@@ -4925,6 +5201,14 @@ class AMSDatabaseManager {
     pelaku = 'Administrator Sistem',
     peran = 'IT & Traceability Hub'
   ): Promise<{ ok: boolean; revision: number; pesan: string }> {
+    this.muatAntreanSyncPersisten();
+    if (this.hasPendingOfflineChanges()) {
+      return {
+        ok: false,
+        revision: this.serverRevision,
+        pesan: 'Pemulihan data dummy ditunda karena masih ada perubahan atau media offline yang belum tersinkron.'
+      };
+    }
     const manifestBaru = buatManifestDefault();
     const keysReset: string[] = [];
 
@@ -5110,6 +5394,16 @@ class AMSDatabaseManager {
     usersSynced: number;
     pesan: string;
   }> {
+    if (this.syncHoldReason || (this.hasPendingOfflineChanges() && !this.identitasSyncSiap())) {
+      return {
+        ok: false,
+        pulledEntries: 0,
+        pushedEntries: 0,
+        rolesSynced: 0,
+        usersSynced: 0,
+        pesan: 'Sinkronisasi Firebase ditunda sampai identitas dan perubahan offline diverifikasi.'
+      };
+    }
     if (!authFirebase.currentUser?.emailVerified) {
       return {
         ok: false,
@@ -5125,70 +5419,66 @@ class AMSDatabaseManager {
     const actor = this.firebaseUserInfo?.email || 'ams-admin';
 
     try {
+      if (!token || typeof fetch !== 'function') {
+        throw new Error('Sesi server diperlukan untuk menyinkronkan data Firebase.');
+      }
       // 1. Tarik seluruh state yang ada di Firestore
       const cloud = await pullAllCloudStateFromFirestore();
       const idToken = await authFirebase.currentUser.getIdToken();
 
       // 2. Pulihkan data Cloud ke server Express (apabila server habis restart / re-publish)
       if (
-        (Object.keys(cloud.entries).length > 0 || cloud.roles.length > 0 || cloud.users.length > 0 || cloud.pocketbaseArchive) &&
-        typeof fetch === 'function'
+        Object.keys(cloud.entries).length > 0 || cloud.roles.length > 0 || cloud.users.length > 0 || cloud.pocketbaseArchive
       ) {
-        await fetch('/api/firebase/hydrate', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify({
-            idToken,
-            roles: cloud.roles,
-            users: cloud.users,
-            entries: cloud.entries,
-            activeDriver: cloud.pocketbaseArchive?.driver,
-            pocketbaseArchive: cloud.pocketbaseArchive?.config
-          })
-        });
+        await hydrateCloudStateOnServer(cloud, idToken, token);
       }
 
       // 3. Tarik snapshot terbaru dari Express dan unggah entri lokal/server yang belum ada di Cloud
       await this.syncFromServer(false);
+      if (this.syncHoldReason || this.lastSyncError) {
+        throw new Error(this.syncHoldReason || this.lastSyncError || 'Sinkronisasi server belum terverifikasi.');
+      }
       let pushedEntries = 0;
       let rolesSynced = 0;
       let usersSynced = 0;
 
-      if (token && typeof fetch === 'function') {
-        const [stateRes, rbacRes] = await Promise.all([
-          fetch('/api/sync/state', { cache: 'no-store', credentials: 'include', headers: { Authorization: `Bearer ${token}` } }),
-          fetch('/api/firebase/rbac-snapshot', { cache: 'no-store', credentials: 'include', headers: { Authorization: `Bearer ${token}` } })
-        ]);
+      const [stateRes, rbacRes] = await Promise.all([
+        fetch('/api/sync/state', { cache: 'no-store', credentials: 'include', headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/firebase/rbac-snapshot', { cache: 'no-store', credentials: 'include', headers: { Authorization: `Bearer ${token}` } })
+      ]);
+      if (!stateRes.ok) throw new Error(`Gagal mengambil state server untuk Firebase (HTTP ${stateRes.status}).`);
+      if (!rbacRes.ok) throw new Error(`Gagal mengambil snapshot RBAC untuk Firebase (HTTP ${rbacRes.status}).`);
 
-        if (stateRes.ok) {
-          const serverState = (await stateRes.json()) as {
-            entries?: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }>;
-          };
-          for (const [k, entry] of Object.entries(serverState.entries || {})) {
-            const cloudItem = cloud.entries[k];
-            const serverTime = new Date(entry.updatedAt || 0).getTime();
-            const cloudTime = cloudItem ? new Date(cloudItem.updatedAt || 0).getTime() : 0;
-            if (!cloudItem || serverTime > cloudTime) {
-              await pushSyncEntryToFirestore(k, entry.value, entry.version || 1, entry.updatedBy || actor);
-              if (k === 'website_published' && entry.value && typeof entry.value === 'object') {
-                await pushPublicSiteToFirestore(entry.value as Record<string, unknown>, entry.updatedBy || actor);
-              }
-              pushedEntries += 1;
-            }
+      const serverState = (await stateRes.json()) as {
+        entries?: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }>;
+      };
+      const rbacData = (await rbacRes.json()) as { roles?: RoleDefinition[]; users?: ServerUserRecord[] };
+      if (!serverState.entries || typeof serverState.entries !== 'object' || Array.isArray(serverState.entries)) {
+        throw new Error('State server untuk Firebase tidak valid.');
+      }
+      if (!Array.isArray(rbacData.roles) || !Array.isArray(rbacData.users)) {
+        throw new Error('Snapshot RBAC untuk Firebase tidak valid.');
+      }
+      for (const [k, entry] of Object.entries(serverState.entries)) {
+        const cloudItem = cloud.entries[k];
+        const serverTime = new Date(entry.updatedAt || 0).getTime();
+        const cloudTime = cloudItem ? new Date(cloudItem.updatedAt || 0).getTime() : 0;
+        const rfqBerbeda = k === 'sales_website_rfq' &&
+          JSON.stringify(entry.value) !== JSON.stringify(cloudItem?.value);
+        if (!cloudItem || serverTime > cloudTime || rfqBerbeda) {
+          await pushSyncEntryToFirestore(k, entry.value, entry.version || 1, entry.updatedBy || actor);
+          if (k === 'website_published' && entry.value && typeof entry.value === 'object') {
+            await pushPublicSiteToFirestore(entry.value as Record<string, unknown>, entry.updatedBy || actor);
           }
-        }
-
-        if (rbacRes.ok) {
-          const rbacData = (await rbacRes.json()) as { roles?: RoleDefinition[]; users?: ServerUserRecord[] };
-          const pushed = await pushRbacSnapshotToFirestore(rbacData.roles || [], rbacData.users || []);
-          rolesSynced = pushed.rolesPushed;
-          usersSynced = pushed.usersPushed;
+          pushedEntries += 1;
         }
       }
+      const pushed = await pushRbacSnapshotToFirestore(rbacData.roles, rbacData.users);
+      if (pushed.rolesPushed !== rbacData.roles.length || pushed.usersPushed !== rbacData.users.length) {
+        throw new Error('Snapshot RBAC tidak tersinkron sepenuhnya ke Firebase.');
+      }
+      rolesSynced = pushed.rolesPushed;
+      usersSynced = pushed.usersPushed;
 
       // 4. Pastikan arsip konfigurasi PocketBase selalu aman tersimpan di Firestore
       await this.archivePocketBaseSettingsToCloud();
@@ -5206,7 +5496,8 @@ class AMSDatabaseManager {
         pesan: 'Sinkronisasi dua arah dengan Firebase Firestore selesai.'
       };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Gagal sinkronisasi dengan Firebase Firestore';
+      const alasan = err instanceof Error ? err.message : 'Gagal sinkronisasi dengan Firebase Firestore.';
+      const msg = `${alasan} Sebagian perubahan mungkin sudah tersimpan; periksa status sebelum mencoba lagi.`;
       this.firebaseSyncError = msg;
       this.updateConnectionStatusLabel();
       return {
@@ -5273,6 +5564,10 @@ class AMSDatabaseManager {
 
   // Reset defaults for testing
   public async resetToDefaults() {
+    this.muatAntreanSyncPersisten();
+    if (this.hasPendingOfflineChanges()) {
+      throw new Error('Reset ditunda karena masih ada perubahan atau media offline yang belum tersinkron.');
+    }
     const token = this.getAuthTokenFromStorage();
     if (token && typeof fetch === 'function') {
       try {

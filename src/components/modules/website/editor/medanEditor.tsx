@@ -4,7 +4,7 @@
  * Nilai diakses lewat jalur bertitik (mis. 'kepala.judul') sehingga seksi dengan
  * struktur bersarang tetap memakai definisi medan yang sama.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, CheckCircle2, ImageOff, Plus, Trash2 } from 'lucide-react';
 import { HalamanWebsite, TautanWebsite } from '../../../../types';
 import { selesaikanGambar } from '../../../../utils/website';
@@ -56,12 +56,14 @@ function Bacaan({ petunjuk }: { petunjuk?: string }) {
 }
 
 function MedanTeks({
+  id,
   nilai,
   onChange,
   multiline,
   rows,
   placeholder
 }: {
+  id: string;
   nilai: unknown;
   onChange: (v: string) => void;
   multiline?: boolean;
@@ -71,6 +73,7 @@ function MedanTeks({
   if (multiline) {
     return (
       <textarea
+        id={id}
         value={String(nilai ?? '')}
         rows={rows ?? 3}
         placeholder={placeholder}
@@ -81,6 +84,7 @@ function MedanTeks({
   }
   return (
     <input
+      id={id}
       type="text"
       value={String(nilai ?? '')}
       placeholder={placeholder}
@@ -91,7 +95,7 @@ function MedanTeks({
 }
 
 /** Daftar string dengan satu baris per butir; state lokal menjaga baris kosong saat mengetik. */
-function MedanDaftarTeks({ nilai, onChange }: { nilai: unknown; onChange: (v: string[]) => void }) {
+function MedanDaftarTeks({ id, nilai, onChange }: { id: string; nilai: unknown; onChange: (v: string[]) => void }) {
   const daftar = Array.isArray(nilai) ? (nilai as unknown[]).map((n) => String(n ?? '')) : [];
   const [teks, setTeks] = useState(daftar.join('\n'));
   const suarKeluar = useRef(teks);
@@ -106,6 +110,7 @@ function MedanDaftarTeks({ nilai, onChange }: { nilai: unknown; onChange: (v: st
 
   return (
     <textarea
+      id={id}
       value={teks}
       rows={Math.max(3, daftar.length + 1)}
       placeholder={'Satu butir per baris'}
@@ -125,9 +130,10 @@ function MedanDaftarTeks({ nilai, onChange }: { nilai: unknown; onChange: (v: st
   );
 }
 
-function MedanAngka({ nilai, onChange }: { nilai: unknown; onChange: (v: number) => void }) {
+function MedanAngka({ id, nilai, onChange }: { id: string; nilai: unknown; onChange: (v: number) => void }) {
   return (
     <input
+      id={id}
       type="number"
       value={Number(nilai ?? 0)}
       onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))}
@@ -137,18 +143,20 @@ function MedanAngka({ nilai, onChange }: { nilai: unknown; onChange: (v: number)
 }
 
 function MedanPilihan({
+  id,
   nilai,
   opsi,
   onChange,
   labelOpsi
 }: {
+  id: string;
   nilai: unknown;
   opsi: string[];
   onChange: (v: string) => void;
   labelOpsi?: (o: string) => string;
 }) {
   return (
-    <select value={String(nilai ?? '')} onChange={(e) => onChange(e.target.value)} className={KELAS_INPUT}>
+    <select id={id} value={String(nilai ?? '')} onChange={(e) => onChange(e.target.value)} className={KELAS_INPUT}>
       {!opsi.includes(String(nilai ?? '')) && <option value={String(nilai ?? '')}>{String(nilai ?? '(kosong)')}</option>}
       {opsi.map((o) => (
         <option key={o} value={o}>
@@ -226,6 +234,7 @@ function MedanGambar({
 }) {
   const [sedangOlah, setSedangOlah] = useState(false);
   const [statusUnggah, setStatusUnggah] = useState<'server' | 'antrean' | ''>('');
+  const [peringatanUnggah, setPeringatanUnggah] = useState('');
   const [gagal, setGagal] = useState('');
   const [gagalPratinjau, setGagalPratinjau] = useState(false);
   const rujukan = String(nilai ?? '');
@@ -263,6 +272,7 @@ function MedanGambar({
     setSedangOlah(true);
     setGagal('');
     setStatusUnggah('');
+    setPeringatanUnggah('');
     try {
       const adalahLogoAtauIkon =
         kunciLower.includes('logo') ||
@@ -280,6 +290,7 @@ function MedanGambar({
       });
       onChange(hasil.referensi);
       setStatusUnggah(hasil.storedOnServer ? 'server' : 'antrean');
+      setPeringatanUnggah(hasil.peringatan ?? '');
     } catch (err) {
       setGagal(err instanceof Error ? err.message : 'Gambar gagal diunggah. Gunakan PNG/JPG/WebP di bawah 8 MB.');
     } finally {
@@ -384,6 +395,7 @@ function MedanGambar({
           Foto tersimpan lokal &amp; akan diunggah otomatis ke server saat online.
         </p>
       )}
+      {peringatanUnggah && <p role="alert" className="text-3xs font-semibold text-amber-700">{peringatanUnggah}</p>}
       {gagal && <p className="text-3xs font-semibold text-rose-700">{gagal}</p>}
     </div>
   );
@@ -416,6 +428,7 @@ export function MedanGambarBanyak({
   const daftar = Array.isArray(nilai) ? nilai.filter((foto): foto is string => typeof foto === 'string') : [];
   const [sedangOlah, setSedangOlah] = useState(false);
   const [statusUnggah, setStatusUnggah] = useState<'server' | 'antrean' | ''>('');
+  const [peringatanUnggah, setPeringatanUnggah] = useState('');
   const [urlBaru, setUrlBaru] = useState('');
   const [gagal, setGagal] = useState('');
 
@@ -429,6 +442,7 @@ export function MedanGambarBanyak({
     setSedangOlah(true);
     setGagal('');
     setStatusUnggah('');
+    setPeringatanUnggah('');
     try {
       const hasilSemua = await Promise.all(
         berkas.map((file) =>
@@ -443,6 +457,7 @@ export function MedanGambarBanyak({
       );
       onChange([...daftar, ...hasilSemua.map((h) => h.referensi)]);
       setStatusUnggah(hasilSemua.every((h) => h.storedOnServer) ? 'server' : 'antrean');
+      setPeringatanUnggah([...new Set(hasilSemua.flatMap((h) => h.peringatan ? [h.peringatan] : []))].join(' '));
     } catch (err) {
       setGagal(err instanceof Error ? err.message : 'Foto gagal diunggah ke server. Gunakan PNG, JPG, atau WebP.');
     } finally {
@@ -570,6 +585,7 @@ export function MedanGambarBanyak({
           Foto tersimpan lokal &amp; akan diunggah otomatis ke server saat online.
         </p>
       )}
+      {peringatanUnggah && <p role="alert" className="text-3xs font-semibold text-amber-700">{peringatanUnggah}</p>}
       {gagal && <p className="text-3xs font-semibold text-rose-700">{gagal}</p>}
     </div>
   );
@@ -670,15 +686,18 @@ export function MedanEditor({
   nilai: NilaiMedan;
   onChange: (nilai: NilaiMedan) => void;
 }) {
+  const id = useId();
+  const medanSederhana = ['teks', 'textarea', 'daftarTeks', 'angka', 'pilihan'].includes(medan.kind);
   return (
     <div>
-      <label className={KELAS_LABEL}>{medan.label}</label>
-      {medan.kind === 'teks' && <MedanTeks nilai={nilai} onChange={onChange} />}
-      {medan.kind === 'textarea' && <MedanTeks nilai={nilai} onChange={onChange} multiline rows={medan.rows} />}
-      {medan.kind === 'daftarTeks' && <MedanDaftarTeks nilai={nilai} onChange={onChange} />}
-      {medan.kind === 'angka' && <MedanAngka nilai={nilai} onChange={onChange} />}
+      <label className={KELAS_LABEL} htmlFor={medanSederhana ? id : undefined}>{medan.label}</label>
+      {medan.kind === 'teks' && <MedanTeks id={id} nilai={nilai} onChange={onChange} />}
+      {medan.kind === 'textarea' && <MedanTeks id={id} nilai={nilai} onChange={onChange} multiline rows={medan.rows} />}
+      {medan.kind === 'daftarTeks' && <MedanDaftarTeks id={id} nilai={nilai} onChange={onChange} />}
+      {medan.kind === 'angka' && <MedanAngka id={id} nilai={nilai} onChange={onChange} />}
       {medan.kind === 'pilihan' && (
         <MedanPilihan
+          id={id}
           nilai={nilai}
           opsi={medan.opsi}
           onChange={onChange}
