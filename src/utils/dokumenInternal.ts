@@ -23,7 +23,7 @@ export const KATEGORI_DOKUMEN_META: Record<
 > = {
   komersial_penawaran: {
     label: 'Komersial & Penawaran',
-    warnaAksen: '#0f766e',
+    warnaAksen: '#2a6199',
     deskripsi: 'Quotation / Surat Penawaran Harga Alkes B2B, e-Katalog LKPP, dan Tender Fasyankes.'
   },
   operasional_logistik: {
@@ -38,7 +38,7 @@ export const KATEGORI_DOKUMEN_META: Record<
   },
   teknis_after_sales: {
     label: 'Teknis & After-Sales',
-    warnaAksen: '#0f766e',
+    warnaAksen: '#2a6199',
     deskripsi: 'Permintaan Unit Demo, Berita Acara Instalasi & Uji Fungsi, serta Maintenance & Kalibrasi.'
   },
   keuangan_umum: {

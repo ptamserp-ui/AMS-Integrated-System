@@ -320,7 +320,7 @@ function Dasbor({
   const namaPelakuAktif = sesi.namaLengkap || sesi.namaPengguna;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-[#00AAFF] selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
       
       {/* Top Banner (Diselaraskan dengan gaya banner notifikasi bejo-pos) */}
       {showComplianceBanner && (

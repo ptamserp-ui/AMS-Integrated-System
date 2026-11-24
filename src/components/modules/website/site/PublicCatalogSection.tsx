@@ -1016,7 +1016,7 @@ export function SeksiProdukPublik({
                   <button
                     type="button"
                     onClick={() => ke('kontak')}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2 rounded-full bg-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_75%,black)] text-slate-950 text-xs font-bold transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap px-4 py-2 rounded-full bg-[var(--brand)] hover:bg-[color-mix(in_srgb,var(--brand)_75%,black)] text-white text-xs font-bold transition-colors cursor-pointer"
                   >
                     {t('Lanjut Ajukan Penawaran')}
                     <ArrowRight className="w-3.5 h-3.5" />

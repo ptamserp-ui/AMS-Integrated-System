@@ -62,11 +62,11 @@ export interface TabDef {
   badge?: string;
 }
 
-const TONE_ACTIVE = 'bg-slate-700 text-white';
+const TONE_ACTIVE = 'bg-blue-600 text-white';
 
 const TONE_ICON = 'text-slate-500';
 
-const TONE_HOVER = 'hover:bg-slate-200 hover:text-slate-900';
+const TONE_HOVER = 'hover:bg-blue-50 hover:text-blue-800';
 
 export const DIVISION_ORDER: DivisionId[] = [
   'commercial',

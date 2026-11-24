@@ -84,7 +84,7 @@ export default defineConfig(() => {
           name: 'AMS Mobile — HRIS & CRM Lapangan',
           short_name: 'AMS Mobile',
           description: 'Aplikasi Mobile HRIS & CRM Lapangan PT Anugrahmitra Selaras terkoneksi PocketBase AMS.',
-          theme_color: '#0d9488',
+          theme_color: '#2a6199',
           background_color: '#f8fafc',
           display: 'standalone',
           orientation: 'portrait',

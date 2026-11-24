@@ -138,7 +138,7 @@ function buatIdentitasDefault(role: UserRole): IdentitasPerusahaanQuotation {
     kotaTandaTangan: 'Bekasi',
     namaPenandatangan: namaPengguna(role).split('-')[0].trim(),
     jabatanPenandatangan: peranPengguna(role),
-    warnaAksen: '#0f766e'
+    warnaAksen: '#2a6199'
   };
 }
 
@@ -1235,7 +1235,7 @@ export default function QuotationModule({
                         onChange={(e) => setIdentitas({ ...identitas, warnaAksen: e.target.value })}
                         className="w-9 h-8 rounded border border-slate-300 cursor-pointer p-0.5 bg-white"
                       />
-                      {['#0f766e', '#0078b5', '#1e293b', '#047857'].map((c) => (
+                      {['#2a6199', '#245382', '#1e293b', '#047857'].map((c) => (
                         <button
                           key={c}
                           type="button"

@@ -162,7 +162,7 @@ function buatIdentitasDefault(): IdentitasKopDokumenInternal {
       email: quotIdentitas.email || 'pjt@anugrahmitraselaras.co.id',
       website: quotIdentitas.website || 'www.anugrahmitraselaras.co.id',
       kotaTandaTangan: quotIdentitas.kotaTandaTangan || 'Bekasi',
-      warnaAksen: quotIdentitas.warnaAksen || '#0f766e'
+      warnaAksen: quotIdentitas.warnaAksen || '#2a6199'
     };
   }
 
@@ -187,7 +187,7 @@ function buatIdentitasDefault(): IdentitasKopDokumenInternal {
     email: draf.kontak.email || 'pjt@anugrahmitraselaras.co.id',
     website: 'www.anugrahmitraselaras.co.id',
     kotaTandaTangan: 'Bekasi',
-    warnaAksen: '#0f766e'
+    warnaAksen: '#2a6199'
   };
 }
 

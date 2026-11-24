@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { bangunKontenDefault } from '../../src/utils/website';
 import { adalahKonfigurasiSitus, muatSnapshot } from '../../src/utils/websitePrimitives';
+import { tampilanEfektif } from '../../src/utils/tampilan';
 
 function snapshot() {
   return bangunKontenDefault({
@@ -25,6 +26,36 @@ describe('sumber snapshot situs publik', () => {
     const lama = snapshot();
     delete lama.tampilan;
     expect(adalahKonfigurasiSitus(lama)).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    { warnaUtama: ' #0D9488 ', warnaAksen: '#0F766E' },
+    { warnaUtama: 'invalid', warnaAksen: '' }
+  ])('menampilkan merek biru pada snapshot lama atau warna tidak valid (%j)', async (tampilan) => {
+    const cfg = snapshot();
+    cfg.tampilan = tampilan ? { ...tampilanEfektif({}), ...tampilan } : undefined;
+    const sebelum = structuredClone(cfg);
+    const storage = { getItem: () => null };
+    vi.stubGlobal('window', { location: { search: '' }, localStorage: storage });
+    vi.stubGlobal('sessionStorage', storage);
+    const { default: PublicWebsite } = await import('../../src/components/modules/website/site/PublicWebsite');
+    const html = renderToString(createElement(PublicWebsite, { konfigurasi: cfg }));
+    expect(html).toContain('--brand:#2a6199;--brand-aksen:#245382');
+    expect(cfg).toEqual(sebelum);
+  });
+
+  it('mempertahankan warna kustom selain tosca lama serta pilihan tata letak', () => {
+    const tampilan = {
+      warnaUtama: '#4338CA',
+      warnaAksen: '#9f1239',
+      templateId: 'remedi-gelap' as const,
+      fontId: 'open-sans' as const
+    };
+    expect(tampilanEfektif({ tampilan })).toMatchObject({
+      ...tampilan,
+      warnaUtama: '#4338ca'
+    });
   });
 
   it('menolak snapshot tidak lengkap atau struktur yang akan merusak renderer', () => {

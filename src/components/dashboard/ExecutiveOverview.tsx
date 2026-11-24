@@ -260,22 +260,22 @@ export default function ExecutiveOverview({
         ]}
       />
       {/* Board of Directors Header Cockpit */}
-      <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-lg border border-slate-800 relative overflow-hidden">
-        <div className="absolute right-0 top-0 bottom-0 w-96 bg-[radial-gradient(circle_at_right,rgba(0,170,255,0.2),transparent_70%)] pointer-events-none" />
+      <div className="bg-blue-600 rounded-2xl p-6 text-white shadow-lg border border-white/20 relative overflow-hidden">
+        <div className="absolute right-0 top-0 bottom-0 w-96 bg-[radial-gradient(circle_at_right,rgba(255,255,255,0.12),transparent_70%)] pointer-events-none" />
         
         <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-3 py-1 rounded-full text-xs font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse inline-block" />
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-black/20 text-blue-100 border border-white/20 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse inline-block" />
                 Real-Time Board Cockpit (Direksi)
               </span>
-              <span className="text-xs text-slate-400">PT Anugrahmitra Selaras (AMS) • Kemenkes RI Standar</span>
+              <span className="text-xs text-blue-100">PT Anugrahmitra Selaras (AMS) • Kemenkes RI Standar</span>
             </div>
             <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
               Executive Dashboard & Pemantauan Divisi
             </h1>
-            <p className="text-xs text-slate-300 max-w-3xl leading-relaxed">
+            <p className="text-xs text-blue-100 max-w-3xl leading-relaxed">
               Pusat komando eksekutif untuk memantau performa bisnis dan empat divisi utama: Commercial, Operations, Finance & Accounting, serta Support.
             </p>
           </div>
@@ -285,15 +285,15 @@ export default function ExecutiveOverview({
               type="button"
               onClick={handleManualRefresh}
               disabled={isRefreshing}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer"
+              className="px-3.5 py-2 bg-black/20 hover:bg-black/30 text-white border border-white/20 rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-400' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-blue-200' : ''}`} />
               Sinkronisasi ({lastUpdated})
             </button>
             <button
               type="button"
               onClick={onOpenTraceability}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2 bg-black/30 hover:bg-black/40 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4" />
               Lacak Batch
@@ -301,7 +301,7 @@ export default function ExecutiveOverview({
             <button
               type="button"
               onClick={onOpenPrintModal}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              className="px-4 py-2 bg-black/20 hover:bg-black/30 text-white border border-white/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
             >
               Cetak Laporan
             </button>
@@ -309,16 +309,16 @@ export default function ExecutiveOverview({
         </div>
 
         {/* Executive Summary Metric Cards Row */}
-        <div className="mt-6 pt-5 border-t border-slate-800 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60">
-            <div className="flex items-center justify-between text-slate-400 text-xs">
+        <div className="mt-6 pt-5 border-t border-white/20 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="bg-black/30 p-3.5 rounded-xl border border-white/20">
+            <div className="flex items-center justify-between text-blue-100 text-xs">
               <span>Total Pendapatan YTD</span>
-              <DollarSign className="w-4 h-4 text-emerald-400" />
+              <DollarSign className="w-4 h-4 text-emerald-300" />
             </div>
             <div className="text-lg font-bold text-white mt-1">
               Rp {(totalRevenue / 1000000000).toFixed(2)} M
             </div>
-            <div className={`text-2xs mt-0.5 flex items-center gap-1 ${pertumbuhanBulanan === null ? 'text-slate-400' : pertumbuhanBulanan >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+            <div className={`text-2xs mt-0.5 flex items-center gap-1 ${pertumbuhanBulanan === null ? 'text-blue-100' : pertumbuhanBulanan >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
               {pertumbuhanBulanan === null ? (
                 'Bulan pembanding belum ada'
               ) : pertumbuhanBulanan >= 0 ? (
@@ -329,54 +329,54 @@ export default function ExecutiveOverview({
             </div>
           </div>
 
-          <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60">
-            <div className="flex items-center justify-between text-slate-400 text-xs">
+          <div className="bg-black/30 p-3.5 rounded-xl border border-white/20">
+            <div className="flex items-center justify-between text-blue-100 text-xs">
               <span>Kepatuhan Mutu & ISO</span>
-              <Award className="w-4 h-4 text-blue-400" />
+              <Award className="w-4 h-4 text-blue-200" />
             </div>
             <div className="text-lg font-bold text-white mt-1">
               {`${skorKepatuhanKini.toFixed(1)}%`}
             </div>
-            <div className="text-2xs text-blue-400 mt-0.5">
+            <div className="text-2xs text-blue-200 mt-0.5">
               Audit KAN & Kemenkes Lulus
             </div>
           </div>
 
-          <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60">
-            <div className="flex items-center justify-between text-slate-400 text-xs">
+          <div className="bg-black/30 p-3.5 rounded-xl border border-white/20">
+            <div className="flex items-center justify-between text-blue-100 text-xs">
               <span>Suhu Cold Chain</span>
-              <Thermometer className="w-4 h-4 text-amber-400" />
+              <Thermometer className="w-4 h-4 text-amber-300" />
             </div>
             <div className="text-lg font-bold text-white mt-1">
               {suhuColdChain === null ? 'Belum ada sensor' : `${suhuColdChain.toFixed(1)}°C`}
             </div>
-            <div className={`text-2xs mt-0.5 flex items-center gap-1 ${suhuDalamRentang === false ? 'text-rose-400' : 'text-emerald-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full inline-block ${suhuDalamRentang === false ? 'bg-rose-400' : 'bg-emerald-400'}`} /> {suhuDalamRentang === false ? 'Di Luar Rentang 2-8°C' : 'Standar 2-8°C Aman'}
+            <div className={`text-2xs mt-0.5 flex items-center gap-1 ${suhuDalamRentang === false ? 'text-rose-300' : 'text-emerald-300'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full inline-block ${suhuDalamRentang === false ? 'bg-rose-300' : 'bg-emerald-300'}`} /> {suhuDalamRentang === false ? 'Di Luar Rentang 2-8°C' : 'Standar 2-8°C Aman'}
             </div>
           </div>
 
-          <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60">
-            <div className="flex items-center justify-between text-slate-400 text-xs">
+          <div className="bg-black/30 p-3.5 rounded-xl border border-white/20">
+            <div className="flex items-center justify-between text-blue-100 text-xs">
               <span>Izin Edar NIE Aktif</span>
-              <Building2 className="w-4 h-4 text-indigo-400" />
+              <Building2 className="w-4 h-4 text-indigo-200" />
             </div>
             <div className="text-lg font-bold text-white mt-1">
               {izinList.length} Produk
             </div>
-            <div className="text-2xs text-amber-400 mt-0.5">
+            <div className="text-2xs text-amber-300 mt-0.5">
               {niePerluPerpanjangan.length} perlu perpanjangan
             </div>
           </div>
 
-          <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60 col-span-2 sm:col-span-1">
-            <div className="flex items-center justify-between text-slate-400 text-xs">
+          <div className="bg-black/30 p-3.5 rounded-xl border border-white/20 col-span-2 sm:col-span-1">
+            <div className="flex items-center justify-between text-blue-100 text-xs">
               <span>Tender & e-Katalog</span>
-              <Briefcase className="w-4 h-4 text-cyan-400" />
+              <Briefcase className="w-4 h-4 text-cyan-200" />
             </div>
             <div className="text-lg font-bold text-white mt-1">
               {tenderList.length} Aktif
             </div>
-            <div className="text-2xs text-cyan-400 mt-0.5">
+            <div className="text-2xs text-cyan-200 mt-0.5">
               LKPP LPSE Terhubung
             </div>
           </div>
@@ -842,14 +842,14 @@ export default function ExecutiveOverview({
       </div>
 
       {/* Board Resolution & Quick Action Footer */}
-      <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-lg border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="bg-blue-600 rounded-2xl p-6 text-white shadow-lg border border-white/20 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/30">
+          <div className="w-10 h-10 rounded-xl bg-black/20 text-blue-100 flex items-center justify-center shrink-0 border border-white/20">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
             <h4 className="text-sm font-bold text-white">Sistem Manajemen Mutu Perusahaan Tersertifikasi</h4>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-blue-100 mt-0.5">
               Seluruh data operasional dienkripsi dan dicatat menggunakan standar keamanan SHA-256 (ALCOA+) untuk audit Kemenkes RI.
             </p>
           </div>
@@ -860,7 +860,7 @@ export default function ExecutiveOverview({
             <button
               type="button"
               onClick={() => bukaModulJikaDiizinkan('pms-vigilance')}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              className="px-4 py-2 bg-black/20 hover:bg-black/30 text-white border border-white/20 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
             >
               Pusat Laporan KTD
             </button>
@@ -868,7 +868,7 @@ export default function ExecutiveOverview({
           <button
             type="button"
             onClick={onOpenPrintModal}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+            className="px-4 py-2 bg-black/30 hover:bg-black/40 text-white rounded-xl text-xs font-semibold shadow-xs transition-colors cursor-pointer"
           >
             Cetak Ringkasan Direksi
           </button>

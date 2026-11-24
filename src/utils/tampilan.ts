@@ -78,7 +78,7 @@ export const SEKSI_BERANDA_LABEL: Record<KunciSeksiSitus, string> = {
 };
 
 export const WARNA_MEREK_PRESET: { warna: string; nama: string }[] = [
-  { warna: '#0d9488', nama: 'Teal REMEDI (bawaan)' },
+  { warna: '#2a6199', nama: 'Biru AMS (bawaan)' },
   { warna: '#0284c7', nama: 'Biru Langit' },
   { warna: '#1d4ed8', nama: 'Biru Institusi' },
   { warna: '#059669', nama: 'Hijau Klinis' },
@@ -90,8 +90,8 @@ export const WARNA_MEREK_PRESET: { warna: string; nama: string }[] = [
 
 export const TAMPILAN_BAWAAN: TampilanSitus = {
   templateId: 'remedi-klasik',
-  warnaUtama: '#0d9488',
-  warnaAksen: '#0f766e',
+  warnaUtama: '#2a6199',
+  warnaAksen: '#245382',
   fontId: 'quicksand',
   berandaUrutan: [...URUTAN_BERANDA_BAWAAN]
 };
@@ -103,6 +103,14 @@ const VALID_URUTAN = new Set(URUTAN_BERANDA_BAWAAN);
 
 const warnaAman = (v: unknown, fallback: string): string =>
   typeof v === 'string' && HEX6.test(v.trim()) ? v.trim().toLowerCase() : fallback;
+
+function warnaMerek(v: unknown, fallback: string): string {
+  const warna = warnaAman(v, fallback);
+  // Snapshot lama tetap memakai merek terbaru tanpa menimpa warna kustom lain.
+  if (warna === '#0d9488') return TAMPILAN_BAWAAN.warnaUtama;
+  if (warna === '#0f766e') return TAMPILAN_BAWAAN.warnaAksen;
+  return warna;
+}
 
 /** Normalisasi tampilan dari konfigurasi lama/rusak — tidak pernah melempar. */
 export function tampilanEfektif(cfg: { tampilan?: Partial<TampilanSitus> | null }): TampilanSitus {
@@ -123,8 +131,8 @@ export function tampilanEfektif(cfg: { tampilan?: Partial<TampilanSitus> | null 
   }
   return {
     templateId,
-    warnaUtama: warnaAman(t.warnaUtama, TAMPILAN_BAWAAN.warnaUtama),
-    warnaAksen: warnaAman(t.warnaAksen, TAMPILAN_BAWAAN.warnaAksen),
+    warnaUtama: warnaMerek(t.warnaUtama, TAMPILAN_BAWAAN.warnaUtama),
+    warnaAksen: warnaMerek(t.warnaAksen, TAMPILAN_BAWAAN.warnaAksen),
     fontId,
     berandaUrutan: bersih
   };

@@ -25,15 +25,15 @@ function hexToRgb(hex: string): [number, number, number] {
     const r = parseInt(bersih[0] + bersih[0], 16);
     const g = parseInt(bersih[1] + bersih[1], 16);
     const b = parseInt(bersih[2] + bersih[2], 16);
-    return [r || 15, g || 118, b || 110];
+    return [r || 42, g || 97, b || 153];
   }
   if (bersih.length === 6) {
     const r = parseInt(bersih.slice(0, 2), 16);
     const g = parseInt(bersih.slice(2, 4), 16);
     const b = parseInt(bersih.slice(4, 6), 16);
-    return [Number.isNaN(r) ? 15 : r, Number.isNaN(g) ? 118 : g, Number.isNaN(b) ? 110 : b];
+    return [Number.isNaN(r) ? 42 : r, Number.isNaN(g) ? 97 : g, Number.isNaN(b) ? 153 : b];
   }
-  return [15, 118, 110];
+  return [42, 97, 153];
 }
 
 async function muatGambarSebagaiPng(src: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
@@ -114,7 +114,7 @@ export async function unduhDokumenInternalPdfA4(
   const pageH = 297;
   const marginX = 14;
   const contentW = pageW - marginX * 2; // 182 mm
-  const [accentR, accentG, accentB] = hexToRgb(identitas.warnaAksen || katMeta.warnaAksen || '#0f766e');
+  const [accentR, accentG, accentB] = hexToRgb(identitas.warnaAksen || katMeta.warnaAksen || '#2a6199');
 
   const logoAsset =
     identitas.tampilkanLogo && logoResolvedUrl

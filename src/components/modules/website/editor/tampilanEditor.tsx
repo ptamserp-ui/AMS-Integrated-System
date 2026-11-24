@@ -9,6 +9,7 @@ import {
   FONT_SITUS,
   SEKSI_BERANDA_LABEL,
   TEMPLATES_SITUS,
+  TAMPILAN_BAWAAN,
   WARNA_MEREK_PRESET,
   tampilanEfektif
 } from '../../../../utils/tampilan';
@@ -191,7 +192,7 @@ export function EditorTampilan({ cfg, onGanti }: PropsEditorTampilan) {
                   }}
                   onBlur={(e) => {
                     const bersih = hexBersih(e.target.value);
-                    if (!bersih) set({ [key]: key === 'warnaUtama' ? '#0d9488' : '#0f766e' } as Partial<TampilanSitus>);
+                    if (!bersih) set({ [key]: TAMPILAN_BAWAAN[key] } as Partial<TampilanSitus>);
                   }}
                   spellCheck={false}
                   className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-xs font-mono uppercase"
