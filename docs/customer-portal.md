@@ -23,6 +23,7 @@ Produksi tetap **NO-GO** sampai temuan P0 di [evaluasi staging](./evaluasi-stagi
 - [ ] **Rilis staging Linux** (fitur aktif dengan flag, diuji dengan akun uji)
 - [ ] **Rilis produksi** (menunggu P0 ditutup dan persetujuan tertulis)
 - [x] ✅ **Penyelarasan aksen biru — lokal Windows, 24 November 2026:** portal mengikuti token global biru `#2a6199` dan turunannya. Pemeriksaan browser form masuk dengan status API sintetis membuktikan tombol `#245382`, hover `#1e456c`, dan fokus `#2a6199`; TypeScript dan build lulus. Ini verifikasi visual, bukan login nyata atau deployment; Tahap 4–6 tetap terbuka.
+- [x] ✅ **Paket tema biru ter-deploy — Linux staging, 24 November 2026:** `ce6174e` aktif, `/akun` HTTP 200 dan CSS publik memuat token biru `#2a6199`; health Firebase connected/ready diverifikasi. Alur portal terautentikasi dan seluruh halaman belum diuji di staging; Tahap 4–6 tetap terbuka.
 
 ## 1. Keputusan desain
 
@@ -387,6 +388,7 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 - Sesuai revisi pengguna, aksen tosca aplikasi, website dan portal diselaraskan menjadi biru `#2a6199`. Alias token teal yang dipakai portal kini mengikuti palet biru bersama untuk tombol, border, latar, teks dan fokus; warna status semantik tetap terpisah.
 - Browser lokal memeriksa form masuk portal dengan status API sintetis, bukan akun nyata. Tombol utama memakai turunan `#245382`, hover `#1e456c`, dan ring fokus `#2a6199`. TypeScript, build dan 33 tes terarah website/dokumen lulus.
 - Tidak ada perubahan autentikasi, sesi, izin, data customer atau layanan VPS. Tampilan halaman portal setelah login dan staging belum diuji; fase pengembangan tidak ditandai selesai.
+- **Pembaruan deployment:** paket `ce6174e` kemudian di-deploy ke Linux staging; lint/tes/build remote mencapai akhir dan hanya service `ams` direstart. Snapshot website dipertahankan. Health lokal/publik connected/ready, `/akun` HTTP 200 serta aset CSS biru diverifikasi; browser website staging menunjukkan warna baru. Ini tidak membuktikan login atau alur operasional portal.
 
 ### 24 November 2026 — deployment staging `d4b089e`
 
