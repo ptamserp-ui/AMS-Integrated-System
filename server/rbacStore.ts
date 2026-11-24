@@ -41,6 +41,25 @@ interface RbacDatabaseState {
   developerReset?: DeveloperPasswordResetState;
 }
 
+function isValidAuditEntry(value: unknown): value is ServerAuditEntry {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entry = value as Partial<ServerAuditEntry>;
+  if (
+    typeof entry.id !== 'string' || !entry.id ||
+    typeof entry.timestamp !== 'string' ||
+    typeof entry.actorUsername !== 'string' ||
+    typeof entry.actorRole !== 'string' ||
+    typeof entry.action !== 'string' ||
+    typeof entry.resource !== 'string' ||
+    (entry.targetId !== undefined && typeof entry.targetId !== 'string') ||
+    (entry.status !== 'ALLOWED' && entry.status !== 'DENIED') ||
+    typeof entry.ip !== 'string' ||
+    typeof entry.detail !== 'string'
+  ) return false;
+  const timestamp = new Date(entry.timestamp);
+  return Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === entry.timestamp;
+}
+
 export const RBAC_RESOURCES: Array<{
   id: RbacResourceId;
   label: string;
@@ -478,18 +497,31 @@ function sanitizePermissions(input: unknown): RolePermissionMatrix {
 export class ServerRbacStore {
   private readonly dataDir: string;
   private readonly dbPath: string;
+  private readonly auditArchiveDir: string;
   private readonly secretPath: string;
   private readonly secret: string;
   private state: RbacDatabaseState;
   private readonly loginAttempts = new Map<string, { count: number; resetAt: number }>();
+  private readonly archivedAuditIds = new Set<string>();
+  private readonly persistedAuditIds = new Set<string>();
+  private readonly pendingAuditArchive = new Map<string, ServerAuditEntry>();
+  private auditArchiveReady = false;
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
     this.dbPath = path.join(dataDir, 'rbac-db.json');
+    this.auditArchiveDir = path.join(dataDir, 'audit-archive');
     this.secretPath = path.join(dataDir, '.session-secret');
     fs.mkdirSync(this.dataDir, { recursive: true });
     this.secret = this.loadOrCreateSecret();
     this.state = this.loadOrSeedState();
+    this.loadAuditArchiveIndex();
+    for (const entry of this.state.auditLogs) {
+      this.persistedAuditIds.add(entry.id);
+      if (!this.archivedAuditIds.has(entry.id)) this.pendingAuditArchive.set(entry.id, entry);
+    }
+    this.auditArchiveReady = true;
+    this.flushAuditArchive();
     this.pruneExpiredSessions();
   }
 
@@ -580,7 +612,11 @@ export class ServerRbacStore {
         }
       }
       let users = parsed.users;
-      const auditLogs = Array.isArray(parsed.auditLogs) ? parsed.auditLogs : [];
+      if (parsed.auditLogs !== undefined &&
+          (!Array.isArray(parsed.auditLogs) || !parsed.auditLogs.every(isValidAuditEntry))) {
+        throw new Error(`Riwayat audit pada basis data RBAC "${this.dbPath}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
+      }
+      const auditLogs = parsed.auditLogs ?? [];
       if (users.length === 0) {
         const envUsers = bootstrapUsersFromEnv(roles, now);
         if (envUsers.length > 0) {
@@ -655,11 +691,70 @@ export class ServerRbacStore {
     const tmp = `${this.dbPath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(target, null, 2), 'utf8');
     fs.renameSync(tmp, this.dbPath);
+    for (const entry of target.auditLogs) {
+      if (this.persistedAuditIds.has(entry.id)) continue;
+      this.persistedAuditIds.add(entry.id);
+      this.pendingAuditArchive.set(entry.id, entry);
+    }
+    if (this.auditArchiveReady && this.pendingAuditArchive.size > 0) {
+      try {
+        this.flushAuditArchive();
+      } catch (error) {
+        console.error('[audit] Arsip bulanan RBAC tertunda; riwayat tetap tersimpan di rbac-db.json.', error);
+      }
+    }
+  }
+
+  private loadAuditArchiveIndex(): void {
+    fs.mkdirSync(this.auditArchiveDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(this.auditArchiveDir, 0o700);
+    for (const filename of fs.readdirSync(this.auditArchiveDir)) {
+      const month = /^(\d{4}-(?:0[1-9]|1[0-2]))\.jsonl$/.exec(filename)?.[1];
+      if (!month) continue;
+      const archivePath = path.join(this.auditArchiveDir, filename);
+      if (!fs.lstatSync(archivePath).isFile()) {
+        throw new Error(`Arsip audit "${archivePath}" bukan file reguler; service tidak dimulai.`);
+      }
+      const content = fs.readFileSync(archivePath, 'utf8');
+      for (const [index, line] of content.split(/\r?\n/).entries()) {
+        if (!line) continue;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch (error) {
+          throw new Error(`Arsip audit "${archivePath}" rusak pada baris ${index + 1}; file tidak diubah.`, { cause: error });
+        }
+        if (!isValidAuditEntry(parsed) || parsed.timestamp.slice(0, 7) !== month) {
+          throw new Error(`Entri arsip audit "${archivePath}" tidak valid pada baris ${index + 1}; file tidak diubah.`);
+        }
+        if (this.archivedAuditIds.has(parsed.id)) {
+          throw new Error(`ID audit "${parsed.id}" duplikat pada arsip; service tidak dimulai.`);
+        }
+        this.archivedAuditIds.add(parsed.id);
+      }
+    }
+  }
+
+  private flushAuditArchive(): void {
+    for (const [id, entry] of this.pendingAuditArchive) {
+      const month = entry.timestamp.slice(0, 7);
+      if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month) || !isValidAuditEntry(entry)) {
+        throw new Error(`Entri audit "${id}" tidak valid untuk arsip bulanan.`);
+      }
+      const archivePath = path.join(this.auditArchiveDir, `${month}.jsonl`);
+      if (fs.existsSync(archivePath) && !fs.lstatSync(archivePath).isFile()) {
+        throw new Error(`Arsip audit "${archivePath}" bukan file reguler.`);
+      }
+      fs.appendFileSync(archivePath, `${JSON.stringify(entry)}\n`, { encoding: 'utf8', mode: 0o600 });
+      fs.chmodSync(archivePath, 0o600);
+      this.archivedAuditIds.add(id);
+      this.pendingAuditArchive.delete(id);
+    }
   }
 
   private persistWithAudit(next: RbacDatabaseState, entry: Omit<ServerAuditEntry, 'id' | 'timestamp'>): void {
     const audit: ServerAuditEntry = { id: `aud-${crypto.randomUUID()}`, timestamp: new Date().toISOString(), ...entry };
-    const committed = { ...next, auditLogs: [audit, ...next.auditLogs].slice(0, 500) };
+    const committed = { ...next, auditLogs: [audit, ...next.auditLogs] };
     this.persistState(committed);
     this.state = committed;
   }
@@ -681,12 +776,44 @@ export class ServerRbacStore {
       timestamp: new Date().toISOString(),
       ...entry
     };
-    this.state.auditLogs = [item, ...this.state.auditLogs].slice(0, 500);
-    this.persistState();
+    const next = { ...this.state, auditLogs: [item, ...this.state.auditLogs] };
+    this.persistState(next);
+    this.state = next;
     return item;
   }
 
   public getAuditLogs(limit = 150): ServerAuditEntry[] {
+    return this.filterVisibleAuditLogs(this.state.auditLogs).slice(0, limit);
+  }
+
+  public getAuditLogsForMonth(month: string): ServerAuditEntry[] {
+    if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) {
+      throw new Error('Bulan arsip audit harus memakai format YYYY-MM.');
+    }
+    const entries = [...this.state.auditLogs, ...this.readAuditArchive(month)];
+    const byId = new Map(entries.filter((entry) => entry.timestamp.slice(0, 7) === month).map((entry) => [entry.id, entry]));
+    return this.filterVisibleAuditLogs([...byId.values()]).sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }
+
+  public getAuditArchiveJsonl(month: string): string {
+    const entries = this.getAuditLogsForMonth(month);
+    return entries.length > 0 ? `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n` : '';
+  }
+
+  private readAuditArchive(month: string): ServerAuditEntry[] {
+    const archivePath = path.join(this.auditArchiveDir, `${month}.jsonl`);
+    if (!fs.existsSync(archivePath)) return [];
+    if (!fs.lstatSync(archivePath).isFile()) throw new Error(`Arsip audit "${archivePath}" bukan file reguler.`);
+    return fs.readFileSync(archivePath, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
+      const entry: unknown = JSON.parse(line);
+      if (!isValidAuditEntry(entry) || entry.timestamp.slice(0, 7) !== month) {
+        throw new Error(`Arsip audit "${archivePath}" memuat entri yang tidak valid.`);
+      }
+      return entry;
+    });
+  }
+
+  private filterVisibleAuditLogs(entries: ServerAuditEntry[]): ServerAuditEntry[] {
     const hiddenUsers = this.state.users.filter((u) => u.isHiddenDeveloper);
     const hiddenIds = new Set(hiddenUsers.map((u) => u.id));
     const hiddenNames = new Set(hiddenUsers.map((u) => u.username.toLowerCase()));
@@ -698,14 +825,12 @@ export class ServerRbacStore {
       'DEV_PASSWORD_RESET_REQUESTED',
       'DEV_PASSWORD_RESET_COMPLETED'
     ]);
-    return this.state.auditLogs
-      .filter((entry) => {
+    return entries.filter((entry) => {
         if (hiddenActions.has(entry.action)) return false;
         if (entry.targetId && hiddenIds.has(entry.targetId)) return false;
         if (entry.actorUsername && hiddenNames.has(entry.actorUsername.toLowerCase())) return false;
         return true;
-      })
-      .slice(0, limit);
+      });
   }
 
   private signSessionId(sessionId: string): string {
@@ -1670,7 +1795,7 @@ export class ServerRbacStore {
     const nextState: RbacDatabaseState = {
       ...this.state,
       users: [...this.state.users, record],
-      auditLogs: [auditEntry, ...this.state.auditLogs].slice(0, 500)
+      auditLogs: [auditEntry, ...this.state.auditLogs]
     };
 
     this.persistState(nextState);
@@ -1793,7 +1918,7 @@ export class ServerRbacStore {
       sessions: !nextActive || (passwordReset && user.id !== actorUserId)
         ? this.state.sessions.filter((session) => session.userId !== user.id)
         : this.state.sessions,
-      auditLogs: [auditEntry, ...this.state.auditLogs].slice(0, 500)
+      auditLogs: [auditEntry, ...this.state.auditLogs]
     };
     this.persistState(nextState);
     this.state = nextState;

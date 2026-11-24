@@ -13,6 +13,41 @@ export interface CustomerIdentityService {
   verify(token: string): Promise<CustomerIdentity>;
   read(uid: string): Promise<CustomerIdentityState>;
   revoke(uid: string): Promise<void>;
+  /** Server-side Email/Password sign-in used by username login; returns a Firebase ID token. */
+  signIn(email: string, password: string): Promise<string>;
+  sendVerification(idToken: string, continueUrl?: string): Promise<void>;
+}
+
+export interface CustomerIdentityRestOptions {
+  apiKey: () => string | undefined;
+  /** Origin sent as Referer so browser-restricted Firebase API keys still accept server calls. */
+  referer?: string;
+  fetcher?: typeof fetch;
+}
+
+const CUSTOMER_PROVIDERS = new Set(['password', 'google.com']);
+const INVALID_CREDENTIALS = () => new CustomerError(401, 'INVALID_CREDENTIALS', 'Username atau kata sandi salah.');
+
+async function identityToolkit(options: CustomerIdentityRestOptions | undefined, method: string, body: Record<string, unknown>) {
+  const key = options?.apiKey();
+  if (!key) throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Konfigurasi autentikasi customer belum siap.');
+  let response: Response;
+  try {
+    response = await (options?.fetcher ?? fetch)(`https://identitytoolkit.googleapis.com/v1/accounts:${method}?key=${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(options?.referer ? { Referer: `${options.referer}/` } : {}) },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10000)
+    });
+  } catch {
+    throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Layanan identitas sedang tidak tersedia. Coba lagi nanti.');
+  }
+  const payload = await response.json().catch(() => ({})) as { idToken?: unknown; error?: { message?: unknown } };
+  if (response.ok) return payload;
+  const code = String(payload.error?.message ?? '').split(/[\s:]/)[0];
+  if (['INVALID_LOGIN_CREDENTIALS', 'EMAIL_NOT_FOUND', 'INVALID_PASSWORD', 'USER_DISABLED', 'INVALID_EMAIL', 'MISSING_PASSWORD'].includes(code)) throw INVALID_CREDENTIALS();
+  if (code === 'TOO_MANY_ATTEMPTS_TRY_LATER') throw new CustomerError(429, 'RATE_LIMIT', 'Terlalu banyak percobaan. Coba lagi nanti.');
+  console.error('[customer-auth] Identity Toolkit menolak permintaan:', method, code || response.status);
+  throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Layanan identitas sedang tidak tersedia. Coba lagi nanti.');
 }
 
 function authError(error: unknown): never {
@@ -24,7 +59,10 @@ function authError(error: unknown): never {
   throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Layanan identitas sedang tidak tersedia. Coba lagi nanti.');
 }
 
-export function createFirebaseCustomerIdentity(getAuth: () => Pick<Auth, 'verifyIdToken' | 'getUser' | 'revokeRefreshTokens'> | null): CustomerIdentityService {
+export function createFirebaseCustomerIdentity(
+  getAuth: () => Pick<Auth, 'verifyIdToken' | 'getUser' | 'revokeRefreshTokens'> | null,
+  rest?: CustomerIdentityRestOptions
+): CustomerIdentityService {
   const auth = () => {
     const service = getAuth();
     if (!service) throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Firebase Admin belum tersedia.');
@@ -38,9 +76,13 @@ export function createFirebaseCustomerIdentity(getAuth: () => Pick<Auth, 'verify
         if (error instanceof CustomerError) throw error;
         authError(error);
       }
-      if (claims.firebase?.sign_in_provider !== 'password' || !claims.uid || !claims.email ||
+      const provider = claims.firebase?.sign_in_provider;
+      if (!CUSTOMER_PROVIDERS.has(provider ?? '') || !claims.uid || !claims.email ||
           !Number.isFinite(claims.auth_time) || claims.auth_time <= 0) {
-        throw new CustomerError(401, 'INVALID_IDENTITY', 'Gunakan akun Email/Password customer.');
+        throw new CustomerError(401, 'INVALID_IDENTITY', 'Gunakan akun Email/Password atau Google customer.');
+      }
+      if (provider === 'google.com' && claims.email_verified !== true) {
+        throw new CustomerError(401, 'INVALID_IDENTITY', 'Email akun Google belum terverifikasi.');
       }
       return {
         uid: claims.uid, email: claims.email.toLowerCase(),
@@ -63,6 +105,14 @@ export function createFirebaseCustomerIdentity(getAuth: () => Pick<Auth, 'verify
         if (error instanceof CustomerError) throw error;
         authError(error);
       }
+    },
+    async signIn(email, password) {
+      const payload = await identityToolkit(rest, 'signInWithPassword', { email, password, returnSecureToken: true });
+      if (typeof payload.idToken !== 'string' || !payload.idToken) throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Layanan identitas sedang tidak tersedia. Coba lagi nanti.');
+      return payload.idToken;
+    },
+    async sendVerification(idToken, continueUrl) {
+      await identityToolkit(rest, 'sendOobCode', { requestType: 'VERIFY_EMAIL', idToken, ...(continueUrl ? { continueUrl } : {}) });
     }
   };
 }

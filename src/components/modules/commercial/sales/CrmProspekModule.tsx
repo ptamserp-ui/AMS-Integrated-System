@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useDbTick } from '../../../../hooks/useDbSync';
 import { db } from '../../../../services/pocketbase';
 import { PelangganB2B, ProspekAlkes, TahapProspek, TeritorialPenjualan } from '../../../../types';
@@ -64,6 +64,26 @@ export default function CrmProspekModule({
   const [filterRayon, setFilterRayon] = useState<string>('Semua');
   const [detail, setDetail] = useState<PelangganB2B | null>(null);
   const [tabDetail, setTabDetail] = useState<'profil' | 'keuangan' | 'kunjungan'>('profil');
+  const [emailPortal, setEmailPortal] = useState('');
+  const [emailPortalPesan, setEmailPortalPesan] = useState('');
+
+  const simpanEmailPortal = (event: FormEvent) => {
+    event.preventDefault();
+    if (!detail) return;
+    const email = emailPortal.trim().toLowerCase();
+    if (email && (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      setEmailPortalPesan('Format email tidak valid.');
+      return;
+    }
+    if (email && pelanggan.some((p) => p.id !== detail.id && p.emailPortal?.trim().toLowerCase() === email)) {
+      setEmailPortalPesan('Email ini sudah dipakai pelanggan B2B lain; saran penautan memerlukan email unik.');
+      return;
+    }
+    db.updatePelangganB2B(detail.id, { emailPortal: email || undefined });
+    setDetail({ ...detail, emailPortal: email || undefined });
+    setEmailPortal(email);
+    setEmailPortalPesan(email ? 'Email portal tersimpan.' : 'Email portal dihapus.');
+  };
 
   const daftarRayon = useMemo(
     () => Array.from(new Set(pelanggan.map((p) => p.rayonDistribusi))).sort(),
@@ -197,6 +217,8 @@ export default function CrmProspekModule({
                     key={p.id}
                     onClick={() => {
                       setDetail(p);
+                      setEmailPortal(p.emailPortal ?? '');
+                      setEmailPortalPesan('');
                       setTabDetail('profil');
                     }}
                     className="hover:bg-slate-50 cursor-pointer"
@@ -382,6 +404,7 @@ export default function CrmProspekModule({
           </div>
 
           {tabDetail === 'profil' && (
+            <>
             <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
               {[
                 ['Kode Pelanggan', detail.kodePelanggan],
@@ -399,6 +422,24 @@ export default function CrmProspekModule({
                 </div>
               ))}
             </dl>
+            <form onSubmit={simpanEmailPortal} className="mt-4 border-t border-slate-200 pt-3 space-y-2">
+              <label htmlFor="email-portal-b2b" className={labelClass}>Email portal customer (opsional)</label>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  id="email-portal-b2b"
+                  type="email"
+                  maxLength={254}
+                  value={emailPortal}
+                  onChange={(e) => { setEmailPortal(e.target.value); setEmailPortalPesan(''); }}
+                  placeholder="pengadaan@instansi.co.id"
+                  className={`${inputClass} flex-1 min-w-[200px]`}
+                />
+                <button type="submit" className={tombolSekunder}>Simpan</button>
+              </div>
+              <p className="text-2xs text-slate-500">Akun Customer Portal dengan email sama (termasuk login Google) akan disarankan untuk ditautkan di tab Portal Customer. Penautan tetap dikonfirmasi staf.</p>
+              {emailPortalPesan && <p role="status" className="text-2xs font-semibold text-slate-700">{emailPortalPesan}</p>}
+            </form>
+            </>
           )}
 
           {tabDetail === 'keuangan' && (

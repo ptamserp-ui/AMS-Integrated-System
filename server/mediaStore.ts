@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { readJsonFileIfPresent } from './readJsonFile';
+import { assertNoPendingJsonFile, readJsonFileIfPresent } from './readJsonFile';
 
 export type MediaVisibility = 'public' | 'internal';
 export type SupportedImageMime = 'image/png' | 'image/jpeg' | 'image/webp';
@@ -137,6 +137,10 @@ export class ServerMediaStore {
       }
       return { version: index.version ?? 1, items: index.items };
     }
+    assertNoPendingJsonFile(this.indexFile, 'Indeks media');
+    if (fs.readdirSync(this.uploadsDir).length > 0) {
+      throw new MediaStorageError(`Indeks media "${this.indexFile}" hilang sementara direktori unggahan tidak kosong. Berkas tidak diubah; pulihkan indeks dari backup.`);
+    }
     const fresh: MediaIndexFile = { version: 1, items: {} };
     fs.writeFileSync(this.indexFile, JSON.stringify(fresh, null, 2), { encoding: 'utf8', flag: 'wx' });
     return fresh;
@@ -156,6 +160,19 @@ export class ServerMediaStore {
       throw new Error('Path media tidak valid.');
     }
     return resolved;
+  }
+
+  private assertNoUnindexedMedia(id: string): void {
+    for (const ext of ['png', 'jpg', 'webp'] as const) {
+      const file = this.resolveSafeUploadPath(`${id}.${ext}`);
+      try {
+        fs.lstatSync(file);
+      } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'ENOENT') continue;
+        throw new MediaStorageError(`Gagal memeriksa media "${id}". Berkas tidak diubah.`, { cause: error });
+      }
+      throw new MediaStorageError(`Media "${id}" tidak memiliki metadata indeks; akses dan perubahan ditahan sampai dipulihkan.`);
+    }
   }
 
   public getUploadsDir(): string {
@@ -188,6 +205,7 @@ export class ServerMediaStore {
     if (!isValidMediaId(id)) {
       throw new Error('ID media hanya boleh berisi huruf, angka, tanda hubung, atau garis bawah (maks 80 karakter).');
     }
+    if (!this.index.items[id]) this.assertNoUnindexedMedia(id);
 
     const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
     const meta: StoredMediaMeta = {
@@ -313,35 +331,7 @@ export class ServerMediaStore {
       }
     }
 
-    // Fallback: jika file fisik ada di folder uploads namun indeks belum terisi
-    for (const candidateExt of ['png', 'jpg', 'webp'] as const) {
-      const candidatePath = this.resolveSafeUploadPath(`${id}.${candidateExt}`);
-      if (fs.existsSync(candidatePath)) {
-        try {
-          const bytes = fs.readFileSync(candidatePath);
-          const detected = detectImageMagicFormat(bytes);
-          if (detected) {
-            const recoveredMeta: StoredMediaMeta = {
-              id,
-              filename: `${id}.${detected.ext}`,
-              contentType: detected.contentType,
-              ext: detected.ext,
-              size: bytes.length,
-              sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
-              visibility: 'public',
-              scope: 'website',
-              uploadedBy: 'recovered',
-              uploadedAt: new Date().toISOString()
-            };
-            this.index.items[id] = recoveredMeta;
-            this.persistIndex();
-            return { meta: recoveredMeta, bytes };
-          }
-        } catch {
-          /* lanjutkan kandidat berikutnya */
-        }
-      }
-    }
+    if (!meta) this.assertNoUnindexedMedia(id);
     return null;
   }
 
@@ -355,6 +345,7 @@ export class ServerMediaStore {
   public deleteMedia(id: string): boolean {
     if (!isValidMediaId(id)) return false;
     const hadMeta = Boolean(this.index.items[id]);
+    if (!hadMeta) this.assertNoUnindexedMedia(id);
     let deletedFile = false;
     for (const candidateExt of ['png', 'jpg', 'webp'] as const) {
       const target = this.resolveSafeUploadPath(`${id}.${candidateExt}`);

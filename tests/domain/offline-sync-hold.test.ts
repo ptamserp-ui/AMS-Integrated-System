@@ -53,7 +53,8 @@ class FakeSocket {
 }
 
 const SESSION_KEY = 'ams_alkes_sesi_login_v2';
-const QUEUE_KEY = '__ams_pending_sync_v1';
+const QUEUE_KEY = '__ams_pending_sync_v2';
+const LEGACY_QUEUE_KEY = '__ams_pending_sync_v1';
 const OWNER_KEY = '__ams_last_sync_user_v1';
 const LEAVE_KEY = 'ams_alkes_hris_cuti';
 const leave = [{ id: 'CUTI-LOCAL', karyawanId: 'EMP-01', status: 'Menunggu' }];
@@ -80,7 +81,10 @@ describe('perlindungan antrean offline saat akses berubah', () => {
   let writable: Set<string> | null;
   let deletable: Set<string> | null;
   let putStatus: number;
+  let resetStatus: number;
   let sent: Array<{ url: string; init?: RequestInit }>;
+  let serverVersions: Record<string, number>;
+  let serverEntries: Record<string, { value: unknown; version: number }>;
 
   function setSession(sesi: SesiLogin) {
     storage.setItem(SESSION_KEY, JSON.stringify(sesi));
@@ -110,7 +114,10 @@ describe('perlindungan antrean offline saat akses berubah', () => {
     writable = null;
     deletable = null;
     putStatus = 200;
+    resetStatus = 200;
     sent = [];
+    serverVersions = {};
+    serverEntries = {};
     vi.stubGlobal('localStorage', storage);
     vi.stubGlobal('window', browser);
     vi.stubGlobal('navigator', { onLine: true });
@@ -124,7 +131,8 @@ describe('perlindungan antrean offline saat akses berubah', () => {
         const known = JSON.parse(query.get('known') || '[]') as string[];
         return Response.json({
           revision: 1,
-          entries: {},
+          entries: Object.fromEntries(known.flatMap((key) => serverEntries[key] ? [[key, serverEntries[key]]] : [])),
+          versions: Object.fromEntries(known.map((key) => [key, serverVersions[key] ?? 0])),
           allowedKeys: known.filter((key) => !readable || readable.has(key)),
           writableKeys: known.filter((key) => !writable || writable.has(key)),
           deletableKeys: known.filter((key) => !deletable || deletable.has(key))
@@ -134,7 +142,16 @@ describe('perlindungan antrean offline saat akses berubah', () => {
         sent.push({ url, init });
         return putStatus === 200
           ? Response.json({ version: 2, revision: 2, versions: {} })
-          : Response.json({ pesan: 'Izin atau data ditolak oleh server.' }, { status: putStatus });
+          : Response.json({
+              error: putStatus === 409 ? 'SYNC_VERSION_CONFLICT' : 'FORBIDDEN',
+              pesan: 'Izin atau data ditolak oleh server.'
+            }, { status: putStatus });
+      }
+      if (url === '/api/sync/reset') {
+        sent.push({ url, init });
+        return resetStatus === 200
+          ? Response.json({ revision: 2 })
+          : Response.json({ pesan: 'State server berubah.' }, { status: resetStatus });
       }
       throw new Error(`Permintaan tak terduga: ${url}`);
     }));
@@ -164,7 +181,7 @@ describe('perlindungan antrean offline saat akses berubah', () => {
 
   it('mendeteksi draf tertunda dari tab lain dan gagal aman jika antrean tidak dapat dibaca', () => {
     expect(manager.hasPendingWebsiteDraft()).toBe(false);
-    storage.setItem(QUEUE_KEY, JSON.stringify(['website_draft']));
+    storage.setItem(LEGACY_QUEUE_KEY, JSON.stringify(['website_draft']));
     expect(manager.hasPendingWebsiteDraft()).toBe(true);
 
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -290,6 +307,64 @@ describe('perlindungan antrean offline saat akses berubah', () => {
     expect(JSON.parse(String(sent.at(-1)?.init?.body)).value).toEqual(leave);
   });
 
+  it('menahan draf konflik setelah reconnect dan reload tanpa mengirim ulang dengan versi baru', async () => {
+    offline();
+    manager.setSettingJson('hris_cuti', leave);
+    const queued = JSON.parse(storage.getItem(QUEUE_KEY)!) as {
+      version: number;
+      entries: Record<string, { expectedVersion: number; conflicted: boolean }>;
+    };
+    expect(queued.entries.hris_cuti).toEqual({ expectedVersion: 0, conflicted: false });
+
+    serverVersions.hris_cuti = 1;
+    serverEntries.hris_cuti = { value: [{ id: 'CUTI-SERVER', karyawanId: 'EMP-01' }], version: 1 };
+    putStatus = 409;
+    online();
+    await manager.syncFromServer(false);
+
+    expect(sent).toHaveLength(1);
+    expect((sent[0].init?.headers as Record<string, string>)['If-Match']).toBe('"0"');
+    expect(storage.getItem(LEAVE_KEY)).toBe(JSON.stringify(leave));
+    expect(manager.getConnectionStatus().conflictedKeys).toContain('hris_cuti');
+    expect(manager.getConnectionStatus().lastSyncError).toContain('ditolak');
+
+    const persisted = JSON.parse(storage.getItem(QUEUE_KEY)!) as {
+      entries: Record<string, { expectedVersion: number; conflicted: boolean }>;
+    };
+    expect(persisted.entries.hris_cuti).toEqual({ expectedVersion: 0, conflicted: true });
+
+    manager.disconnectRealtimeSync();
+    putStatus = 200;
+    const restarted = new AMSDatabaseManager();
+    restarted.prepareSessionSync(session);
+    await restarted.syncFromServer(false);
+    expect(sent).toHaveLength(1);
+    expect(storage.getItem(LEAVE_KEY)).toBe(JSON.stringify(leave));
+    expect(restarted.getConnectionStatus().conflictedKeys).toContain('hris_cuti');
+    expect(JSON.parse(storage.getItem(QUEUE_KEY)!).entries.hris_cuti.expectedVersion).toBe(0);
+    restarted.disconnectRealtimeSync();
+  });
+
+  it('menahan seluruh batch basi secara atomik tanpa fallback per-kunci', async () => {
+    offline();
+    manager.setSettingJson('hris_cuti', leave);
+    manager.setSettingJson('hris_absensi', [{ id: 'ABS-LOCAL', karyawanId: 'EMP-01' }]);
+    serverVersions.hris_cuti = 1;
+    putStatus = 409;
+    online();
+    const result = await manager.flushPendingSync();
+
+    expect(result.synced).toBe(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].url).toBe('/api/sync/batch');
+    expect(JSON.parse(String(sent[0].init?.body)).expectedVersions).toEqual({
+      hris_cuti: 0,
+      hris_absensi: 0
+    });
+    expect(storage.getItem(LEAVE_KEY)).toBe(JSON.stringify(leave));
+    expect(manager.getConnectionStatus().conflictedKeys).toEqual(expect.arrayContaining(['hris_cuti', 'hris_absensi']));
+  });
+
   it('mempertahankan operasi hapus yang tidak diizinkan tanpa membuat ulang seed', async () => {
     offline();
     manager.removeSettingJson('hris_cuti');
@@ -336,7 +411,7 @@ describe('perlindungan antrean offline saat akses berubah', () => {
 
   it('mengunci antrean lama yang tidak memiliki identitas lengkap tanpa menimpanya', () => {
     storage.setItem(OWNER_KEY, 'USR-01:karyawan:{"hrd-pelatihan":["view"]}');
-    storage.setItem(QUEUE_KEY, JSON.stringify(['hris_cuti']));
+    storage.setItem(LEGACY_QUEUE_KEY, JSON.stringify(['hris_cuti']));
     storage.setItem(LEAVE_KEY, JSON.stringify(leave));
     const restarted = new AMSDatabaseManager();
     restarted.prepareSessionSync(session);
@@ -379,6 +454,26 @@ describe('perlindungan antrean offline saat akses berubah', () => {
     expect(manager.getSyncHoldReason()).toContain('dibersihkan');
     expect(storage.getItem(LEAVE_KEY)).toBe(JSON.stringify(leave));
     expect(storage.getItem(QUEUE_KEY)).toContain('hris_cuti');
+  });
+
+  it('mempertahankan cache saat reset ditolak atau sesi otorisasi tidak tersedia', async () => {
+    storage.setItem(LEAVE_KEY, JSON.stringify(leave));
+    const before = Array.from({ length: storage.length }, (_, index) => {
+      const key = storage.key(index)!;
+      return [key, storage.getItem(key)] as const;
+    }).sort(([a], [b]) => a.localeCompare(b));
+
+    resetStatus = 409;
+    await expect(manager.resetToDefaults()).rejects.toThrow('State server berubah.');
+    expect(Array.from({ length: storage.length }, (_, index) => {
+      const key = storage.key(index)!;
+      return [key, storage.getItem(key)] as const;
+    }).sort(([a], [b]) => a.localeCompare(b))).toEqual(before);
+    expect(JSON.parse(String(sent.at(-1)?.init?.body)).expectedRevision).toBe(1);
+
+    storage.removeItem(SESSION_KEY);
+    await expect(manager.resetToDefaults()).rejects.toThrow('sesi otorisasi server');
+    expect(storage.getItem(LEAVE_KEY)).toBe(JSON.stringify(leave));
   });
 
   it('tidak menghapus antrean ketika jawaban kiriman tiba setelah identitas berubah', async () => {

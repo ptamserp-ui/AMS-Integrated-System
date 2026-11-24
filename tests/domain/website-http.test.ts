@@ -34,14 +34,40 @@ describe('website publik: penerbitan dan RFQ melalui server terisolasi', () => {
   let nomorProspek = '';
 
   async function request<T>(endpoint: string, method = 'GET', token = '', body?: unknown, headers: Record<string, string> = {}) {
+    let requestBody = body;
+    const requestHeaders = { ...headers };
+    const syncKeys = endpoint.startsWith('/api/sync/keys/')
+      ? [decodeURIComponent(endpoint.slice('/api/sync/keys/'.length))]
+      : endpoint === '/api/sync/batch' && body && typeof body === 'object'
+        ? [
+            ...Object.keys((body as { updates?: Record<string, unknown> }).updates ?? {}),
+            ...((body as { deletes?: string[] }).deletes ?? [])
+          ]
+        : [];
+    if (token && syncKeys.length > 0) {
+      const stateResponse = await fetch(
+        `${baseUrl}/api/sync/state?known=${encodeURIComponent(JSON.stringify(syncKeys))}`,
+        { headers: { Authorization: `Bearer ${token}`, ...headers } }
+      );
+      const state = stateResponse.ok
+        ? await stateResponse.json() as { versions?: Record<string, number> }
+        : {};
+      const versions = Object.fromEntries(syncKeys.map((key) => [key, state.versions?.[key] ?? 0]));
+      if (endpoint === '/api/sync/batch') {
+        const batch = body as { expectedVersions?: Record<string, number> };
+        if (!batch.expectedVersions) requestBody = { ...batch, expectedVersions: versions };
+      } else if (!Object.hasOwn(requestHeaders, 'If-Match')) {
+        requestHeaders['If-Match'] = `"${versions[syncKeys[0]]}"`;
+      }
+    }
     const response = await fetch(`${baseUrl}${endpoint}`, {
       method,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...headers
+        ...(requestBody !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...requestHeaders
       },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+      ...(requestBody !== undefined ? { body: JSON.stringify(requestBody) } : {})
     });
     return { status: response.status, body: await response.json() as T };
   }
@@ -231,6 +257,52 @@ describe('website publik: penerbitan dan RFQ melalui server terisolasi', () => {
       expect(Buffer.from(await response.arrayBuffer())).toEqual(original);
     } finally {
       fs.rmdirSync(blocked);
+    }
+  });
+
+  it('tidak menyajikan atau menimpa media tanpa metadata sebagai media publik', async () => {
+    const media = path.join(tempDir, 'data', 'uploads', 'tanpa-metadata.png');
+    const original = fs.readFileSync(path.resolve('public', 'pwa-192x192.png'));
+    fs.writeFileSync(media, original);
+    try {
+      const read = await request<{ error: string }>('/api/website/media/tanpa-metadata');
+      expect(read).toMatchObject({ status: 503, body: { error: 'MEDIA_STORAGE_FAILED' } });
+      const upload = await request<{ error: string }>('/api/media/upload', 'POST', developerToken, {
+        id: 'tanpa-metadata', dataUrl: `data:image/png;base64,${original.toString('base64')}`, visibility: 'public'
+      });
+      expect(upload).toMatchObject({ status: 500, body: { error: 'MEDIA_STORAGE_FAILED' } });
+      const deletion = await request<{ error: string }>('/api/media/tanpa-metadata', 'DELETE', developerToken);
+      expect(deletion).toMatchObject({ status: 500, body: { error: 'MEDIA_STORAGE_FAILED' } });
+      expect(fs.readFileSync(media)).toEqual(original);
+    } finally {
+      fs.unlinkSync(media);
+    }
+  });
+
+  it('melaporkan migrasi media bermasalah pada sync dan pemulihan cloud tanpa menimpa file', async () => {
+    const media = path.join(tempDir, 'data', 'uploads', 'media-tidak-terindeks.png');
+    const bytes = fs.readFileSync(path.resolve('public', 'pwa-192x192.png'));
+    const value = [{ id: 'media-tidak-terindeks', dataUrl: `data:image/png;base64,${bytes.toString('base64')}` }];
+    fs.writeFileSync(media, bytes);
+    try {
+      const before = await request<{ versions: Record<string, number> }>('/api/sync/state?known=%5B%22website_media_v1%22%5D', 'GET', developerToken);
+      const put = await request<{ error: string }>('/api/sync/keys/website_media_v1', 'PUT', developerToken, { value });
+      expect(put).toMatchObject({ status: 500, body: { error: 'MEDIA_STORAGE_FAILED' } });
+      const batch = await request<{ error: string }>('/api/sync/batch', 'POST', developerToken, {
+        updates: { website_media_v1: value }, deletes: []
+      });
+      expect(batch).toMatchObject({ status: 500, body: { error: 'MEDIA_STORAGE_FAILED' } });
+      const after = await request<{ versions: Record<string, number> }>('/api/sync/state?known=%5B%22website_media_v1%22%5D', 'GET', developerToken);
+      expect(after.body.versions.website_media_v1).toBe(before.body.versions.website_media_v1);
+
+      const hydrate = await request<{ error: string; pesan: string }>('/api/firebase/hydrate', 'POST', developerToken, {
+        entries: { website_media_v1: { value, version: 999, updatedAt: '2099-01-01T00:00:00.000Z' } }
+      });
+      expect(hydrate).toMatchObject({ status: 500, body: { error: 'CLOUD_HYDRATE_MEDIA_FAILED' } });
+      expect(hydrate.body.pesan).toContain('Sebagian state telah dipulihkan');
+      expect(fs.readFileSync(media)).toEqual(bytes);
+    } finally {
+      fs.unlinkSync(media);
     }
   });
 

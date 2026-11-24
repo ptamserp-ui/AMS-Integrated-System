@@ -89,6 +89,42 @@ describe('ServerMediaStore — Penyimpanan Foto Real-Time di Server', () => {
     expect(fs.statSync(file).isDirectory()).toBe(true);
   });
 
+  it('menolak membuat indeks kosong jika masih ada file indeks sementara', () => {
+    const dataDir = createTempDir();
+    const index = path.join(dataDir, 'media-index.json');
+    fs.writeFileSync(`${index}.tmp`, '{"items":{}}');
+    expect(() => new ServerMediaStore(dataDir)).toThrow(/hilang.*berkas sementara/);
+    expect(fs.existsSync(index)).toBe(false);
+    expect(fs.readFileSync(`${index}.tmp`, 'utf8')).toBe('{"items":{}}');
+  });
+
+  it('menolak membuat indeks kosong saat unggahan lama masih ada', () => {
+    const dataDir = createTempDir();
+    const uploads = path.join(dataDir, 'uploads');
+    fs.mkdirSync(uploads);
+    const media = path.join(uploads, 'privat.png');
+    fs.writeFileSync(media, makeFakePng());
+
+    expect(() => new ServerMediaStore(dataDir)).toThrow(/Indeks media.*hilang.*unggahan tidak kosong/);
+    expect(fs.existsSync(path.join(dataDir, 'media-index.json'))).toBe(false);
+    expect(fs.readFileSync(media)).toEqual(makeFakePng());
+  });
+
+  it('menahan media tanpa metadata agar tidak ditebak publik, ditimpa, atau dihapus', () => {
+    const dataDir = createTempDir();
+    const store = new ServerMediaStore(dataDir);
+    const media = path.join(dataDir, 'uploads', 'privat.png');
+    fs.writeFileSync(media, makeFakePng());
+    const index = fs.readFileSync(path.join(dataDir, 'media-index.json'), 'utf8');
+
+    expect(() => store.getMedia('privat')).toThrow(/tidak memiliki metadata/);
+    expect(() => store.saveFromBuffer({ id: 'privat', bytes: makeFakeJpeg() })).toThrow(/tidak memiliki metadata/);
+    expect(() => store.deleteMedia('privat')).toThrow(/tidak memiliki metadata/);
+    expect(store.getMedia('tidak-ada')).toBeNull();
+    expect(fs.readFileSync(media)).toEqual(makeFakePng());
+    expect(fs.readFileSync(path.join(dataDir, 'media-index.json'), 'utf8')).toBe(index);
+  });
+
   it('membaca indeks lama tanpa version dan mempertahankan akses media', () => {
     const dataDir = createTempDir();
     const store = new ServerMediaStore(dataDir);

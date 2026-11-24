@@ -6,6 +6,8 @@ export interface B2BCustomerReference {
   id: string;
   nama: string;
   status: 'Aktif' | 'Non-aktif';
+  /** Optional portal email recorded on the B2B master; used only to suggest a link for staff confirmation. */
+  email?: string;
 }
 
 function fields(body: unknown, allowed: string[]): Record<string, unknown> {
@@ -22,6 +24,7 @@ export function createCustomerErpRouter(options: {
   requireView: RequestHandler;
   requireUpdate: RequestHandler;
   findB2BCustomers: (id: string) => B2BCustomerReference[];
+  listB2BCustomers?: () => B2BCustomerReference[];
 }) {
   const router = express.Router();
   const sameOrigin = requireCustomerOrigin(options.origin);
@@ -37,7 +40,23 @@ export function createCustomerErpRouter(options: {
 
   router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
   router.get('/customers', options.requireView, (_req, res) => {
-    res.json({ items: store().listCustomersForStaff() });
+    const items = store().listCustomersForStaff();
+    const linked = new Set(items.map((customer) => customer.pelangganId).filter(Boolean));
+    const byEmail = new Map<string, B2BCustomerReference[]>();
+    for (const b2b of options.listB2BCustomers?.() ?? []) {
+      const email = b2b.email?.trim().toLowerCase();
+      if (!email) continue;
+      byEmail.set(email, [...(byEmail.get(email) ?? []), b2b]);
+    }
+    res.json({
+      items: items.map((customer) => {
+        if (customer.pelangganId || customer.status === 'ditangguhkan') return customer;
+        const matches = byEmail.get(customer.email.toLowerCase()) ?? [];
+        // Suggest only an unambiguous, active, unlinked match; staff must confirm through /tautkan.
+        const match = matches.length === 1 && matches[0].status === 'Aktif' && !linked.has(matches[0].id) ? matches[0] : null;
+        return match ? { ...customer, saranB2B: { id: match.id, nama: match.nama } } : customer;
+      })
+    });
   });
   router.post('/customers/:id/tautkan', options.requireUpdate, sameOrigin, parseBody, handle((req, res) => {
     const body = fields(req.body, ['pelangganId']);
@@ -56,6 +75,15 @@ export function createCustomerErpRouter(options: {
     const actor = req.auth?.user.username;
     if (!actor) throw new CustomerError(401, 'UNAUTHORIZED', 'Sesi staf tidak valid.');
     res.json({ customer: store().suspendCustomer(req.params.id, actor) });
+  }));
+  router.get('/pesanan', options.requireView, (_req, res) => {
+    res.json({ items: store().listOrdersForStaff() });
+  });
+  router.post('/pesanan/:id/batalkan', options.requireUpdate, sameOrigin, parseBody, handle((req, res) => {
+    const body = fields(req.body, ['alasan']);
+    const actor = req.auth?.user.username;
+    if (!actor) throw new CustomerError(401, 'UNAUTHORIZED', 'Sesi staf tidak valid.');
+    res.json({ order: store().cancelOrderByStaff(req.params.id, body.alasan, actor) });
   }));
   router.use((_req, res) => res.status(404).json({ error: 'NOT_FOUND', pesan: 'Endpoint ERP Portal tidak ditemukan.' }));
   router.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

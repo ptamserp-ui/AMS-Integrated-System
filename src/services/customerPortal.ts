@@ -3,6 +3,8 @@ import type {
   CustomerAddress,
   CustomerCart,
   CustomerCatalogItem,
+  CustomerNotification,
+  CustomerOrder,
   CustomerPortalStatus,
   CustomerProfileInput
 } from '../types/customerPortal';
@@ -28,8 +30,11 @@ async function request<T>(path: string, method = 'GET', data?: unknown): Promise
 export const customerApi = {
   status: () => request<CustomerPortalStatus>('/status'),
   me: () => request<{ account: CustomerAccount }>('/auth/saya'),
-  register: (idToken: string, profile: CustomerProfileInput, privacyVersion: string) =>
-    request<{ account: CustomerAccount }>('/auth/daftar', 'POST', { idToken, ...profile, privacyAccepted: true, privacyVersion }),
+  register: (idToken: string, username: string, profile: CustomerProfileInput, privacyVersion: string) =>
+    request<{ account: CustomerAccount }>('/auth/daftar', 'POST', { idToken, username, ...profile, privacyAccepted: true, privacyVersion }),
+  checkUsername: (username: string) => request<{ available: boolean; pesan: string }>('/auth/cek-username', 'POST', { username }),
+  loginWithUsername: (username: string, password: string) =>
+    request<{ account: CustomerAccount }>('/auth/masuk', 'POST', { username, password }),
   login: (idToken: string) => request<{ account: CustomerAccount }>('/auth/sesi', 'POST', { idToken }),
   logout: (all = false) => request<{ ok: boolean }>(all ? '/auth/keluar-semua' : '/auth/keluar', 'POST'),
   updateProfile: (profile: CustomerProfileInput) => request<{ account: CustomerAccount }>('/profil', 'PATCH', profile),
@@ -43,5 +48,12 @@ export const customerApi = {
     request<{ items: CustomerAddress[] }>(address.id ? `/alamat/${encodeURIComponent(address.id)}` : '/alamat', address.id ? 'PATCH' : 'POST', address),
   deleteAddress: (id: string) =>
     request<{ items: CustomerAddress[] }>(`/alamat/${encodeURIComponent(id)}`, 'DELETE'),
-  notifications: () => request<{ items: Array<{ id: string; judul: string; pesan: string; dibaca: boolean; createdAt: string }> }>('/notifikasi')
+  notifications: () => request<{ items: CustomerNotification[] }>('/notifikasi'),
+  markNotificationsRead: () => request<{ items: CustomerNotification[] }>('/notifikasi/baca', 'POST'),
+  orders: () => request<{ items: CustomerOrder[] }>('/pesanan'),
+  order: (id: string) => request<{ order: CustomerOrder }>(`/pesanan/${encodeURIComponent(id)}`),
+  submitOrder: (input: { requestId: string; cartRevision: number; alamatId: string; catatan: string }) =>
+    request<{ order: CustomerOrder; cart: CustomerCart }>('/pesanan', 'POST', input),
+  cancelOrder: (id: string, alasan: string) =>
+    request<{ order: CustomerOrder }>(`/pesanan/${encodeURIComponent(id)}/batal`, 'POST', { alasan })
 };

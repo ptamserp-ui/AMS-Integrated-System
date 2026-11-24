@@ -37,6 +37,8 @@ import {
   mergeCatalogIntoPublishedSnapshot,
   PUBLIC_SYNC_KEYS,
   ServerDataSyncStore,
+  SyncRevisionConflictError,
+  SyncVersionConflictError,
   validateHrisReplacement
 } from './server/dataSyncStore';
 import { ActiveDbDriver, PocketBaseArchiveConfig, ServerDbDriverManager } from './server/dbDriverManager';
@@ -48,7 +50,7 @@ import { loadDeploymentEnv, resolveDeploymentEnvironment } from './server/envLoa
 import { verifyEmployeeFirebaseToken } from './server/firebaseIdentity';
 import { createFirebaseCustomerIdentity } from './server/customerAuth';
 import { createCustomerRouter } from './server/customerRoutes';
-import { createCustomerErpRouter } from './server/customerErpRoutes';
+import { createCustomerErpRouter, type B2BCustomerReference } from './server/customerErpRoutes';
 import { ServerCustomerStore } from './server/customerStore';
 import type { CustomerPortalStatus } from './src/types/customerPortal';
 import { buildWindowsDeploymentGuides } from './server/deploymentGuides';
@@ -131,6 +133,32 @@ function rejectStaleSyncIdentity(req: express.Request, res: express.Response): b
     pesan: 'Identitas atau hak akses telah berubah. Perubahan offline ditahan; hubungi administrator.'
   });
   return true;
+}
+
+function expectedVersionFromHeader(req: express.Request): number | null {
+  const raw = req.get('If-Match');
+  if (!raw) return null;
+  const match = /^"(0|[1-9]\d*)"$/.exec(raw);
+  if (!match) return null;
+  const version = Number(match[1]);
+  return Number.isSafeInteger(version) ? version : null;
+}
+
+function sendSyncVersionConflict(res: express.Response, error: SyncVersionConflictError) {
+  return res.status(409).json({
+    error: 'SYNC_VERSION_CONFLICT',
+    pesan: 'Data berubah di server sejak terakhir dibaca. Draf lokal dipertahankan; periksa konflik sebelum mencoba lagi.',
+    conflicts: error.conflicts
+  });
+}
+
+function sendSyncRevisionConflict(res: express.Response, error: SyncRevisionConflictError) {
+  return res.status(409).json({
+    error: 'SYNC_REVISION_CONFLICT',
+    pesan: 'State server berubah sejak terakhir dibaca. Reset dibatalkan; muat ulang data sebelum mencoba lagi.',
+    expectedRevision: error.expectedRevision,
+    actualRevision: error.actualRevision
+  });
 }
 
 function readFirebaseClientConfig(): FirebaseClientConfig | null {
@@ -506,7 +534,7 @@ async function startServer() {
     }
   };
 
-  const broadcastSyncDelete = (key: string, revision: number, sourceClientId?: string) => {
+  const broadcastSyncDelete = (key: string, revision: number, version: number, sourceClientId?: string) => {
     for (const client of syncClients) {
       if (client.ws.readyState !== WebSocket.OPEN) continue;
       if (!PUBLIC_SYNC_KEYS.has(key)) {
@@ -524,6 +552,7 @@ async function startServer() {
         client.ws.send(JSON.stringify({
           type: 'sync:delete',
           key,
+          version,
           revision,
           sourceClientId: sourceClientId || null
         }));
@@ -536,6 +565,7 @@ async function startServer() {
   const broadcastSyncBatch = (
     updated: Record<string, { value: unknown; version: number; updatedAt: string; updatedBy: string }>,
     deleted: string[],
+    deletedVersions: Record<string, number>,
     revision: number,
     sourceClientId?: string
   ) => {
@@ -544,6 +574,7 @@ async function startServer() {
       if (PUBLIC_SYNC_KEYS.has(k)) publicUpdated[k] = v;
     }
     const publicDeleted = deleted.filter((k) => PUBLIC_SYNC_KEYS.has(k));
+    const publicDeletedVersions = Object.fromEntries(publicDeleted.map((key) => [key, deletedVersions[key]]));
     const hasPublicChanges = Object.keys(publicUpdated).length > 0 || publicDeleted.length > 0;
 
     const publicPayload = hasPublicChanges
@@ -551,6 +582,7 @@ async function startServer() {
           type: 'sync:batch-update',
           entries: publicUpdated,
           deleted: publicDeleted,
+          deletedVersions: publicDeletedVersions,
           revision,
           sourceClientId: sourceClientId || null
         })
@@ -590,6 +622,7 @@ async function startServer() {
             type: 'sync:batch-update',
             entries: permittedEntries,
             deleted: permittedDeleted,
+            deletedVersions: Object.fromEntries(permittedDeleted.map((key) => [key, deletedVersions[key]])),
             revision,
             sourceClientId: sourceClientId || null
           })
@@ -707,7 +740,10 @@ async function startServer() {
     return next();
   }, pbProxy);
 
-  const customerIdentity = createFirebaseCustomerIdentity(getFirebaseAdminAuth);
+  const customerIdentity = createFirebaseCustomerIdentity(getFirebaseAdminAuth, {
+    apiKey: () => readFirebaseClientConfig()?.apiKey,
+    referer: process.env.APP_URL?.trim() ? new URL(process.env.APP_URL.trim()).origin : undefined
+  });
   const customerPolicyUrl = (name: string) => {
     const value = process.env[name]?.trim();
     if (!value) return null;
@@ -736,25 +772,28 @@ async function startServer() {
     catalog: bacaSnapshot
   }));
 
+  const readB2BCustomers = (): B2BCustomerReference[] => {
+    const customers = dataSyncStore.getEntry('sales_pelanggan')?.value;
+    if (!Array.isArray(customers)) return [];
+    return customers.flatMap((value) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+      const customer = value as Record<string, unknown>;
+      if (typeof customer.id !== 'string' || typeof customer.namaInstalasi !== 'string') return [];
+      return [{
+        id: customer.id,
+        nama: customer.namaInstalasi,
+        status: customer.statusPelanggan === 'Aktif' ? 'Aktif' as const : 'Non-aktif' as const,
+        ...(typeof customer.emailPortal === 'string' && customer.emailPortal.trim() ? { email: customer.emailPortal.trim().toLowerCase() } : {})
+      }];
+    });
+  };
   app.use('/api/erp/portal', createCustomerErpRouter({
     store: customerStore,
     origin: process.env.APP_URL?.trim(),
     requireView: requirePermission('sales-marketing', 'view'),
     requireUpdate: requirePermission('sales-marketing', 'update'),
-    findB2BCustomers: (id) => {
-      const customers = dataSyncStore.getEntry('sales_pelanggan')?.value;
-      if (!Array.isArray(customers)) return [];
-      return customers.flatMap((value) => {
-        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-        const customer = value as Record<string, unknown>;
-        if (customer.id !== id || typeof customer.namaInstalasi !== 'string') return [];
-        return [{
-          id,
-          nama: customer.namaInstalasi,
-          status: customer.statusPelanggan === 'Aktif' ? 'Aktif' : 'Non-aktif'
-        }];
-      });
-    }
+    findB2BCustomers: (id) => readB2BCustomers().filter((customer) => customer.id === id),
+    listB2BCustomers: readB2BCustomers
   }));
 
   app.use(express.json({ limit: '10mb' }));
@@ -1002,8 +1041,14 @@ async function startServer() {
       dbDriverManager.hydrateArchiveFromCloud(body.activeDriver, body.pocketbaseArchive, actorUsername || 'firebase-sync');
     }
 
+    let mediaMigrationFailed = false;
     if (syncRes.appliedKeys.includes('website_media_v1') && body.entries?.website_media_v1?.value) {
-      mediaStore.migrateLegacyMediaEntries(body.entries.website_media_v1.value, actorUsername || 'firebase-hydrate');
+      try {
+        mediaStore.migrateLegacyMediaEntries(body.entries.website_media_v1.value, actorUsername || 'firebase-hydrate');
+      } catch (error) {
+        mediaMigrationFailed = true;
+        console.error('[firebase-hydrate] State telah dipulihkan, tetapi migrasi media gagal.', error);
+      }
     }
 
     const peringatanSnapshot = syncRes.appliedKeys.includes('website_published') &&
@@ -1019,9 +1064,15 @@ async function startServer() {
       for (const k of syncRes.appliedKeys) {
         if (all[k]) updatedEntries[k] = all[k];
       }
-      broadcastSyncBatch(updatedEntries, [], syncRes.revision);
+      broadcastSyncBatch(updatedEntries, [], {}, syncRes.revision);
     }
 
+    if (mediaMigrationFailed) {
+      return res.status(500).json({
+        error: 'CLOUD_HYDRATE_MEDIA_FAILED',
+        pesan: 'Sebagian state telah dipulihkan, tetapi migrasi media gagal. Rekonsiliasi media bersama administrator sebelum mencoba lagi.'
+      });
+    }
     res.json({
       ok: true,
       rolesApplied: rbacRes.rolesApplied,
@@ -1322,6 +1373,16 @@ async function startServer() {
     res.json({ logs: rbacStore.getAuditLogs(200) });
   });
 
+  app.get('/api/rbac/audit/archive/:month', requirePermission('audit-trail', 'export'), (req, res) => {
+    if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(req.params.month)) {
+      return res.status(400).json({ error: 'INVALID_AUDIT_MONTH', pesan: 'Bulan arsip harus memakai format YYYY-MM.' });
+    }
+    const archive = rbacStore.getAuditArchiveJsonl(req.params.month);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="ams-rbac-audit-${req.params.month}.jsonl"`);
+    res.send(archive);
+  });
+
   app.post('/api/search/log', requireAuth, (req, res) => {
     const body = (req.body || {}) as {
       query?: unknown;
@@ -1461,12 +1522,16 @@ async function startServer() {
     }
     const relevantKeys = [...new Set([...knownKeys, ...Object.keys(state.entries)])];
     const allowedKeys = relevantKeys.filter((key) => canReadSyncKey(req.auth!.role, key, employeeId));
+    const versions = dataSyncStore.getVersions(relevantKeys);
+    for (const key of Object.keys(versions)) {
+      if (!allowedKeys.includes(key)) delete versions[key];
+    }
     const writableKeys = relevantKeys.filter((key) =>
       canWriteSyncKey(req.auth!.role, key) &&
       (!SELF_SERVICE_ROLE_IDS.has(req.auth!.role.id) || !isHrisPersonalSyncKey(key) || Boolean(employeeId))
     );
     const deletableKeys = relevantKeys.filter((key) => canDeleteSyncKey(req.auth!.role, key));
-    res.set('Cache-Control', 'no-store').json({ ...state, allowedKeys, writableKeys, deletableKeys });
+    res.set('Cache-Control', 'no-store').json({ ...state, versions, allowedKeys, writableKeys, deletableKeys });
   });
 
   app.put('/api/sync/keys/:key', requireAuth, (req, res) => {
@@ -1501,6 +1566,14 @@ async function startServer() {
     const body = (req.body || {}) as { value?: unknown; clientId?: string };
     if (!('value' in body) || body.value === undefined) {
       return res.status(400).json({ error: 'BAD_REQUEST', pesan: 'Field "value" wajib disertakan.' });
+    }
+    const rawExpectedVersion = req.get('If-Match');
+    const expectedVersion = expectedVersionFromHeader(req);
+    if (!rawExpectedVersion) {
+      return res.status(428).json({ error: 'SYNC_VERSION_REQUIRED', pesan: 'Versi data yang dibaca wajib disertakan melalui If-Match.' });
+    }
+    if (expectedVersion === null) {
+      return res.status(400).json({ error: 'INVALID_SYNC_VERSION', pesan: 'Header If-Match harus berisi satu versi bilangan bulat nonnegatif.' });
     }
     if (key === 'website_published' && !adalahKonfigurasiSitus(body.value)) {
       return res.status(400).json({
@@ -1538,14 +1611,27 @@ async function startServer() {
       return res.status(403).json({ error: 'HRIS_REPLACEMENT_DENIED', pesan: replacementError });
     }
 
+    try {
+      dataSyncStore.assertExpectedVersions([key], { [key]: expectedVersion });
+    } catch (error) {
+      if (error instanceof SyncVersionConflictError) return sendSyncVersionConflict(res, error);
+      throw error;
+    }
+
     if (key === 'website_media_v1') {
-      mediaStore.migrateLegacyMediaEntries(valueToSave, req.auth!.user.username);
+      try {
+        mediaStore.migrateLegacyMediaEntries(valueToSave, req.auth!.user.username);
+      } catch (error) {
+        console.error('[sync] Migrasi media gagal sebelum penyimpanan state.', error);
+        return res.status(500).json({ error: 'MEDIA_STORAGE_FAILED', pesan: 'Migrasi media gagal; periksa media bersama administrator.' });
+      }
     }
 
     let synced: ReturnType<typeof dataSyncStore.setKey>;
     try {
-      synced = dataSyncStore.setKey(key, valueToSave, req.auth!.user.username);
+      synced = dataSyncStore.setKey(key, valueToSave, req.auth!.user.username, expectedVersion);
     } catch (error) {
+      if (error instanceof SyncVersionConflictError) return sendSyncVersionConflict(res, error);
       console.error('[sync] Penyimpanan perubahan gagal.', error);
       return res.status(500).json({ error: 'SYNC_WRITE_FAILED', pesan: 'Perubahan gagal disimpan di server.' });
     }
@@ -1627,12 +1713,27 @@ async function startServer() {
         pesan: `Akses ditolak: peran "${req.auth!.role.name}" tidak memiliki izin menghapus data "${key}".`
       });
     }
-    const result = dataSyncStore.deleteKey(key);
+    const rawExpectedVersion = req.get('If-Match');
+    const expectedVersion = expectedVersionFromHeader(req);
+    if (!rawExpectedVersion) {
+      return res.status(428).json({ error: 'SYNC_VERSION_REQUIRED', pesan: 'Versi data yang dibaca wajib disertakan melalui If-Match.' });
+    }
+    if (expectedVersion === null) {
+      return res.status(400).json({ error: 'INVALID_SYNC_VERSION', pesan: 'Header If-Match harus berisi satu versi bilangan bulat nonnegatif.' });
+    }
+    let result: ReturnType<typeof dataSyncStore.deleteKey>;
+    try {
+      result = dataSyncStore.deleteKey(key, expectedVersion);
+    } catch (error) {
+      if (error instanceof SyncVersionConflictError) return sendSyncVersionConflict(res, error);
+      console.error('[sync] Penghapusan gagal disimpan.', error);
+      return res.status(500).json({ error: 'SYNC_WRITE_FAILED', pesan: 'Penghapusan gagal disimpan di server.' });
+    }
     const sourceClientId = typeof req.headers['x-sync-client-id'] === 'string' ? req.headers['x-sync-client-id'] : undefined;
     if (result.deleted) {
-      broadcastSyncDelete(key, result.revision, sourceClientId);
+      broadcastSyncDelete(key, result.revision, result.version, sourceClientId);
     }
-    res.json({ ok: true, key, deleted: result.deleted, revision: result.revision });
+    res.json({ ok: true, key, deleted: result.deleted, version: result.version, revision: result.revision });
   });
 
   app.post('/api/sync/batch', requireAuth, (req, res) => {
@@ -1640,6 +1741,7 @@ async function startServer() {
     const body = (req.body || {}) as {
       updates?: Record<string, unknown>;
       deletes?: string[];
+      expectedVersions?: Record<string, unknown>;
       clientId?: string;
     };
     const updates = body.updates && typeof body.updates === 'object' && !Array.isArray(body.updates) ? body.updates : {};
@@ -1731,14 +1833,47 @@ async function startServer() {
       }
     }
 
+    const touchedKeys = [...Object.keys(sanitizedUpdates), ...deletes];
+    if (new Set(deletes).size !== deletes.length || deletes.some((key) => Object.hasOwn(sanitizedUpdates, key))) {
+      return res.status(400).json({ error: 'INVALID_SYNC_BATCH', pesan: 'Kunci batch tidak boleh diulang atau diubah sekaligus dihapus.' });
+    }
+    const expectedVersions = body.expectedVersions;
+    if (!expectedVersions || typeof expectedVersions !== 'object' || Array.isArray(expectedVersions) ||
+        touchedKeys.length !== Object.keys(expectedVersions).length ||
+        touchedKeys.some((key) => !Object.hasOwn(expectedVersions, key))) {
+      return res.status(428).json({
+        error: 'SYNC_VERSION_REQUIRED',
+        pesan: 'Batch wajib menyertakan versi yang dibaca untuk setiap kunci yang diubah atau dihapus.'
+      });
+    }
+    const parsedExpectedVersions: Record<string, number> = {};
+    for (const [key, value] of Object.entries(expectedVersions)) {
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+        return res.status(400).json({ error: 'INVALID_SYNC_VERSION', pesan: `Versi sinkronisasi untuk "${key}" tidak valid.` });
+      }
+      parsedExpectedVersions[key] = value;
+    }
+    try {
+      dataSyncStore.assertExpectedVersions(touchedKeys, parsedExpectedVersions);
+    } catch (error) {
+      if (error instanceof SyncVersionConflictError) return sendSyncVersionConflict(res, error);
+      throw error;
+    }
+
     if (sanitizedUpdates.website_media_v1) {
-      mediaStore.migrateLegacyMediaEntries(sanitizedUpdates.website_media_v1, req.auth!.user.username);
+      try {
+        mediaStore.migrateLegacyMediaEntries(sanitizedUpdates.website_media_v1, req.auth!.user.username);
+      } catch (error) {
+        console.error('[sync] Migrasi media gagal sebelum penyimpanan batch.', error);
+        return res.status(500).json({ error: 'MEDIA_STORAGE_FAILED', pesan: 'Migrasi media gagal; periksa media bersama administrator.' });
+      }
     }
 
     let result: ReturnType<typeof dataSyncStore.setBatch>;
     try {
-      result = dataSyncStore.setBatch(sanitizedUpdates, deletes, req.auth!.user.username);
+      result = dataSyncStore.setBatch(sanitizedUpdates, deletes, req.auth!.user.username, parsedExpectedVersions);
     } catch (error) {
+      if (error instanceof SyncVersionConflictError) return sendSyncVersionConflict(res, error);
       console.error('[sync] Penyimpanan batch gagal.', error);
       return res.status(500).json({ error: 'SYNC_WRITE_FAILED', pesan: 'Batch gagal disimpan di server.' });
     }
@@ -1755,7 +1890,7 @@ async function startServer() {
           ? req.headers['x-sync-client-id']
           : undefined;
     if (Object.keys(result.updated).length > 0 || result.deleted.length > 0) {
-      broadcastSyncBatch(result.updated, result.deleted, result.revision, sourceClientId);
+      broadcastSyncBatch(result.updated, result.deleted, dataSyncStore.getVersions(result.deleted), result.revision, sourceClientId);
     }
 
     if (sanitizedUpdates.product_catalog && !sanitizedUpdates.website_draft) {
@@ -1803,6 +1938,7 @@ async function startServer() {
       revision: latestRevision,
       versions,
       deleted: result.deleted,
+      deletedVersions: dataSyncStore.getVersions(result.deleted),
       ...(peringatan.length ? { peringatan: peringatan.join(' ') } : {})
     });
   });
@@ -1837,6 +1973,7 @@ async function startServer() {
     const body = (req.body || {}) as {
       updates?: Record<string, unknown>;
       deletes?: string[];
+      expectedVersions?: Record<string, unknown>;
       mode?: 'purge' | 'restore';
       ringkasan?: string;
       clientId?: string;
@@ -1882,7 +2019,39 @@ async function startServer() {
       }
     }
 
-    const result = dataSyncStore.setBatch(updates, deletes, req.auth!.user.username);
+    const touchedKeys = [...Object.keys(updates), ...deletes];
+    if (touchedKeys.length === 0 || new Set(deletes).size !== deletes.length ||
+        deletes.some((key) => Object.hasOwn(updates, key))) {
+      return res.status(400).json({ error: 'INVALID_SYNC_BATCH', pesan: 'Purge/pemulihan harus mengubah kunci unik dan tidak boleh mengubah sekaligus menghapus kunci yang sama.' });
+    }
+    const expectedVersions = body.expectedVersions;
+    if (!expectedVersions || typeof expectedVersions !== 'object' || Array.isArray(expectedVersions) ||
+        touchedKeys.length !== Object.keys(expectedVersions).length ||
+        touchedKeys.some((key) => !Object.hasOwn(expectedVersions, key))) {
+      return res.status(428).json({
+        error: 'SYNC_VERSION_REQUIRED',
+        pesan: 'Purge/pemulihan wajib menyertakan versi yang dibaca untuk setiap kunci yang diubah atau dihapus.'
+      });
+    }
+    const parsedExpectedVersions: Record<string, number> = {};
+    for (const [key, value] of Object.entries(expectedVersions)) {
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+        return res.status(400).json({ error: 'INVALID_SYNC_VERSION', pesan: `Versi sinkronisasi untuk "${key}" tidak valid.` });
+      }
+      parsedExpectedVersions[key] = value;
+    }
+
+    let result: ReturnType<typeof dataSyncStore.setBatch>;
+    try {
+      result = dataSyncStore.setBatch(updates, deletes, req.auth!.user.username, parsedExpectedVersions);
+    } catch (error) {
+      if (error instanceof SyncVersionConflictError) return sendSyncVersionConflict(res, error);
+      console.error('[sync] Penyimpanan purge/pemulihan gagal.', error);
+      return res.status(503).json({
+        error: 'SYNC_BULK_WRITE_FAILED',
+        pesan: 'Purge/pemulihan belum dapat dipastikan tersimpan. Periksa state server sebelum mencoba kembali.'
+      });
+    }
     const sourceClientId =
       typeof body.clientId === 'string' && body.clientId
         ? body.clientId
@@ -1890,7 +2059,7 @@ async function startServer() {
           ? req.headers['x-sync-client-id']
           : undefined;
     if (Object.keys(result.updated).length > 0 || result.deleted.length > 0) {
-      broadcastSyncBatch(result.updated, result.deleted, result.revision, sourceClientId);
+      broadcastSyncBatch(result.updated, result.deleted, dataSyncStore.getVersions(result.deleted), result.revision, sourceClientId);
     }
 
     const versions: Record<string, number> = {};
@@ -1931,10 +2100,35 @@ async function startServer() {
         pesan: 'Reset seluruh data ditolak karena peran Anda tidak memiliki izin menghapus seluruh data HRIS.'
       });
     }
-    const revision = dataSyncStore.resetAll();
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+      ? req.body as { expectedRevision?: unknown; clientId?: unknown }
+      : {};
+    if (!Object.hasOwn(body, 'expectedRevision')) {
+      return res.status(428).json({
+        error: 'SYNC_REVISION_REQUIRED',
+        pesan: 'Reset wajib menyertakan revisi state yang terakhir dibaca.'
+      });
+    }
+    if (typeof body.expectedRevision !== 'number' || !Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 0) {
+      return res.status(400).json({
+        error: 'INVALID_SYNC_REVISION',
+        pesan: 'Revisi state untuk reset harus berupa bilangan bulat nonnegatif.'
+      });
+    }
+    let revision: number;
+    try {
+      revision = dataSyncStore.resetAll(body.expectedRevision);
+    } catch (error) {
+      if (error instanceof SyncRevisionConflictError) return sendSyncRevisionConflict(res, error);
+      console.error('[sync] Reset state gagal.', error);
+      return res.status(503).json({
+        error: 'SYNC_RESET_FAILED',
+        pesan: 'Reset belum dapat dipastikan tersimpan. Periksa state server sebelum mencoba kembali.'
+      });
+    }
     const sourceClientId =
-      typeof (req.body as { clientId?: string } | undefined)?.clientId === 'string'
-        ? (req.body as { clientId?: string }).clientId
+      typeof body.clientId === 'string'
+        ? body.clientId
         : undefined;
     broadcastMessage({ type: 'sync:reset', revision, sourceClientId: sourceClientId || null }, true);
     rbacStore.recordAudit({
@@ -2050,7 +2244,13 @@ async function startServer() {
     }
 
     // 1. Prioritas utama: file gambar biner langsung di disk server (${DATA_DIR}/uploads/)
-    let stored = mediaStore.getMedia(id);
+    let stored: ReturnType<typeof mediaStore.getMedia>;
+    try {
+      stored = mediaStore.getMedia(id);
+    } catch (error) {
+      console.error('[media] Gagal membaca metadata media.', error);
+      return res.status(503).json({ error: 'MEDIA_STORAGE_FAILED', pesan: 'Media tidak dapat dibaca; hubungi administrator.' });
+    }
 
     // 2. Fallback: entri media lama di dataSyncStore (materialisasi langsung ke file disk)
     if (!stored) {
@@ -2315,7 +2515,13 @@ async function startServer() {
         pesan: 'Peran Anda tidak memiliki izin menghapus media pada modul ini.'
       });
     }
-    const deleted = mediaStore.deleteMedia(id);
+    let deleted: boolean;
+    try {
+      deleted = mediaStore.deleteMedia(id);
+    } catch (error) {
+      console.error('[media] Gagal menghapus media.', error);
+      return res.status(500).json({ error: 'MEDIA_STORAGE_FAILED', pesan: 'Media tidak dapat dihapus; hubungi administrator.' });
+    }
     const sourceClientId =
       typeof req.headers['x-sync-client-id'] === 'string' ? req.headers['x-sync-client-id'] : undefined;
     if (deleted) {

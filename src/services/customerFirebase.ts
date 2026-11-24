@@ -1,5 +1,7 @@
 import { getApps, initializeApp } from 'firebase/app';
-import { getAuth, initializeAuth, inMemoryPersistence, type Auth } from 'firebase/auth';
+import {
+  browserPopupRedirectResolver, getAuth, initializeAuth, inMemoryPersistence, type Auth
+} from 'firebase/auth';
 import type { CustomerPortalStatus } from '../types/customerPortal';
 
 let portalAuth: Auth | undefined;
@@ -13,7 +15,10 @@ export function getCustomerFirebase(status: CustomerPortalStatus): Auth {
   if (!portalAuth) {
     const existing = getApps().find((app) => app.name === 'portal-customer');
     if (existing && existing.options.projectId !== config.projectId) throw new Error('Project Firebase customer tidak sesuai.');
-    portalAuth = existing ? getAuth(existing) : initializeAuth(initializeApp(config, 'portal-customer'), { persistence: inMemoryPersistence });
+    portalAuth = existing ? getAuth(existing) : initializeAuth(initializeApp(config, 'portal-customer'), {
+      persistence: inMemoryPersistence,
+      popupRedirectResolver: browserPopupRedirectResolver
+    });
   }
   return portalAuth;
 }
@@ -30,6 +35,10 @@ export function customerFirebaseMessage(error: unknown): string {
     case 'auth/weak-password':
     case 'auth/password-does-not-meet-requirements': return 'Kata sandi belum memenuhi kebijakan keamanan Firebase.';
     case 'auth/too-many-requests': return 'Terlalu banyak percobaan. Tunggu sebelum mencoba kembali.';
+    case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request': return 'Masuk dengan Google dibatalkan.';
+    case 'auth/popup-blocked': return 'Jendela Google diblokir browser. Izinkan pop-up untuk situs ini lalu coba lagi.';
+    case 'auth/account-exists-with-different-credential': return 'Email ini sudah terdaftar dengan metode lain. Masuk dengan username dan kata sandi.';
     case 'auth/network-request-failed': return 'Jaringan bermasalah. Periksa koneksi lalu coba kembali.';
     case 'auth/operation-not-allowed':
     case 'auth/unauthorized-domain':

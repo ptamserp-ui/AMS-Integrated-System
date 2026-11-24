@@ -4,7 +4,7 @@ import type {
   CustomerPortalStatus,
   CustomerProfileInput
 } from '../src/types/customerPortal';
-import { customerProfileError } from '../src/types/customerPortal';
+import { customerProfileError, customerUsernameError, normalizeCustomerUsername } from '../src/types/customerPortal';
 import { CustomerError, ServerCustomerStore } from './customerStore';
 import type { CustomerIdentityService, CustomerIdentityState } from './customerAuth';
 
@@ -120,12 +120,12 @@ function profile(body: Record<string, unknown>): CustomerProfileInput {
   return { nama: String(body.nama), telepon: String(body.telepon), perusahaan: String(body.perusahaan) };
 }
 
-function rateLimit(max: number, windowMs: number) {
+function rateLimit(max: number, windowMs: number, keyOf: (req: Request) => string = (req) => req.ip || req.socket.remoteAddress || 'unknown') {
   const entries = new Map<string, { count: number; reset: number }>();
   return (req: Request, res: Response, next: NextFunction) => {
     const now = Date.now();
     for (const [key, entry] of entries) if (entry.reset <= now) entries.delete(key);
-    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = keyOf(req);
     const entry = entries.get(key) ?? { count: 0, reset: now + windowMs };
     if (entry.count >= max || (!entries.has(key) && entries.size >= 10000)) {
       res.set('Retry-After', String(Math.ceil((entry.reset - now) / 1000)));
@@ -178,13 +178,65 @@ export function createCustomerRouter(options: {
   router.post('/auth/daftar', rateLimit(5, 3600000), handle(async (req, res) => {
     const status = options.status();
     if (!status.registrationAvailable || !status.privacyVersion) throw new CustomerError(503, 'REGISTRATION_UNAVAILABLE', 'Pendaftaran belum tersedia. Kebijakan privasi atau Firebase belum dikonfigurasi.');
-    const body = fields(req.body, ['idToken', 'nama', 'telepon', 'perusahaan', 'privacyAccepted', 'privacyVersion']);
+    const body = fields(req.body, ['idToken', 'username', 'nama', 'telepon', 'perusahaan', 'privacyAccepted', 'privacyVersion']);
     if (body.privacyAccepted !== true || body.privacyVersion !== status.privacyVersion) {
       throw new CustomerError(400, 'PRIVACY_REQUIRED', 'Setujui kebijakan privasi dan syarat layanan yang berlaku.');
     }
     const input = profile(body);
     const verified = await verifyIdentity(body);
-    res.status(201).json({ account: store!.register(verified, input, status.privacyVersion) });
+    res.status(201).json({ account: store!.register(verified, input, status.privacyVersion, typeof body.username === 'string' ? body.username : undefined) });
+  }));
+
+  router.post('/auth/cek-username', rateLimit(30, 900000), handle((req, res) => {
+    const body = fields(req.body, ['username']);
+    const error = customerUsernameError(body.username);
+    if (error) return res.json({ available: false, pesan: error });
+    const available = store!.isUsernameAvailable(String(body.username));
+    res.json({ available, pesan: available ? 'Username tersedia.' : 'Username sudah digunakan.' });
+  }));
+
+  const usernameFailures = new Map<string, { count: number; reset: number }>();
+  const verificationSentAt = new Map<string, number>();
+  router.post('/auth/masuk', rateLimit(20, 900000), handle(async (req, res) => {
+    if (!options.status().authAvailable || !identity.available()) throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Konfigurasi autentikasi customer belum siap.');
+    const body = fields(req.body, ['username', 'password']);
+    if (typeof body.username !== 'string' || typeof body.password !== 'string' || !body.password ||
+        body.username.length > 64 || body.password.length > 128) throw new CustomerError(400, 'INVALID_CREDENTIALS', 'Username dan kata sandi wajib diisi.');
+    const username = normalizeCustomerUsername(body.username);
+    const now = Date.now();
+    for (const [key, entry] of usernameFailures) if (entry.reset <= now) usernameFailures.delete(key);
+    // Per-username throttle limits distributed guessing that the per-IP limiter cannot see.
+    const failures = usernameFailures.get(username);
+    if (failures && failures.count >= 10) {
+      res.set('Retry-After', String(Math.ceil((failures.reset - now) / 1000)));
+      throw new CustomerError(429, 'RATE_LIMIT', 'Terlalu banyak percobaan. Coba lagi nanti.');
+    }
+    const fail = () => {
+      const entry = usernameFailures.get(username) ?? { count: 0, reset: now + 900000 };
+      entry.count += 1;
+      if (usernameFailures.size < 10000 || usernameFailures.has(username)) usernameFailures.set(username, entry);
+    };
+    const email = store!.loginEmailForUsername(username);
+    if (!email) { fail(); throw new CustomerError(401, 'INVALID_CREDENTIALS', 'Username atau kata sandi salah.'); }
+    let idToken: string;
+    try { idToken = await identity.signIn(email, body.password); } catch (error) {
+      if (error instanceof CustomerError && error.code === 'INVALID_CREDENTIALS') fail();
+      throw error;
+    }
+    usernameFailures.delete(username);
+    const verified = await verifyIdentity({ idToken });
+    if (!verified.emailVerified) {
+      const last = verificationSentAt.get(verified.uid) ?? 0;
+      if (now - last > 600000) {
+        verificationSentAt.set(verified.uid, now);
+        if (verificationSentAt.size > 10000) verificationSentAt.delete(verificationSentAt.keys().next().value!);
+        await identity.sendVerification(idToken, origin ? `${new URL(origin).origin}/akun/masuk` : undefined).catch(() => undefined);
+      }
+      throw new CustomerError(403, 'EMAIL_UNVERIFIED', 'Email belum terverifikasi. Tautan verifikasi telah dikirim ke email terdaftar.');
+    }
+    const result = store!.login(verified);
+    customerCookie(req, res, result.token, origin);
+    res.json({ account: result.account, expiresAt: result.expiresAt });
   }));
 
   router.post('/auth/sesi', rateLimit(20, 900000), handle(async (req, res) => {
@@ -302,9 +354,42 @@ export function createCustomerRouter(options: {
   router.delete('/alamat/:id', handle((req, res) => {
     res.json({ items: store!.deleteAddress(req.customerAuth!.account.id, req.params.id) });
   }));
-  router.get('/notifikasi', (_req, res) => {
-    res.json({ items: [] });
+  router.get('/notifikasi', (req, res) => {
+    res.json({ items: store!.notifications(req.customerAuth!.account.id) });
   });
+  router.post('/notifikasi/baca', handle((req, res) => {
+    fields(req.body, []);
+    res.json({ items: store!.markNotificationsRead(req.customerAuth!.account.id) });
+  }));
+  router.get('/pesanan', (req, res) => {
+    res.json({ items: store!.listOrders(req.customerAuth!.account.id) });
+  });
+  router.get('/pesanan/:id', (req, res) => {
+    res.json({ order: store!.getOrder(req.customerAuth!.account.id, req.params.id) });
+  });
+  // Per account (not per IP) so customers behind one hospital NAT do not share a quota; idempotent retries count too.
+  router.post('/pesanan', rateLimit(20, 3600000, (req) => `pesanan:${req.customerAuth!.account.id}`), handle((req, res) => {
+    const body = fields(req.body, ['requestId', 'cartRevision', 'alamatId', 'catatan']);
+    // Lines are re-resolved against the published catalog at submission; the browser only sends the cart revision.
+    const items = catalogItems(options.catalog?.()).map(sanitizeCatalogItem);
+    const result = store!.createOrder(req.customerAuth!.account.id, {
+      requestId: body.requestId, cartRevision: body.cartRevision, alamatId: body.alamatId, catatan: body.catatan
+    }, (row) => {
+      const product = items.find((item) => item.id === row.produkId);
+      const variant = product?.varian.find((candidate) => candidate.id === row.varianId);
+      if (!product || !variant) return null;
+      return {
+        produkId: row.produkId, varianId: row.varianId, nama: product.nama,
+        tipeModel: variant.tipeModel || product.tipeModel, kodeSKU: variant.kodeSKU,
+        nomorIzinEdar: variant.nomorIzinEdar || product.nomorIzinEdar, satuan: variant.satuan
+      };
+    });
+    res.status(result.created ? 201 : 200).json({ order: result.order, cart: store!.getCart(req.customerAuth!.account.id) });
+  }));
+  router.post('/pesanan/:id/batal', handle((req, res) => {
+    const body = fields(req.body, ['alasan']);
+    res.json({ order: store!.cancelOrderByCustomer(req.customerAuth!.account.id, req.params.id, body.alasan) });
+  }));
   router.patch('/profil', handle((req, res) => {
     const input = profile(fields(req.body, ['nama', 'telepon', 'perusahaan']));
     res.json({ account: store!.updateProfile(req.customerAuth!.account.id, input) });

@@ -1175,6 +1175,8 @@ export interface PelangganB2B {
   npwp?: string;
   kodeProvinsi?: string;
   kodeKota?: string;
+  /** Email pengadaan yang dipakai untuk menyarankan penautan akun Customer Portal (selalu dikonfirmasi staf). */
+  emailPortal?: string;
 }
 
 export type TahapProspek =

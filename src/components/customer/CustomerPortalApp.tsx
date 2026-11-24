@@ -1,29 +1,34 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
-  createUserWithEmailAndPassword, reload, sendEmailVerification, sendPasswordResetEmail,
-  signInWithEmailAndPassword, signOut
+  createUserWithEmailAndPassword, GoogleAuthProvider, reload, sendEmailVerification, sendPasswordResetEmail,
+  signInWithEmailAndPassword, signInWithPopup, signOut
 } from 'firebase/auth';
 import {
-  ArrowLeft, Bell, Building2, CheckCircle2, CircleUserRound, KeyRound, LogOut, Mail,
+  ArrowLeft, Bell, Building2, CheckCircle2, CircleUserRound, ClipboardList, KeyRound, LogOut, Mail,
   Minus, PackageSearch, Pencil, Plus, Search, ShieldCheck, ShoppingBag, Trash2, X
 } from 'lucide-react';
 import { customerApi, CustomerApiError } from '../../services/customerPortal';
 import { customerFirebaseMessage, getCustomerFirebase } from '../../services/customerFirebase';
 import {
+  CUSTOMER_ORDER_NOTE_MAX,
   customerProfileError,
+  customerUsernameError,
   type CustomerAccount,
   type CustomerAddress,
   type CustomerCart,
   type CustomerCatalogItem,
+  type CustomerNotification,
+  type CustomerOrder,
+  type CustomerOrderStatus,
   type CustomerPortalStatus
 } from '../../types/customerPortal';
 
 type Page =
   | 'masuk' | 'daftar' | 'lupa-sandi' | 'verifikasi' | 'ringkasan' | 'profil'
-  | 'katalog' | 'keranjang' | 'alamat' | 'notifikasi';
+  | 'katalog' | 'keranjang' | 'pesanan' | 'alamat' | 'notifikasi';
 const pages: Page[] = [
   'masuk', 'daftar', 'lupa-sandi', 'verifikasi', 'ringkasan', 'profil',
-  'katalog', 'keranjang', 'alamat', 'notifikasi'
+  'katalog', 'keranjang', 'pesanan', 'alamat', 'notifikasi'
 ];
 const initialPage = (): Page => {
   const part = window.location.pathname.replace(/^\/akun\/?/, '');
@@ -32,6 +37,11 @@ const initialPage = (): Page => {
 const inputClass = 'w-full min-h-11 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600';
 const primaryClass = 'min-h-11 rounded-xl bg-teal-700 px-5 py-2.5 font-semibold text-sm text-white hover:bg-teal-800 disabled:opacity-50 disabled:cursor-not-allowed';
 const secondaryClass = 'min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50';
+const orderStatusLabel: Record<CustomerOrderStatus, { label: string; className: string }> = {
+  'menunggu-penawaran': { label: 'Menunggu penawaran', className: 'bg-amber-100 text-amber-900' },
+  dibatalkan: { label: 'Dibatalkan', className: 'bg-slate-200 text-slate-700' }
+};
+const formatTanggal = (value: string) => new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
 
 export default function CustomerPortalApp() {
   const [page, setPage] = useState<Page>(initialPage);
@@ -43,6 +53,8 @@ export default function CustomerPortalApp() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [usernameHint, setUsernameHint] = useState<{ ok: boolean; pesan: string } | null>(null);
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [nama, setNama] = useState('');
@@ -50,6 +62,8 @@ export default function CustomerPortalApp() {
   const [perusahaan, setPerusahaan] = useState('');
   const [consent, setConsent] = useState(false);
   const [registrationIdentity, setRegistrationIdentity] = useState<string | null>(null);
+  // Set while a Google identity is signed in but still needs a customer profile (username, company, consent).
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<CustomerCatalogItem[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [catalogQuery, setCatalogQuery] = useState('');
@@ -59,7 +73,14 @@ export default function CustomerPortalApp() {
   const catalogRequestRef = useRef(0);
   const [cart, setCart] = useState<CustomerCart>({ items: [], revision: 0, updatedAt: '' });
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
-  const [notifications, setNotifications] = useState<Array<{ id: string; judul: string; pesan: string; dibaca: boolean; createdAt: string }>>([]);
+  const [notifications, setNotifications] = useState<CustomerNotification[]>([]);
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<CustomerOrder | null>(null);
+  const [checkoutAddressId, setCheckoutAddressId] = useState('');
+  const [checkoutNote, setCheckoutNote] = useState('');
+  const [cancelReason, setCancelReason] = useState('');
+  // One requestId per submission attempt; a retry after a network failure reuses it so the server can deduplicate.
+  const orderRequestRef = useRef<{ id: string; revision: number } | null>(null);
   const [addressForm, setAddressForm] = useState({ label: '', penerima: '', telepon: '', alamat: '', kota: '', provinsi: '', kodePos: '', isUtama: false });
   const [editingAddressId, setEditingAddressId] = useState<string | undefined>();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -84,12 +105,20 @@ export default function CustomerPortalApp() {
     setTelepon('');
     setPerusahaan('');
     setEmail('');
+    setUsername('');
+    setUsernameHint(null);
     setConsent(false);
     setRegistrationIdentity(null);
+    setGoogleEmail(null);
     setCatalog([]);
     setCart({ items: [], revision: 0, updatedAt: '' });
     setAddresses([]);
     setNotifications([]);
+    setOrders([]);
+    setSelectedOrder(null);
+    setCheckoutAddressId('');
+    setCheckoutNote('');
+    orderRequestRef.current = null;
     setDetailProduct(null);
     setEditingAddressId(undefined);
   };
@@ -99,6 +128,23 @@ export default function CustomerPortalApp() {
     return () => window.removeEventListener('popstate', pop);
   }, []);
   useEffect(() => { heading.current?.focus(); }, [page, loading]);
+
+  const loadWorkspace = async (isActive: () => boolean = () => true) => {
+    const [catalogData, cartData, addressData, notificationData, orderData] = await Promise.all([
+      customerApi.catalog(), customerApi.cart(), customerApi.addresses(), customerApi.notifications(), customerApi.orders()
+    ]);
+    if (!isActive()) return;
+    setCatalog(catalogData.items);
+    setCategories(catalogData.categories);
+    setCart(cartData.cart);
+    setAddresses(addressData.items);
+    setNotifications(notificationData.items);
+    setOrders(orderData.items);
+  };
+  useEffect(() => {
+    setCheckoutAddressId((current) => current && addresses.some((a) => a.id === current)
+      ? current : addresses.find((a) => a.isUtama)?.id ?? addresses[0]?.id ?? '');
+  }, [addresses]);
 
   useEffect(() => {
     let active = true;
@@ -112,15 +158,7 @@ export default function CustomerPortalApp() {
           const result = await customerApi.me();
           if (active) {
             applyAccount(result.account);
-            const [catalogData, cartData, addressData, notificationData] = await Promise.all([
-              customerApi.catalog(), customerApi.cart(), customerApi.addresses(), customerApi.notifications()
-            ]);
-            if (!active) return;
-            setCatalog(catalogData.items);
-            setCategories(catalogData.categories);
-            setCart(cartData.cart);
-            setAddresses(addressData.items);
-            setNotifications(notificationData.items);
+            await loadWorkspace(() => active);
           }
         } catch (e) {
           if (!(e instanceof CustomerApiError && e.status === 401)) throw e;
@@ -161,6 +199,39 @@ export default function CustomerPortalApp() {
     go('ringkasan');
     await signOut(auth);
     setRegistrationIdentity(null);
+    setGoogleEmail(null);
+    await loadWorkspace();
+  };
+  const loginWithGoogle = () => void run(async () => {
+    const auth = firebase();
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const user = (await signInWithPopup(auth, provider)).user;
+    try {
+      await exchange();
+    } catch (e) {
+      if (!(e instanceof CustomerApiError && e.code === 'REGISTRATION_REQUIRED')) {
+        await signOut(auth).catch(() => undefined);
+        throw e;
+      }
+      if (!status?.registrationAvailable) {
+        await signOut(auth).catch(() => undefined);
+        throw new Error('Akun Google ini belum terdaftar sebagai customer, dan pendaftaran belum dibuka.');
+      }
+      const address = user.email?.toLowerCase() ?? '';
+      go('daftar');
+      setEmail(address);
+      setRegistrationIdentity(address);
+      setGoogleEmail(address);
+      setNama((current) => current || user.displayName?.slice(0, 120) || '');
+      setNotice(`Akun Google ${address} terverifikasi. Lengkapi username dan profil untuk menyelesaikan pendaftaran.`);
+    }
+  });
+  const cancelGoogle = () => {
+    setGoogleEmail(null);
+    setRegistrationIdentity(null);
+    setEmail('');
+    if (status?.authAvailable) void signOut(firebase()).catch(() => undefined);
   };
   const sendReset = async (address: string) => {
     try { await sendPasswordResetEmail(firebase(), address, actionSettings()); } catch (e) {
@@ -174,37 +245,58 @@ export default function CustomerPortalApp() {
     event.preventDefault();
     void run(async () => {
       if (page === 'lupa-sandi') { await sendReset(email.trim()); return; }
-      const auth = firebase();
       if (page === 'daftar') {
+        const auth = firebase();
         const profile = { nama, telepon, perusahaan };
         const invalid = customerProfileError(profile);
         if (invalid) throw new Error(invalid);
         if (!status?.registrationAvailable || !consent || !status.privacyVersion) throw new Error('Pendaftaran memerlukan persetujuan kebijakan yang berlaku.');
+        const usernameInvalid = customerUsernameError(username);
+        if (usernameInvalid) throw new Error(usernameInvalid);
         let user = auth.currentUser;
+        if (googleEmail && user?.email?.toLowerCase() !== googleEmail) {
+          cancelGoogle();
+          throw new Error('Sesi Google berakhir. Pilih "Lanjutkan dengan Google" lagi.');
+        }
         if (!user || user.email?.toLowerCase() !== email.trim().toLowerCase()) {
           if (password.length < 12) throw new Error('Gunakan kata sandi minimal 12 karakter.');
           if (password !== confirmation) throw new Error('Konfirmasi kata sandi tidak sama.');
-          user = (await createUserWithEmailAndPassword(auth, email.trim(), password)).user;
+          // Check before creating the Firebase identity so a taken username does not leave an orphan account.
+          const check = await customerApi.checkUsername(username);
+          setUsernameHint({ ok: check.available, pesan: check.pesan });
+          if (!check.available) throw new Error(check.pesan);
+          try {
+            user = (await createUserWithEmailAndPassword(auth, email.trim(), password)).user;
+          } catch (e) {
+            if (!(e && typeof e === 'object' && 'code' in e && e.code === 'auth/email-already-in-use')) throw e;
+            // An earlier attempt may have created the identity without a customer record; the same password resumes it.
+            try { user = (await signInWithEmailAndPassword(auth, email.trim(), password)).user; } catch {
+              throw new Error('Email sudah terdaftar. Masuk dengan username Anda atau gunakan lupa kata sandi.');
+            }
+          }
         }
         setRegistrationIdentity(user.email?.toLowerCase() ?? null);
-        await customerApi.register(await user.getIdToken(true), profile, status.privacyVersion);
+        try {
+          await customerApi.register(await user.getIdToken(true), username, profile, status.privacyVersion);
+        } catch (e) {
+          if (e instanceof CustomerApiError && e.code === 'USERNAME_TAKEN') setUsernameHint({ ok: false, pesan: e.message });
+          throw e;
+        }
         if (user.emailVerified) { await exchange(); return; }
         go('verifikasi');
         await sendEmailVerification(user, actionSettings());
         setNotice('Pendaftaran tersimpan. Buka email verifikasi, lalu masuk kembali.');
         return;
       }
-      await signInWithEmailAndPassword(auth, email.trim(), password);
-      try { await exchange(); } catch (e) {
-        if (e instanceof CustomerApiError && e.code === 'REGISTRATION_REQUIRED') {
-          setRegistrationIdentity(auth.currentUser?.email?.toLowerCase() ?? null);
-          go('daftar');
-          setNotice('Identitas Firebase valid. Lengkapi profil dan persetujuan untuk membuat akun customer.');
-          return;
-        }
+      try {
+        const result = await customerApi.loginWithUsername(username.trim(), password);
+        applyAccount(result.account);
+        go('ringkasan');
+        await loadWorkspace();
+      } catch (e) {
         if (e instanceof CustomerApiError && e.code === 'EMAIL_UNVERIFIED') {
           go('verifikasi');
-          setNotice('Email belum terverifikasi. Buka tautan verifikasi pada kotak masuk Anda.');
+          setNotice(e.message);
           return;
         }
         throw e;
@@ -253,6 +345,49 @@ export default function CustomerPortalApp() {
     const result = await customerApi.updateCart(next);
     setCart(result.cart);
   });
+  const ajukanPesanan = () => void run(async () => {
+    if (!checkoutAddressId) throw new Error('Tambahkan atau pilih alamat pengiriman terlebih dahulu.');
+    if (orderRequestRef.current?.revision !== cart.revision) {
+      orderRequestRef.current = { id: crypto.randomUUID(), revision: cart.revision };
+    }
+    try {
+      const result = await customerApi.submitOrder({
+        requestId: orderRequestRef.current.id, cartRevision: cart.revision, alamatId: checkoutAddressId, catatan: checkoutNote
+      });
+      orderRequestRef.current = null;
+      setCart(result.cart);
+      setCheckoutNote('');
+      const [orderData, notificationData] = await Promise.all([customerApi.orders(), customerApi.notifications()]);
+      setOrders(orderData.items);
+      setNotifications(notificationData.items);
+      setSelectedOrder(result.order);
+      go('pesanan');
+      setNotice(`Permintaan penawaran ${result.order.nomor} terkirim. Tim sales akan menyiapkan harga dan ketersediaan.`);
+    } catch (e) {
+      if (e instanceof CustomerApiError && e.code === 'CART_CHANGED') {
+        orderRequestRef.current = null;
+        setCart((await customerApi.cart()).cart);
+      }
+      throw e;
+    }
+  });
+  const bukaPesanan = (id: string) => void run(async () => {
+    setCancelReason('');
+    setSelectedOrder((await customerApi.order(id)).order);
+  });
+  const batalkanPesanan = (id: string) => void run(async () => {
+    if (!window.confirm('Batalkan permintaan penawaran ini?')) return;
+    const result = await customerApi.cancelOrder(id, cancelReason);
+    setSelectedOrder(result.order);
+    setCancelReason('');
+    const [orderData, notificationData] = await Promise.all([customerApi.orders(), customerApi.notifications()]);
+    setOrders(orderData.items);
+    setNotifications(notificationData.items);
+    setNotice(`Pesanan ${result.order.nomor} dibatalkan.`);
+  });
+  const tandaiNotifikasiDibaca = () => void run(async () => {
+    setNotifications((await customerApi.markNotificationsRead()).items);
+  });
   const hapusAlamat = (id: string) => void run(async () => {
     const result = await customerApi.deleteAddress(id);
     setAddresses(result.items);
@@ -269,18 +404,21 @@ export default function CustomerPortalApp() {
     setEditingAddressId(undefined);
     setAddressForm({ label: '', penerima: '', telepon: '', alamat: '', kota: '', provinsi: '', kodePos: '', isUtama: false });
   };
-  const field = (label: string, value: string, setter: (v: string) => void, options: { type?: string; required?: boolean; maxLength?: number; autoComplete?: string } = {}) => (
+  const field = (label: string, value: string, setter: (v: string) => void, options: { type?: string; required?: boolean; maxLength?: number; autoComplete?: string; readOnly?: boolean } = {}) => (
     <label className="block space-y-1.5 text-sm font-medium text-slate-700">
       <span>{label}</span>
       <input className={inputClass} value={value} onChange={(e) => setter(e.target.value)} disabled={busy} {...options} />
     </label>
   );
-  const actualPage = account ? (['profil', 'katalog', 'keranjang', 'alamat', 'notifikasi'].includes(page) ? page : 'ringkasan') :
+  const actualPage = account ? (['profil', 'katalog', 'keranjang', 'pesanan', 'alamat', 'notifikasi'].includes(page) ? page : 'ringkasan') :
     (['daftar', 'lupa-sandi', 'verifikasi'].includes(page) ? page : 'masuk');
+  const unreadCount = notifications.filter((item) => !item.dibaca).length;
+  const canOrder = Boolean(account && (account.aksesDeveloper || account.status === 'aktif'));
+  const openOrders = orders.filter((order) => order.status === 'menunggu-penawaran').length;
   const title = loading ? 'Memuat akun' : !status?.enabled ? 'Customer Portal' : {
     masuk: 'Masuk ke akun customer', daftar: 'Daftar akun customer', 'lupa-sandi': 'Lupa kata sandi',
     verifikasi: 'Verifikasi email Anda', ringkasan: 'Selamat datang kembali', profil: 'Profil & keamanan akun',
-    katalog: 'Katalog produk', keranjang: 'Keranjang permintaan', alamat: 'Alamat pengiriman',
+    katalog: 'Katalog produk', keranjang: 'Keranjang permintaan', pesanan: 'Pesanan saya', alamat: 'Alamat pengiriman',
     notifikasi: 'Notifikasi'
   }[actualPage];
   useEffect(() => { document.title = `${title} | Remedi-AMS`; }, [title]);
@@ -302,8 +440,9 @@ export default function CustomerPortalApp() {
             <button className={secondaryClass} onClick={() => go('profil')} aria-current={actualPage === 'profil' ? 'page' : undefined}>Profil & keamanan</button>
             <button className={secondaryClass} onClick={() => go('katalog')} aria-current={actualPage === 'katalog' ? 'page' : undefined}>Katalog produk</button>
             <button className={secondaryClass} onClick={() => go('keranjang')} aria-current={actualPage === 'keranjang' ? 'page' : undefined}>Keranjang <span className="ml-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs">{cart.items.length}</span></button>
+            <button className={secondaryClass} onClick={() => { setSelectedOrder(null); go('pesanan'); }} aria-current={actualPage === 'pesanan' ? 'page' : undefined}>Pesanan saya</button>
             <button className={secondaryClass} onClick={() => go('alamat')} aria-current={actualPage === 'alamat' ? 'page' : undefined}>Alamat pengiriman</button>
-            <button className={secondaryClass} onClick={() => go('notifikasi')} aria-current={actualPage === 'notifikasi' ? 'page' : undefined}>Notifikasi</button>
+            <button className={secondaryClass} onClick={() => go('notifikasi')} aria-current={actualPage === 'notifikasi' ? 'page' : undefined}>Notifikasi{unreadCount > 0 && <span className="ml-1 rounded-full bg-teal-700 px-2 py-0.5 text-xs text-white">{unreadCount}</span>}</button>
             {account.aksesDeveloper
               ? <a href="/" className={`${secondaryClass} inline-flex items-center justify-center gap-2`}><ArrowLeft className="h-4 w-4" /> Kembali ke ERP</a>
               : <button disabled={busy} className={`${secondaryClass} inline-flex items-center justify-center gap-2`} onClick={() => logout()}><LogOut className="h-4 w-4" /> Keluar</button>}
@@ -331,17 +470,30 @@ export default function CustomerPortalApp() {
                   <div><p className="text-sm font-semibold">Email terverifikasi</p><p className="mt-1 break-words text-sm text-slate-600">{account.email}</p></div>
                 </div>}
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                  {account.status === 'aktif' ? 'Akun bisnis aktif.' : 'Akun menunggu verifikasi bisnis. Tim kami perlu menautkan akun Anda ke data pelanggan B2B sebelum pemesanan dapat digunakan.'}
+                  {account.aksesDeveloper ? 'Ruang kerja developer: pengajuan pesanan diizinkan untuk evaluasi dan ditandai sebagai pesanan uji di inbox sales.'
+                    : account.status === 'aktif' ? 'Akun bisnis aktif. Anda dapat mengajukan permintaan penawaran dari keranjang.'
+                    : 'Akun menunggu verifikasi bisnis. Tim kami perlu menautkan akun Anda ke data pelanggan B2B sebelum pemesanan dapat digunakan.'}
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-xl border border-slate-200 p-4"><p className="text-xs text-slate-500">Baris keranjang</p><p className="mt-1 text-2xl font-bold">{cart.items.length}</p></div>
-                  <div className="rounded-xl border border-slate-200 p-4"><p className="text-xs text-slate-500">Alamat tersimpan</p><p className="mt-1 text-2xl font-bold">{addresses.length}</p></div>
-                  <div className="rounded-xl border border-slate-200 p-4"><p className="text-xs text-slate-500">Notifikasi belum dibaca</p><p className="mt-1 text-2xl font-bold">{notifications.filter((item) => !item.dibaca).length}</p></div>
+                  <div className="rounded-xl border border-slate-200 p-4"><p className="text-xs text-slate-500">Menunggu penawaran</p><p className="mt-1 text-2xl font-bold">{openOrders}</p></div>
+                  <div className="rounded-xl border border-slate-200 p-4"><p className="text-xs text-slate-500">Total pesanan</p><p className="mt-1 text-2xl font-bold">{orders.length}</p></div>
+                  <div className="rounded-xl border border-slate-200 p-4"><p className="text-xs text-slate-500">Notifikasi belum dibaca</p><p className="mt-1 text-2xl font-bold">{unreadCount}</p></div>
                 </div>
-                <p className="text-sm leading-relaxed text-slate-600">Katalog, keranjang dan alamat tersimpan melalui backend. Pengajuan penawaran, pesanan, invoice dan pembayaran belum diaktifkan sampai integrasi ERP Tahap 5 selesai.</p>
+                {orders.length > 0 && <div className="space-y-2">
+                  <h2 className="font-semibold">Pesanan terbaru</h2>
+                  {orders.slice(0, 3).map((order) => (
+                    <button key={order.id} className="flex w-full flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 text-left hover:bg-slate-50" onClick={() => { go('pesanan'); bukaPesanan(order.id); }}>
+                      <span><span className="font-semibold">{order.nomor}</span><span className="block text-xs text-slate-500">{formatTanggal(order.createdAt)} · {order.baris.length} produk</span></span>
+                      <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${orderStatusLabel[order.status].className}`}>{orderStatusLabel[order.status].label}</span>
+                    </button>
+                  ))}
+                </div>}
+                <p className="text-sm leading-relaxed text-slate-600">Harga, PPN, ongkir dan ketersediaan ditetapkan tim sales melalui penawaran. Penawaran, invoice dan pembayaran online belum tersedia di portal; tim kami akan menindaklanjuti permintaan Anda.</p>
                 <div className="flex flex-wrap gap-3">
                   <button className={primaryClass} onClick={() => go('katalog')}>Lihat katalog produk</button>
                   <button className={secondaryClass} onClick={() => go('keranjang')}>Buka keranjang</button>
+                  <button className={secondaryClass} onClick={() => { setSelectedOrder(null); go('pesanan'); }}>Pesanan saya</button>
                 </div>
               </div>
             ) : account && actualPage === 'katalog' ? (
@@ -415,7 +567,84 @@ export default function CustomerPortalApp() {
                     </div>
                   );
                 })}
-                {cart.items.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Checkout dan pengajuan penawaran belum aktif. Keranjang ini tersimpan di server dan dapat dilanjutkan setelah integrasi ERP Tahap 5.</div>}
+                {cart.items.length > 0 && (!canOrder ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">Keranjang tersimpan. Pengajuan permintaan penawaran tersedia setelah tim kami menautkan akun Anda ke data pelanggan bisnis.</div>
+                ) : (
+                  <div className="space-y-4 rounded-2xl border border-teal-200 bg-teal-50/40 p-4 sm:p-5">
+                    <h2 className="font-semibold">Ajukan permintaan penawaran</h2>
+                    <p className="text-sm text-slate-600">Harga, PPN, ongkir dan ketersediaan stok dikonfirmasi oleh tim sales. Pengajuan ini belum menjadi pesanan mengikat.</p>
+                    {addresses.length === 0 ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">Belum ada alamat pengiriman.<button className={secondaryClass} onClick={() => go('alamat')}>Tambah alamat</button></div>
+                    ) : (
+                      <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Alamat pengiriman</span>
+                        <select className={inputClass} value={checkoutAddressId} disabled={busy} onChange={(e) => setCheckoutAddressId(e.target.value)}>
+                          {addresses.map((address) => <option key={address.id} value={address.id}>{address.label} — {address.penerima}, {address.kota}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                      <span>Catatan untuk sales (opsional)</span>
+                      <textarea className={`${inputClass} min-h-24`} value={checkoutNote} maxLength={CUSTOMER_ORDER_NOTE_MAX} disabled={busy} onChange={(e) => setCheckoutNote(e.target.value)} placeholder="Contoh: kebutuhan tanggal kirim, nomor RFQ/PO internal, atau spesifikasi tambahan" />
+                    </label>
+                    <button disabled={busy || !checkoutAddressId} className={`${primaryClass} w-full sm:w-auto`} onClick={ajukanPesanan}>{busy ? 'Mengirim...' : 'Ajukan permintaan penawaran'}</button>
+                  </div>
+                ))}
+              </div>
+            ) : account && actualPage === 'pesanan' ? (
+              <div className="mt-6 space-y-4">
+                {selectedOrder ? (
+                  <div className="space-y-5">
+                    <button className={`${secondaryClass} inline-flex items-center gap-2`} onClick={() => setSelectedOrder(null)}><ArrowLeft className="h-4 w-4" /> Semua pesanan</button>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div><h2 className="text-lg font-bold">{selectedOrder.nomor}</h2><p className="text-sm text-slate-500">Diajukan {formatTanggal(selectedOrder.createdAt)}</p></div>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${orderStatusLabel[selectedOrder.status].className}`}>{orderStatusLabel[selectedOrder.status].label}</span>
+                    </div>
+                    {selectedOrder.uji && <p className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">Pesanan uji dari ruang kerja developer.</p>}
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-3">Produk</th><th className="p-3">SKU</th><th className="p-3 text-right">Jumlah</th></tr></thead>
+                        <tbody>{selectedOrder.baris.map((line) => (
+                          <tr key={line.id} className="border-t border-slate-200"><td className="p-3"><p className="font-semibold">{line.nama}</p><p className="text-xs text-slate-500">{line.tipeModel}{line.nomorIzinEdar ? ` · ${line.nomorIzinEdar}` : ''}</p></td><td className="p-3">{line.kodeSKU || '-'}</td><td className="p-3 text-right">{line.jumlah} {line.satuan}</td></tr>
+                        ))}</tbody>
+                      </table>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 p-4 text-sm"><p className="font-semibold">Alamat pengiriman</p><p className="mt-1 text-slate-600">{selectedOrder.alamat.penerima} · {selectedOrder.alamat.telepon}<br />{selectedOrder.alamat.alamat}, {selectedOrder.alamat.kota}, {selectedOrder.alamat.provinsi} {selectedOrder.alamat.kodePos}</p></div>
+                      <div className="rounded-xl border border-slate-200 p-4 text-sm"><p className="font-semibold">Harga & tagihan</p><p className="mt-1 text-slate-600">Belum ada penawaran. Harga, PPN, ongkir dan invoice akan tampil setelah tim sales mengirim penawaran.</p></div>
+                    </div>
+                    {selectedOrder.catatan && <div className="rounded-xl border border-slate-200 p-4 text-sm"><p className="font-semibold">Catatan Anda</p><p className="mt-1 whitespace-pre-line text-slate-600">{selectedOrder.catatan}</p></div>}
+                    <div>
+                      <h3 className="font-semibold">Riwayat status</h3>
+                      <ol className="mt-2 space-y-2 border-l-2 border-slate-200 pl-4">
+                        {selectedOrder.riwayat.map((event) => (
+                          <li key={event.id} className="text-sm"><p className="font-medium">{orderStatusLabel[event.status].label}{event.oleh === 'staf' ? ' oleh tim kami' : ''}</p><p className="text-xs text-slate-500">{formatTanggal(event.at)}</p>{event.catatan && <p className="mt-1 whitespace-pre-line text-slate-600">{event.catatan}</p>}</li>
+                        ))}
+                      </ol>
+                    </div>
+                    {selectedOrder.status === 'menunggu-penawaran' && (
+                      <div className="space-y-3 border-t border-slate-200 pt-4">
+                        <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                          <span>Alasan pembatalan (opsional)</span>
+                          <input className={inputClass} value={cancelReason} maxLength={500} disabled={busy} onChange={(e) => setCancelReason(e.target.value)} />
+                        </label>
+                        <button disabled={busy} className={`${secondaryClass} inline-flex items-center gap-2 text-red-700`} onClick={() => batalkanPesanan(selectedOrder.id)}><X className="h-4 w-4" /> Batalkan permintaan</button>
+                      </div>
+                    )}
+                  </div>
+                ) : orders.length === 0 ? (
+                  <div className="rounded-xl border border-slate-200 p-8 text-center">
+                    <ClipboardList className="mx-auto mb-3 h-8 w-8 text-slate-300" />
+                    <p className="text-sm text-slate-600">Belum ada pesanan. Tambahkan produk ke keranjang lalu ajukan permintaan penawaran.</p>
+                    <button className={`${primaryClass} mt-4`} onClick={() => go('katalog')}>Lihat katalog</button>
+                  </div>
+                ) : orders.map((order) => (
+                  <button key={order.id} className="flex w-full flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 p-4 text-left hover:bg-slate-50" onClick={() => bukaPesanan(order.id)}>
+                    <span className="min-w-0"><span className="font-semibold">{order.nomor}</span>{order.uji && <span className="ml-2 rounded bg-indigo-100 px-1.5 py-0.5 text-xs text-indigo-800">uji</span>}
+                      <span className="block text-xs text-slate-500">{formatTanggal(order.createdAt)} · {order.baris.length} produk · {order.baris.reduce((sum, line) => sum + line.jumlah, 0)} unit</span></span>
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${orderStatusLabel[order.status].className}`}>{orderStatusLabel[order.status].label}</span>
+                  </button>
+                ))}
               </div>
             ) : account && actualPage === 'alamat' ? (
               <div className="mt-6 space-y-5">
@@ -453,8 +682,15 @@ export default function CustomerPortalApp() {
               </div>
             ) : account && actualPage === 'notifikasi' ? (
               <div className="mt-6 space-y-3">
+                {unreadCount > 0 && <button disabled={busy} className={secondaryClass} onClick={tandaiNotifikasiDibaca}>Tandai semua sudah dibaca</button>}
                 {notifications.length === 0 ? <div className="rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500"><Bell className="mx-auto mb-3 h-8 w-8 text-slate-300" />Belum ada notifikasi.</div> :
-                  notifications.map((item) => <article key={item.id} className="rounded-xl border border-slate-200 p-4"><p className="font-semibold">{item.judul}</p><p className="mt-1 text-sm text-slate-600">{item.pesan}</p></article>)}
+                  notifications.map((item) => (
+                    <article key={item.id} className={`rounded-xl border p-4 ${item.dibaca ? 'border-slate-200' : 'border-teal-300 bg-teal-50/50'}`}>
+                      <div className="flex flex-wrap items-start justify-between gap-2"><p className="font-semibold">{item.judul}</p><p className="text-xs text-slate-500">{formatTanggal(item.createdAt)}</p></div>
+                      <p className="mt-1 text-sm text-slate-600">{item.pesan}</p>
+                      {item.pesananId && <button className="mt-2 text-sm font-semibold text-teal-700 hover:underline" onClick={() => { go('pesanan'); bukaPesanan(item.pesananId!); }}>Lihat pesanan</button>}
+                    </article>
+                  ))}
               </div>
             ) : account ? (
               <div className="mt-6 space-y-6">
@@ -471,8 +707,9 @@ export default function CustomerPortalApp() {
                 </form>
                 {!account.aksesDeveloper && <div className="space-y-3 border-t border-slate-200 pt-5">
                   <h2 className="inline-flex items-center gap-2 font-semibold"><KeyRound className="h-4 w-4" /> Keamanan akun</h2>
+                  {account.username && <p className="break-words text-sm text-slate-600">Username masuk: <span className="font-semibold text-slate-800">{account.username}</span> (tidak dapat diubah)</p>}
                   <p className="break-words text-sm text-slate-600">Email terverifikasi: {account.email}</p>
-                  <p className="text-sm text-slate-600">Pengaturan ulang kata sandi dilakukan melalui tautan Firebase ke email Anda. Perubahan email dan alamat pengiriman belum tersedia pada tahap ini.</p>
+                  <p className="text-sm text-slate-600">Pengaturan ulang kata sandi dilakukan melalui tautan Firebase ke email Anda. Perubahan email belum tersedia pada tahap ini; alamat pengiriman dikelola di menu Alamat pengiriman.</p>
                   <div className="flex flex-wrap gap-3">
                     <button disabled={busy || !status.authAvailable} className={secondaryClass} onClick={() => void run(() => sendReset(account.email))}>Kirim tautan atur ulang sandi</button>
                     <button disabled={busy} className={secondaryClass} onClick={() => logout(true)}>Keluar dari semua perangkat</button>
@@ -484,7 +721,7 @@ export default function CustomerPortalApp() {
             ) : actualPage === 'verifikasi' ? (
               <div className="mt-5 space-y-4">
                 <Mail className="h-8 w-8 text-teal-700" />
-                <p className="text-sm leading-relaxed text-slate-600">Buka tautan verifikasi yang dikirim Firebase. Jika halaman ini sudah dimuat ulang, masuk kembali dengan email dan kata sandi Anda.</p>
+                <p className="text-sm leading-relaxed text-slate-600">Buka tautan verifikasi yang dikirim Firebase. Jika halaman ini sudah dimuat ulang, masuk kembali dengan username dan kata sandi Anda.</p>
                 <div className="flex flex-col gap-3">
                   <button disabled={busy} className={primaryClass} onClick={() => void run(async () => {
                     const user = firebase().currentUser;
@@ -510,11 +747,27 @@ export default function CustomerPortalApp() {
                   {field('Perusahaan / instansi', perusahaan, setPerusahaan, { required: true, maxLength: 160, autoComplete: 'organization' })}
                   {field('Nomor telepon (opsional)', telepon, setTelepon, { type: 'tel', maxLength: 40, autoComplete: 'tel' })}
                 </>}
-                {field('Email', email, setEmail, { type: 'email', required: true, maxLength: 254, autoComplete: 'email' })}
-                {actualPage !== 'lupa-sandi' && field('Kata sandi', password, setPassword, { type: 'password', required: actualPage !== 'daftar' || registrationIdentity !== email.trim().toLowerCase(), maxLength: 128, autoComplete: actualPage === 'daftar' ? 'new-password' : 'current-password' })}
                 {actualPage === 'daftar' && <>
-                  {field('Konfirmasi kata sandi', confirmation, setConfirmation, { type: 'password', required: registrationIdentity !== email.trim().toLowerCase(), maxLength: 128, autoComplete: 'new-password' })}
-                  <p className="text-xs text-slate-500">Minimal 12 karakter untuk akun baru. Jika melengkapi pendaftaran setelah masuk, kata sandi tidak perlu diisi ulang.</p>
+                  {field('Username', username, (value) => { setUsername(value.toLowerCase()); setUsernameHint(null); }, { required: true, maxLength: 30, autoComplete: 'username' })}
+                  {usernameHint
+                    ? <p role="status" className={`-mt-2 text-xs ${usernameHint.ok ? 'text-teal-700' : 'text-red-700'}`}>{usernameHint.pesan}</p>
+                    : <p className="-mt-2 text-xs text-slate-500">Dipakai untuk masuk. 3–30 karakter: huruf kecil, angka, titik, garis bawah atau tanda hubung. Harus unik.</p>}
+                  {!usernameHint && username.length >= 3 && <button type="button" disabled={busy} className="-mt-2 min-h-9 text-xs font-semibold text-teal-700" onClick={() => void run(async () => {
+                    const invalid = customerUsernameError(username);
+                    if (invalid) { setUsernameHint({ ok: false, pesan: invalid }); return; }
+                    const check = await customerApi.checkUsername(username);
+                    setUsernameHint({ ok: check.available, pesan: check.pesan });
+                  })}>Cek ketersediaan username</button>}
+                </>}
+                {actualPage === 'masuk' && field('Username', username, setUsername, { required: true, maxLength: 64, autoComplete: 'username' })}
+                {actualPage !== 'masuk' && field('Email', email, setEmail, { type: 'email', required: true, maxLength: 254, autoComplete: 'email', readOnly: actualPage === 'daftar' && Boolean(googleEmail) })}
+                {actualPage === 'daftar' && <p className="-mt-2 text-xs text-slate-500">{googleEmail ? 'Email dari akun Google Anda. Selanjutnya Anda dapat masuk dengan Google atau username.' : 'Email dipakai untuk verifikasi dan pemulihan kata sandi, bukan untuk masuk.'}</p>}
+                {actualPage !== 'lupa-sandi' && !(actualPage === 'daftar' && googleEmail) && field('Kata sandi', password, setPassword, { type: 'password', required: actualPage !== 'daftar' || registrationIdentity !== email.trim().toLowerCase(), maxLength: 128, autoComplete: actualPage === 'daftar' ? 'new-password' : 'current-password' })}
+                {actualPage === 'daftar' && <>
+                  {!googleEmail && <>
+                    {field('Konfirmasi kata sandi', confirmation, setConfirmation, { type: 'password', required: registrationIdentity !== email.trim().toLowerCase(), maxLength: 128, autoComplete: 'new-password' })}
+                    <p className="text-xs text-slate-500">Minimal 12 karakter untuk akun baru. Jika melengkapi pendaftaran setelah masuk, kata sandi tidak perlu diisi ulang.</p>
+                  </>}
                   <label className="flex items-start gap-3 text-sm text-slate-600">
                     <input type="checkbox" className="mt-1 h-5 w-5 accent-teal-700" checked={consent} onChange={(e) => setConsent(e.target.checked)} required disabled={busy} />
                     <span>Saya menyetujui {status.privacyUrl ? <a className="font-semibold text-teal-700 underline" href={status.privacyUrl} target="_blank" rel="noreferrer">Kebijakan Privasi</a> : 'Kebijakan Privasi'} dan {status.termsUrl ? <a className="font-semibold text-teal-700 underline" href={status.termsUrl} target="_blank" rel="noreferrer">Syarat Layanan</a> : 'Syarat Layanan'}.</span>
@@ -523,8 +776,16 @@ export default function CustomerPortalApp() {
                 <button className={`${primaryClass} w-full`} disabled={busy || (actualPage === 'daftar' && !status.registrationAvailable)}>
                   {busy ? 'Memproses...' : actualPage === 'daftar' ? 'Daftar customer' : actualPage === 'lupa-sandi' ? 'Kirim tautan reset' : 'Masuk customer'}
                 </button>
+                {(actualPage === 'masuk' || (actualPage === 'daftar' && !googleEmail)) && <>
+                  <div className="flex items-center gap-3 text-xs text-slate-400"><span className="h-px flex-1 bg-slate-200" />atau<span className="h-px flex-1 bg-slate-200" /></div>
+                  <button type="button" disabled={busy} onClick={loginWithGoogle} className={`${secondaryClass} inline-flex w-full items-center justify-center gap-2`}>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" className="h-4 w-4"><path fill="#EA4335" d="M12 10.2v3.9h5.4c-.2 1.3-1.6 3.8-5.4 3.8-3.2 0-5.9-2.7-5.9-6s2.7-6 5.9-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.4 12 2.4 6.7 2.4 2.4 6.7 2.4 12s4.3 9.6 9.6 9.6c5.5 0 9.2-3.9 9.2-9.4 0-.6-.1-1.1-.2-1.6H12z" /></svg>
+                    Lanjutkan dengan Google
+                  </button>
+                </>}
+                {actualPage === 'daftar' && googleEmail && <button type="button" disabled={busy} className={`${secondaryClass} w-full`} onClick={cancelGoogle}>Gunakan email & kata sandi</button>}
                 <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 border-t border-slate-100 pt-3">
-                  {actualPage !== 'masuk' && <button type="button" disabled={busy} className="min-h-11 text-sm font-semibold text-teal-700" onClick={() => go('masuk')}>Sudah punya akun? Masuk</button>}
+                  {actualPage !== 'masuk' && <button type="button" disabled={busy} className="min-h-11 text-sm font-semibold text-teal-700" onClick={() => { if (googleEmail) cancelGoogle(); go('masuk'); }}>Sudah punya akun? Masuk</button>}
                   {actualPage === 'masuk' && <>
                     <button type="button" disabled={busy} className="min-h-11 text-sm font-semibold text-teal-700" onClick={() => go('daftar')}>Daftar customer</button>
                     <button type="button" disabled={busy} className="min-h-11 text-sm text-slate-600" onClick={() => go('lupa-sandi')}>Lupa kata sandi?</button>

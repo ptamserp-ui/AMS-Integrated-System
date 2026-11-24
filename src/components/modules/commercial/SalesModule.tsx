@@ -7,7 +7,8 @@ import {
   Megaphone,
   ChartColumn,
   Mail,
-  BookOpen
+  BookOpen,
+  Store
 } from 'lucide-react';
 import { PelangganB2B, UserRole } from '../../../types';
 import ErrorBoundary from '../../common/ErrorBoundary';
@@ -20,8 +21,9 @@ const KampanyeMarketingModule = lazy(() => import('./sales/KampanyeMarketingModu
 const AnalitikSalesModule = lazy(() => import('./sales/AnalitikSalesModule'));
 const ListmonkModule = lazy(() => import('./sales/ListmonkModule'));
 const InternalCatalogModule = lazy(() => import('./sales/InternalCatalogModule'));
+const PortalCustomerModule = lazy(() => import('./sales/PortalCustomerModule'));
 
-export type SalesTab = 'crm' | 'tender' | 'sfa' | 'order' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
+export type SalesTab = 'crm' | 'tender' | 'sfa' | 'order' | 'portal-customer' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
 
 const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
   { id: 'analitik', label: 'Analitik & Dashboard (BI)', ikon: ChartColumn },
@@ -29,6 +31,7 @@ const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
   { id: 'tender', label: 'Manajemen Tender & Kontrak (e-Katalog & LPSE)', ikon: Gavel },
   { id: 'sfa', label: 'Otomasi Sales Force (SFA)', ikon: MapPinned },
   { id: 'order', label: 'Manajemen Order & Penjualan', ikon: ShoppingCart },
+  { id: 'portal-customer', label: 'Portal Customer', ikon: Store },
   { id: 'katalog-internal', label: 'e-Brochure (PDF)', ikon: BookOpen },
   { id: 'kampanye', label: 'Marketing, Promo & Campaign Management', ikon: Megaphone },
   { id: 'listmonk', label: 'Newsletter & Mailing List (listmonk)', ikon: Mail }
@@ -113,6 +116,7 @@ export default function SalesModule({
           {activeTab === 'tender' && <TenderKontrakModule />}
           {activeTab === 'sfa' && <SalesForceModule />}
           {activeTab === 'order' && <SalesOrderModule />}
+          {activeTab === 'portal-customer' && <PortalCustomerModule />}
           {activeTab === 'katalog-internal' && <InternalCatalogModule />}
           {activeTab === 'kampanye' && <KampanyeMarketingModule />}
           {activeTab === 'listmonk' && <ListmonkModule currentRole={currentRole} />}

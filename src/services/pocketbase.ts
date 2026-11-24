@@ -290,7 +290,8 @@ export type KunciKoleksiOperasionalSitus = (typeof KOLEKSI_OPERASIONAL_SITUS)[nu
 
 const KANAL_REALTIME_AMS = 'ams_alkes_realtime_v1';
 const KUNCI_SESI_AUTH = 'ams_alkes_sesi_login_v2';
-const KUNCI_ANTREAN_SYNC = '__ams_pending_sync_v1';
+const KUNCI_ANTREAN_SYNC = '__ams_pending_sync_v2';
+const KUNCI_ANTREAN_SYNC_LEGACY = '__ams_pending_sync_v1';
 const KUNCI_LAST_SYNC_USER = '__ams_last_sync_user_v1';
 const KUNCI_TAHAN_RESET_SYNC = '__ams_sync_reset_hold_v1';
 const KUNCI_MANIFEST_DATA = 'sistem_data_manifest';
@@ -301,7 +302,12 @@ function isLegacyRbacSyncKey(key: string): boolean {
   return LEGACY_RBAC_SYNC_KEYS.has(key);
 }
 
-type SyncOp = { type: 'put'; value: unknown } | { type: 'delete' };
+type SyncMutation = { type: 'put'; value: unknown } | { type: 'delete' };
+type SyncOp = SyncMutation & { expectedVersion: number | null };
+interface PersistedSyncQueue {
+  version: 2;
+  entries: Record<string, { expectedVersion: number | null; conflicted: boolean }>;
+}
 type SesiSinkronisasi = Pick<SesiLogin, 'userId' | 'peran' | 'permissions' | 'employeeId'>;
 export type StatusSinkronisasi = 'idle' | 'syncing' | 'pending' | 'offline' | 'error';
 
@@ -333,6 +339,8 @@ export class AMSDatabaseManager {
   private latestSyncOp: Map<string, SyncOp> = new Map();
   private activeSyncKeys: Set<string> = new Set();
   private pendingSyncKeys: Set<string> = new Set();
+  private pendingSyncExpectedVersions: Map<string, number | null> = new Map();
+  private conflictedSyncKeys: Set<string> = new Set();
   private syncRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   private syncRetryCounts: Map<string, number> = new Map();
   private syncStateStatus: StatusSinkronisasi = 'idle';
@@ -490,13 +498,48 @@ export class AMSDatabaseManager {
   private muatAntreanSyncPersisten() {
     try {
       if (typeof localStorage === 'undefined') return;
-      const raw = localStorage.getItem(KUNCI_ANTREAN_SYNC);
+      this.pendingSyncKeys.clear();
+      this.pendingSyncExpectedVersions.clear();
+      this.conflictedSyncKeys.clear();
+      const current = localStorage.getItem(KUNCI_ANTREAN_SYNC);
+      const legacy = current === null ? localStorage.getItem(KUNCI_ANTREAN_SYNC_LEGACY) : null;
+      const raw = current ?? legacy;
       if (!raw) return;
       const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed) || parsed.some((key) => typeof key !== 'string' || !key)) {
-        throw new Error('Daftar antrean sinkronisasi tidak valid.');
+      if (Array.isArray(parsed)) {
+        if (parsed.some((key) => typeof key !== 'string' || !key)) {
+          throw new Error('Daftar antrean sinkronisasi lama tidak valid.');
+        }
+        for (const key of parsed as string[]) {
+          this.pendingSyncKeys.add(key);
+          this.pendingSyncExpectedVersions.set(key, null);
+          this.conflictedSyncKeys.add(key);
+        }
+        if (legacy !== null) {
+          this.lastSyncError = 'Antrean offline lama tidak memiliki versi dasar; draf dipertahankan untuk rekonsiliasi.';
+          this.simpanAntreanSyncPersisten();
+        }
+        return;
       }
-      parsed.forEach((key: string) => this.pendingSyncKeys.add(key));
+      if (!parsed || typeof parsed !== 'object' || (parsed as PersistedSyncQueue).version !== 2 ||
+          !(parsed as PersistedSyncQueue).entries || typeof (parsed as PersistedSyncQueue).entries !== 'object' ||
+          Array.isArray((parsed as PersistedSyncQueue).entries)) {
+        throw new Error('Metadata antrean sinkronisasi tidak valid.');
+      }
+      for (const [key, metadata] of Object.entries((parsed as PersistedSyncQueue).entries)) {
+        if (!key || !metadata || typeof metadata !== 'object' ||
+            !(metadata.expectedVersion === null ||
+              (Number.isSafeInteger(metadata.expectedVersion) && metadata.expectedVersion >= 0)) ||
+            typeof metadata.conflicted !== 'boolean') {
+          throw new Error('Metadata versi antrean sinkronisasi tidak valid.');
+        }
+        this.pendingSyncKeys.add(key);
+        this.pendingSyncExpectedVersions.set(key, metadata.expectedVersion);
+        if (metadata.conflicted || metadata.expectedVersion === null) this.conflictedSyncKeys.add(key);
+      }
+      if (this.conflictedSyncKeys.size > 0) {
+        this.lastSyncError = `Konflik sinkronisasi pada ${this.conflictedSyncKeys.size} perubahan; draf lokal dipertahankan.`;
+      }
     } catch (error) {
       this.pendingSyncCorrupted = true;
       this.syncHoldReason = 'Antrean offline tidak dapat dibaca. Jangan hapus data browser; hubungi administrator.';
@@ -508,11 +551,19 @@ export class AMSDatabaseManager {
     try {
       if (typeof localStorage === 'undefined') return;
       if (this.pendingSyncCorrupted) throw new Error('Antrean offline yang rusak tidak boleh ditimpa.');
-      const daftar = Array.from(this.pendingSyncKeys);
-      if (daftar.length === 0) {
+      if (this.pendingSyncKeys.size === 0) {
         localStorage.removeItem(KUNCI_ANTREAN_SYNC);
+        localStorage.removeItem(KUNCI_ANTREAN_SYNC_LEGACY);
       } else {
-        localStorage.setItem(KUNCI_ANTREAN_SYNC, JSON.stringify(daftar));
+        const entries: PersistedSyncQueue['entries'] = {};
+        for (const key of this.pendingSyncKeys) {
+          entries[key] = {
+            expectedVersion: this.pendingSyncExpectedVersions.get(key) ?? null,
+            conflicted: this.conflictedSyncKeys.has(key)
+          };
+        }
+        localStorage.setItem(KUNCI_ANTREAN_SYNC, JSON.stringify({ version: 2, entries } satisfies PersistedSyncQueue));
+        localStorage.removeItem(KUNCI_ANTREAN_SYNC_LEGACY);
       }
     } catch (error) {
       console.error('Gagal menyimpan antrean sinkronisasi:', error);
@@ -542,13 +593,15 @@ export class AMSDatabaseManager {
     }
     try {
       if (typeof localStorage === 'undefined') return true;
-      const raw = localStorage.getItem(KUNCI_ANTREAN_SYNC);
+      const raw = localStorage.getItem(KUNCI_ANTREAN_SYNC) ?? localStorage.getItem(KUNCI_ANTREAN_SYNC_LEGACY);
       if (!raw) return false;
       const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed) || parsed.some((key) => typeof key !== 'string' || !key)) {
-        throw new Error('Daftar antrean sinkronisasi tidak valid.');
+      if (Array.isArray(parsed)) {
+        return parsed.includes('website_draft');
       }
-      return parsed.includes('website_draft');
+      return Boolean(parsed && typeof parsed === 'object' &&
+        (parsed as PersistedSyncQueue).version === 2 &&
+        Object.hasOwn((parsed as PersistedSyncQueue).entries, 'website_draft'));
     } catch (error) {
       console.error('Gagal memeriksa antrean draf website:', error);
       return true;
@@ -663,7 +716,7 @@ export class AMSDatabaseManager {
         }
         return;
       }
-      if (e.key === KUNCI_ANTREAN_SYNC || e.key === KUNCI_LAST_SYNC_USER) {
+      if (e.key === KUNCI_ANTREAN_SYNC || e.key === KUNCI_ANTREAN_SYNC_LEGACY || e.key === KUNCI_LAST_SYNC_USER) {
         this.muatAntreanSyncPersisten();
         if (this.syncIdentity && this.hasPendingOfflineChanges() && !this.identitasSesiMasihSama(this.syncIdentity)) {
           this.tahanSinkronisasi('Akun pada tab lain berubah saat masih ada perubahan offline. Pulihkan akun semula.');
@@ -788,6 +841,10 @@ export class AMSDatabaseManager {
     if (this.syncHoldReason) {
       this.syncStateStatus = 'error';
       this.connectionStatusText = this.syncHoldReason;
+    } else if (this.conflictedSyncKeys.size > 0) {
+      this.syncStateStatus = 'error';
+      this.connectionStatusText =
+        `Konflik sinkronisasi pada ${this.conflictedSyncKeys.size} perubahan — draf lokal dipertahankan, perlu rekonsiliasi`;
     } else if (!this.isOnlineBrowser) {
       this.syncStateStatus = 'offline';
       this.connectionStatusText =
@@ -896,6 +953,7 @@ export class AMSDatabaseManager {
       url: this.wsConnected || this.wsShouldConnect ? originUrl : PB_URL,
       pendingCount: this.pendingSyncKeys.size,
       pendingKeys: Array.from(this.pendingSyncKeys),
+      conflictedKeys: Array.from(this.conflictedSyncKeys),
       syncState: this.syncStateStatus,
       syncHoldReason: this.syncHoldReason,
       pendingMediaCount: this.jumlahAntreanMedia(),
@@ -1027,8 +1085,9 @@ export class AMSDatabaseManager {
     try {
       if (typeof localStorage === 'undefined') throw new Error('Penyimpanan lokal tidak tersedia.');
       const raw = localStorage.getItem(STORAGE_PREFIX + key);
-      if (raw === null) return { type: 'delete' };
-      return { type: 'put', value: JSON.parse(raw) };
+      const expectedVersion = this.pendingSyncExpectedVersions.get(key) ?? null;
+      if (raw === null) return { type: 'delete', expectedVersion };
+      return { type: 'put', value: JSON.parse(raw), expectedVersion };
     } catch (error) {
       console.error(`Gagal membaca perubahan offline ${key}:`, error);
       this.tahanSinkronisasi('Perubahan offline tidak dapat dibaca. Jangan hapus data browser; hubungi administrator.');
@@ -1058,12 +1117,24 @@ export class AMSDatabaseManager {
     this.syncRetryTimers.set(key, timer);
   }
 
-  private enqueueKeySync(key: string, op: SyncOp) {
+  private enqueueKeySync(key: string, mutation: SyncMutation) {
     if (isLegacyRbacSyncKey(key)) return;
     if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    const previous = this.latestSyncOp.get(key);
+    const expectedVersion = previous
+      ? previous.expectedVersion
+      : this.pendingSyncKeys.has(key)
+        ? this.pendingSyncExpectedVersions.get(key) ?? null
+        : this.syncScopeVerified ? this.serverVersions[key] ?? 0 : null;
+    const op: SyncOp = { ...mutation, expectedVersion };
     this.pendingSyncKeys.add(key);
+    this.pendingSyncExpectedVersions.set(key, expectedVersion);
     this.latestSyncOp.set(key, op);
+    if (expectedVersion === null) this.conflictedSyncKeys.add(key);
     this.simpanAntreanSyncPersisten();
+    if (this.conflictedSyncKeys.has(key)) {
+      this.lastSyncError = `Versi dasar ${key} tidak tersedia; draf lokal dipertahankan untuk rekonsiliasi.`;
+    }
     const timer = this.syncRetryTimers.get(key);
     if (timer) {
       clearTimeout(timer);
@@ -1079,6 +1150,10 @@ export class AMSDatabaseManager {
 
   private async drainKeySync(key: string) {
     if (typeof window === 'undefined' || typeof fetch !== 'function') return;
+    if (this.conflictedSyncKeys.has(key)) {
+      this.updateConnectionStatusLabel();
+      return;
+    }
     const identity = this.identitasSyncSiap();
     if (!identity) return;
     const epoch = this.syncEpoch;
@@ -1090,6 +1165,12 @@ export class AMSDatabaseManager {
         const op = this.latestSyncOp.get(key) ?? this.bacaOperasiDariLocalStorage(key);
         if (!op) break;
         this.latestSyncOp.set(key, op);
+        if (op.expectedVersion === null) {
+          this.conflictedSyncKeys.add(key);
+          this.lastSyncError = `Versi dasar ${key} tidak tersedia; draf lokal dipertahankan untuk rekonsiliasi.`;
+          this.simpanAntreanSyncPersisten();
+          break;
+        }
 
         const token = this.getAuthTokenFromStorage();
         if (!token || !this.isOnlineBrowser) {
@@ -1101,6 +1182,7 @@ export class AMSDatabaseManager {
           const headers: Record<string, string> = {
             Authorization: `Bearer ${token}`,
             'X-Sync-Client-Id': this.clientTabId,
+            'If-Match': `"${op.expectedVersion}"`,
             [HEADER_IDENTITAS_SYNC]: encodeURIComponent(identity)
           };
           let res: Response;
@@ -1128,12 +1210,22 @@ export class AMSDatabaseManager {
             break;
           }
 
-          if ([400, 403, 409, 410].includes(res.status)) {
-            const errPayload = (await res.json().catch(() => null)) as { pesan?: string } | null;
+          if ([400, 403, 409, 410, 428].includes(res.status)) {
+            const errPayload = (await res.json().catch(() => null)) as {
+              error?: string;
+              pesan?: string;
+              conflicts?: Array<{ key?: string; actualVersion?: number }>;
+            } | null;
             if (!this.konteksSyncMasihSama(identity, epoch)) break;
             this.lastSyncError = errPayload?.pesan || `HTTP ${res.status}`;
             this.lastRejectedKey = key;
-            if (res.status !== 400) {
+            if (res.status === 409 && errPayload?.error === 'SYNC_VERSION_CONFLICT') {
+              this.conflictedSyncKeys.add(key);
+              this.simpanAntreanSyncPersisten();
+            } else if (res.status === 428) {
+              this.conflictedSyncKeys.add(key);
+              this.simpanAntreanSyncPersisten();
+            } else if (res.status !== 400) {
               this.tahanSinkronisasi(`Server menolak perubahan offline: ${this.lastSyncError}`);
             }
             this.updateConnectionStatusLabel();
@@ -1160,8 +1252,10 @@ export class AMSDatabaseManager {
             this.serverRevision = Math.max(this.serverRevision, payload.revision);
           }
           this.lastSyncedAt = new Date().toISOString();
-          this.lastSyncError = null;
-          this.lastRejectedKey = null;
+          this.lastSyncError = this.conflictedSyncKeys.size > 0
+            ? `Konflik sinkronisasi pada ${this.conflictedSyncKeys.size} perubahan; draf lokal dipertahankan.`
+            : null;
+          if (!this.conflictedSyncKeys.has(key)) this.lastRejectedKey = null;
 
           // Cerminkan juga ke Firebase Firestore bila mode pengembangan aktif & terautentikasi
           if (this.activeDbDriver === 'firebase' && authFirebase.currentUser?.emailVerified) {
@@ -1172,10 +1266,20 @@ export class AMSDatabaseManager {
           if (this.latestSyncOp.get(key) === op && this.operasiMasihTersimpan(key, op)) {
             this.latestSyncOp.delete(key);
             this.pendingSyncKeys.delete(key);
+            this.pendingSyncExpectedVersions.delete(key);
+            this.conflictedSyncKeys.delete(key);
             this.syncRetryCounts.delete(key);
             this.simpanAntreanSyncPersisten();
           } else if (this.latestSyncOp.get(key) === op) {
             this.latestSyncOp.delete(key);
+          } else {
+            const newer = this.latestSyncOp.get(key);
+            if (newer && typeof payload?.version === 'number' && newer.expectedVersion === op.expectedVersion) {
+              const rebased = { ...newer, expectedVersion: payload.version };
+              this.latestSyncOp.set(key, rebased);
+              this.pendingSyncExpectedVersions.set(key, payload.version);
+              this.simpanAntreanSyncPersisten();
+            }
           }
         } catch {
           this.lastSyncError = 'Koneksi server terputus';
@@ -1200,7 +1304,8 @@ export class AMSDatabaseManager {
     }
     const epoch = this.syncEpoch;
 
-    const keys = Array.from(this.pendingSyncKeys).filter((k) => !this.activeSyncKeys.has(k));
+    const keys = Array.from(this.pendingSyncKeys)
+      .filter((key) => !this.activeSyncKeys.has(key) && !this.conflictedSyncKeys.has(key));
     if (keys.length === 0) {
       return { synced: 0, remaining: this.pendingSyncKeys.size };
     }
@@ -1215,6 +1320,7 @@ export class AMSDatabaseManager {
 
     const updates: Record<string, unknown> = {};
     const deletes: string[] = [];
+    const expectedVersions: Record<string, number> = {};
     const snapshotOps = new Map<string, SyncOp>();
 
     for (const k of keys) {
@@ -1232,12 +1338,22 @@ export class AMSDatabaseManager {
       }
       this.latestSyncOp.set(k, op);
       snapshotOps.set(k, op);
+      if (op.expectedVersion === null) {
+        this.conflictedSyncKeys.add(k);
+        this.lastSyncError = `Versi dasar ${k} tidak tersedia; draf lokal dipertahankan untuk rekonsiliasi.`;
+        this.simpanAntreanSyncPersisten();
+        for (const activeKey of keys) this.activeSyncKeys.delete(activeKey);
+        this.updateConnectionStatusLabel();
+        return { synced: 0, remaining: this.pendingSyncKeys.size };
+      }
+      expectedVersions[k] = op.expectedVersion;
       if (op.type === 'put') updates[k] = op.value;
       else deletes.push(k);
     }
     this.updateConnectionStatusLabel();
 
     let synced = 0;
+    let flushAfterBatch = false;
     try {
       const res = await fetch('/api/sync/batch', {
         method: 'POST',
@@ -1248,7 +1364,7 @@ export class AMSDatabaseManager {
           'X-Sync-Client-Id': this.clientTabId,
           [HEADER_IDENTITAS_SYNC]: encodeURIComponent(identity)
         },
-        body: JSON.stringify({ updates, deletes, clientId: this.clientTabId })
+        body: JSON.stringify({ updates, deletes, expectedVersions, clientId: this.clientTabId })
       });
 
       if (!this.konteksSyncMasihSama(identity, epoch)) {
@@ -1265,6 +1381,7 @@ export class AMSDatabaseManager {
         const payload = (await res.json().catch(() => null)) as {
           revision?: number;
           versions?: Record<string, number>;
+          deletedVersions?: Record<string, number>;
           peringatan?: unknown;
         } | null;
         if (!this.konteksSyncMasihSama(identity, epoch)) {
@@ -1281,23 +1398,56 @@ export class AMSDatabaseManager {
             }
           }
         }
+        if (payload?.deletedVersions) {
+          for (const [key, version] of Object.entries(payload.deletedVersions)) {
+            if (typeof version === 'number') this.serverVersions[key] = Math.max(this.serverVersions[key] ?? 0, version);
+          }
+        }
         this.lastSyncedAt = new Date().toISOString();
-        this.lastSyncError = null;
+        this.lastSyncError = this.conflictedSyncKeys.size > 0
+          ? `Konflik sinkronisasi pada ${this.conflictedSyncKeys.size} perubahan; draf lokal dipertahankan.`
+          : null;
         for (const k of keys) {
           const snapOp = snapshotOps.get(k);
+          const acknowledgedVersion = payload?.versions?.[k] ?? payload?.deletedVersions?.[k];
           if (this.activeDbDriver === 'firebase' && snapOp && authFirebase.currentUser?.emailVerified) {
-            void this.mirrorOpToFirestore(k, snapOp, payload?.versions?.[k] ?? this.serverVersions[k] ?? 1);
+            void this.mirrorOpToFirestore(k, snapOp, acknowledgedVersion ?? this.serverVersions[k] ?? 1);
           }
           if (snapOp && this.latestSyncOp.get(k) === snapOp && this.operasiMasihTersimpan(k, snapOp)) {
             this.latestSyncOp.delete(k);
             this.pendingSyncKeys.delete(k);
+            this.pendingSyncExpectedVersions.delete(k);
+            this.conflictedSyncKeys.delete(k);
             this.syncRetryCounts.delete(k);
             synced += 1;
           } else if (this.latestSyncOp.get(k) === snapOp) {
             this.latestSyncOp.delete(k);
+          } else {
+            const newer = this.latestSyncOp.get(k);
+            if (newer && typeof acknowledgedVersion === 'number' && newer.expectedVersion === snapOp?.expectedVersion) {
+              const rebased = { ...newer, expectedVersion: acknowledgedVersion };
+              this.latestSyncOp.set(k, rebased);
+              this.pendingSyncExpectedVersions.set(k, acknowledgedVersion);
+              flushAfterBatch = true;
+            }
           }
         }
         this.simpanAntreanSyncPersisten();
+      } else if (res.status === 409 || res.status === 428) {
+        const errorPayload = (await res.json().catch(() => null)) as {
+          error?: string;
+          pesan?: string;
+          conflicts?: Array<{ key?: string }>;
+        } | null;
+        this.lastSyncError = errorPayload?.pesan || `Batch sync ditolak (HTTP ${res.status}).`;
+        this.lastRejectedKey = errorPayload?.conflicts?.[0]?.key ?? keys[0] ?? null;
+        if (errorPayload?.error === 'SYNC_IDENTITY_CHANGED') {
+          this.tahanSinkronisasi(this.lastSyncError);
+        } else {
+          for (const key of keys) this.conflictedSyncKeys.add(key);
+        }
+        this.simpanAntreanSyncPersisten();
+        return { synced: 0, remaining: this.pendingSyncKeys.size };
       } else {
         // Fallback per-kunci bila salah satu item batch ditolak RBAC
         for (const k of keys) {
@@ -1320,6 +1470,9 @@ export class AMSDatabaseManager {
         this.activeSyncKeys.delete(k);
       }
       this.updateConnectionStatusLabel();
+      if (flushAfterBatch && this.isOnlineBrowser && this.identitasSyncSiap()) {
+        queueMicrotask(() => void this.flushPendingSync());
+      }
     }
 
     // Jika ada perubahan baru saat batch berlangsung, antrekan ulang
@@ -1339,7 +1492,8 @@ export class AMSDatabaseManager {
     const push = await this.flushPendingSync();
     const pendingMedia = this.jumlahAntreanMedia();
     return {
-      ok: this.syncScopeVerified && push.remaining === 0 && pendingMedia === 0 && !this.syncHoldReason,
+      ok: this.syncScopeVerified && push.remaining === 0 && pendingMedia === 0 &&
+        this.conflictedSyncKeys.size === 0 && !this.syncHoldReason,
       uploaded: Math.max(push.synced, sebelumnya - push.remaining),
       downloaded: pull.length,
       remaining: push.remaining + Math.max(0, pendingMedia)
@@ -1459,7 +1613,7 @@ export class AMSDatabaseManager {
     return true;
   }
 
-  private applyRemoteDelete(key: string, reason = 'ws'): boolean {
+  private applyRemoteDelete(key: string, reason = 'ws', version?: number): boolean {
     if (isLegacyRbacSyncKey(key)) return false;
     if (this.pendingSyncKeys.has(key)) return false;
     if (typeof localStorage === 'undefined') return false;
@@ -1467,7 +1621,8 @@ export class AMSDatabaseManager {
     this.isApplyingRemote = true;
     try {
       localStorage.removeItem(STORAGE_PREFIX + key);
-      delete this.serverVersions[key];
+      if (typeof version === 'number') this.serverVersions[key] = version;
+      else delete this.serverVersions[key];
       this.notify(key);
     } finally {
       this.isApplyingRemote = false;
@@ -1587,6 +1742,7 @@ export class AMSDatabaseManager {
       const data = (await res.json()) as {
         revision?: number;
         entries?: Record<string, { value: unknown; version: number }>;
+        versions?: Record<string, number>;
         allowedKeys?: string[];
         writableKeys?: string[];
         deletableKeys?: string[];
@@ -1617,6 +1773,7 @@ export class AMSDatabaseManager {
       }
       const changed: string[] = [];
       const remoteEntries = data.entries || {};
+      const previousVersions = { ...this.serverVersions };
       const remoteManifest = remoteEntries[KUNCI_MANIFEST_DATA]?.value as Partial<ManifestAsalData> | undefined;
       const remotePurged = Boolean(remoteManifest?.dummyDihapus);
       if (remotePurged && !this.getManifestData().dummyDihapus && this.hasPendingOfflineChanges()) {
@@ -1636,8 +1793,6 @@ export class AMSDatabaseManager {
         delete this.serverVersions[key];
         if (this.applyRemoteDelete(key, 'permission-revoked')) changed.push(key);
       }
-      const prevKnownKeys = Object.keys(this.serverVersions);
-
       const forceApply = !deltaOnly;
 
       // Pastikan manifest diterapkan terlebih dahulu agar penanda dummyDihapus aktif sebelum koleksi lain
@@ -1661,14 +1816,28 @@ export class AMSDatabaseManager {
         }
       }
 
+      for (const [key, version] of Object.entries(data.versions ?? {})) {
+        if (!Number.isSafeInteger(version) || version < 0 || !allowed.has(key) || this.pendingSyncKeys.has(key)) continue;
+        const previousVersion = previousVersions[key] ?? 0;
+        const keyWasDeleted = !Object.hasOwn(remoteEntries, key);
+        if (keyWasDeleted && (!deltaOnly || version > previousVersion)) {
+          if (this.applyRemoteDelete(key, deltaOnly ? 'delta-delete' : 'hydrate', version) && !changed.includes(key)) {
+            changed.push(key);
+          }
+        } else {
+          this.serverVersions[key] = version;
+        }
+      }
+
       if (!deltaOnly) {
         this.initialServerHydrationDone = true;
-        for (const prevKey of prevKnownKeys) {
+        for (const prevKey of knownKeys) {
           if (
             !Object.prototype.hasOwnProperty.call(remoteEntries, prevKey) &&
             !this.pendingSyncKeys.has(prevKey)
           ) {
-            if (this.applyRemoteDelete(prevKey, 'hydrate')) {
+            const version = data.versions?.[prevKey];
+            if (this.applyRemoteDelete(prevKey, 'hydrate', typeof version === 'number' ? version : undefined)) {
               changed.push(prevKey);
             }
           }
@@ -1676,6 +1845,9 @@ export class AMSDatabaseManager {
       }
 
       this.lastSyncedAt = new Date().toISOString();
+      this.lastSyncError = this.conflictedSyncKeys.size > 0
+        ? `Konflik sinkronisasi pada ${this.conflictedSyncKeys.size} perubahan; draf lokal dipertahankan.`
+        : null;
       this.updateConnectionStatusLabel();
       if (changed.length > 0) {
         this.emitRemoteUpdate(changed, deltaOnly ? 'delta' : 'hydrate');
@@ -1781,6 +1953,7 @@ export class AMSDatabaseManager {
             sourceClientId?: string | null;
             entries?: Record<string, { value: unknown; version: number }>;
             deleted?: string[];
+            deletedVersions?: Record<string, number>;
           };
           if (!msg || typeof msg.type !== 'string') return;
 
@@ -1820,6 +1993,9 @@ export class AMSDatabaseManager {
                   this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, entry.version);
                 }
               }
+              for (const [key, version] of Object.entries(msg.deletedVersions ?? {})) {
+                if (typeof version === 'number') this.serverVersions[key] = Math.max(this.serverVersions[key] ?? 0, version);
+              }
               return;
             }
             const changed: string[] = [];
@@ -1836,7 +2012,8 @@ export class AMSDatabaseManager {
               }
             }
             for (const k of deleted) {
-              if (this.applyRemoteDelete(k, 'ws-batch')) {
+              const version = msg.deletedVersions?.[k];
+              if (this.applyRemoteDelete(k, 'ws-batch', typeof version === 'number' ? version : undefined)) {
                 changed.push(k);
               }
             }
@@ -1851,8 +2028,13 @@ export class AMSDatabaseManager {
             if (typeof msg.revision === 'number') {
               this.serverRevision = Math.max(this.serverRevision, msg.revision);
             }
-            if (msg.sourceClientId === this.clientTabId) return;
-            this.applyRemoteDelete(msg.key, 'ws');
+            if (msg.sourceClientId === this.clientTabId) {
+              if (typeof msg.version === 'number') {
+                this.serverVersions[msg.key] = Math.max(this.serverVersions[msg.key] ?? 0, msg.version);
+              }
+              return;
+            }
+            this.applyRemoteDelete(msg.key, 'ws', msg.version);
             return;
           }
 
@@ -5023,6 +5205,21 @@ export class AMSDatabaseManager {
     };
   }
 
+  private snapshotLocalSyncKeys(keys: string[]): Map<string, string | null> {
+    const snapshot = new Map<string, string | null>();
+    if (typeof localStorage === 'undefined') return snapshot;
+    for (const key of keys) snapshot.set(key, localStorage.getItem(STORAGE_PREFIX + key));
+    return snapshot;
+  }
+
+  private restoreLocalSyncSnapshot(snapshot: Map<string, string | null>): void {
+    if (typeof localStorage === 'undefined') return;
+    for (const [key, value] of snapshot) {
+      if (value === null) localStorage.removeItem(STORAGE_PREFIX + key);
+      else localStorage.setItem(STORAGE_PREFIX + key, value);
+    }
+  }
+
   public async purgeDummyData(
     opsi: {
       pertahankanEditUser?: boolean;
@@ -5054,6 +5251,7 @@ export class AMSDatabaseManager {
 
     const manifestLama = this.getManifestData();
     const batchUpdates: Record<string, unknown> = {};
+    let localSnapshot = new Map<string, string | null>();
     let terhapusDummy = 0;
     let dipertahankanUser = 0;
 
@@ -5135,6 +5333,7 @@ export class AMSDatabaseManager {
       };
       batchUpdates[KUNCI_MANIFEST_DATA] = manifestBaru;
 
+      localSnapshot = this.snapshotLocalSyncKeys(Object.keys(batchUpdates));
       if (typeof localStorage !== 'undefined') {
         for (const [k, val] of Object.entries(batchUpdates)) {
           localStorage.setItem(STORAGE_PREFIX + k, JSON.stringify(val));
@@ -5167,38 +5366,48 @@ export class AMSDatabaseManager {
           },
           body: JSON.stringify({
             updates: batchUpdates,
+            expectedVersions: Object.fromEntries(
+              Object.keys(batchUpdates).map((key) => [key, this.serverVersions[key] ?? 0])
+            ),
             mode: 'purge',
             ringkasan: `Purge ${terhapusDummy} data dummy (dipertahankan ${dipertahankanUser} rekaman user).`,
             clientId: this.clientTabId
           })
         });
-        if (res.ok) {
-          const payload = (await res.json().catch(() => null)) as {
-            revision?: number;
-            versions?: Record<string, number>;
-          } | null;
-          if (typeof payload?.revision === 'number') {
-            this.serverRevision = Math.max(this.serverRevision, payload.revision);
-            syncedRevision = this.serverRevision;
-          }
-          if (payload?.versions) {
-            for (const [k, v] of Object.entries(payload.versions)) {
-              if (typeof v === 'number') {
-                this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
-              }
-            }
-          }
-          this.lastSyncedAt = new Date().toISOString();
-          this.lastSyncError = null;
-        } else {
-          for (const [k, v] of Object.entries(batchUpdates)) {
-            this.enqueueKeySync(k, { type: 'put', value: v });
-          }
+        const payload = await res.json().catch(() => null) as {
+          error?: string;
+          pesan?: string;
+          revision?: number;
+          versions?: Record<string, number>;
+        } | null;
+        if (!res.ok || typeof payload?.revision !== 'number' || !payload.versions ||
+            Object.keys(batchUpdates).some((key) => !Number.isSafeInteger(payload.versions?.[key]))) {
+          this.restoreLocalSyncSnapshot(localSnapshot);
+          const message = payload?.pesan || (res.status === 409
+            ? 'Data berubah di server. Purge dibatalkan; muat ulang data sebelum mencoba lagi.'
+            : 'Server tidak mengonfirmasi purge. Data lokal dipulihkan; periksa server sebelum mencoba lagi.');
+          this.lastSyncError = message;
+          for (const key of Object.keys(batchUpdates)) this.notify(key);
+          this.notify('all');
+          this.updateConnectionStatusLabel();
+          return { ok: false, terhapusDummy: 0, dipertahankanUser, revision: this.serverRevision, pesan: message };
         }
-      } catch {
-        for (const [k, v] of Object.entries(batchUpdates)) {
-          this.enqueueKeySync(k, { type: 'put', value: v });
+        this.serverRevision = Math.max(this.serverRevision, payload.revision);
+        syncedRevision = this.serverRevision;
+        for (const [k, v] of Object.entries(payload.versions)) {
+          if (typeof v === 'number') this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
         }
+        this.lastSyncedAt = new Date().toISOString();
+        this.lastSyncError = null;
+      } catch (error) {
+        this.restoreLocalSyncSnapshot(localSnapshot);
+        const message = 'Tidak dapat memastikan hasil purge. Data lokal dipulihkan; muat ulang dan verifikasi server sebelum mencoba lagi.';
+        this.lastSyncError = message;
+        console.error('[sync] Purge administrasi gagal dikonfirmasi.', error);
+        for (const key of Object.keys(batchUpdates)) this.notify(key);
+        this.notify('all');
+        this.updateConnectionStatusLabel();
+        return { ok: false, terhapusDummy: 0, dipertahankanUser, revision: this.serverRevision, pesan: message };
       }
     }
 
@@ -5229,6 +5438,12 @@ export class AMSDatabaseManager {
         pesan: 'Pemulihan data dummy ditunda karena masih ada perubahan atau media offline yang belum tersinkron.'
       };
     }
+    const snapshotKeys = [...new Set([
+      ...KATALOG_KOLEKSI_DATA.filter((def) => def.kategori === 'operasional').map((def) => def.key),
+      KUNCI_MANIFEST_DATA,
+      'audit_trail'
+    ])];
+    const localSnapshot = this.snapshotLocalSyncKeys(snapshotKeys);
     const manifestBaru = buatManifestDefault();
     const keysReset: string[] = [];
 
@@ -5285,33 +5500,46 @@ export class AMSDatabaseManager {
             },
             body: JSON.stringify({
               updates: batchUpdates,
+              expectedVersions: Object.fromEntries(
+                Object.keys(batchUpdates).map((key) => [key, this.serverVersions[key] ?? 0])
+              ),
               mode: 'restore',
               ringkasan: 'Pemulihan seluruh koleksi data simulasi/dummy standar.',
               clientId: this.clientTabId
             })
           });
-          if (res.ok) {
-            const payload = (await res.json().catch(() => null)) as {
-              revision?: number;
-              versions?: Record<string, number>;
-            } | null;
-            if (typeof payload?.revision === 'number') {
-              this.serverRevision = Math.max(this.serverRevision, payload.revision);
-              syncedRevision = this.serverRevision;
-            }
-            if (payload?.versions) {
-              for (const [k, v] of Object.entries(payload.versions)) {
-                if (typeof v === 'number') {
-                  this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
-                }
-              }
-            }
-            this.lastSyncedAt = new Date().toISOString();
+          const payload = await res.json().catch(() => null) as {
+            error?: string;
+            pesan?: string;
+            revision?: number;
+            versions?: Record<string, number>;
+          } | null;
+          if (!res.ok || typeof payload?.revision !== 'number' || !payload.versions ||
+              Object.keys(batchUpdates).some((key) => !Number.isSafeInteger(payload.versions?.[key]))) {
+            this.restoreLocalSyncSnapshot(localSnapshot);
+            const message = payload?.pesan || (res.status === 409
+              ? 'Data berubah di server. Pemulihan dibatalkan; muat ulang data sebelum mencoba lagi.'
+              : 'Server tidak mengonfirmasi pemulihan. Data lokal dipulihkan; periksa server sebelum mencoba lagi.');
+            this.lastSyncError = message;
+            this.notify('all');
+            this.updateConnectionStatusLabel();
+            return { ok: false, revision: this.serverRevision, pesan: message };
           }
-        } catch {
-          for (const [k, v] of Object.entries(batchUpdates)) {
-            this.enqueueKeySync(k, { type: 'put', value: v });
+          this.serverRevision = Math.max(this.serverRevision, payload.revision);
+          syncedRevision = this.serverRevision;
+          for (const [k, v] of Object.entries(payload.versions)) {
+            if (typeof v === 'number') this.serverVersions[k] = Math.max(this.serverVersions[k] ?? 0, v);
           }
+          this.lastSyncedAt = new Date().toISOString();
+          this.lastSyncError = null;
+        } catch (error) {
+          this.restoreLocalSyncSnapshot(localSnapshot);
+          const message = 'Tidak dapat memastikan hasil pemulihan. Data lokal dipulihkan; muat ulang dan verifikasi server sebelum mencoba lagi.';
+          this.lastSyncError = message;
+          console.error('[sync] Pemulihan administrasi gagal dikonfirmasi.', error);
+          this.notify('all');
+          this.updateConnectionStatusLabel();
+          return { ok: false, revision: this.serverRevision, pesan: message };
         }
       }
 
@@ -5327,6 +5555,9 @@ export class AMSDatabaseManager {
         revision: syncedRevision,
         pesan: 'Seluruh data simulasi standar telah dipulihkan; pengaturan situs, quotation, e-Katalog, CoA, pajak, dan RBAC tetap terjaga.'
       };
+    } catch (error) {
+      this.restoreLocalSyncSnapshot(localSnapshot);
+      throw error;
     } finally {
       this.isInternalProvenanceOp = false;
     }
@@ -5589,21 +5820,35 @@ export class AMSDatabaseManager {
       throw new Error('Reset ditunda karena masih ada perubahan atau media offline yang belum tersinkron.');
     }
     const token = this.getAuthTokenFromStorage();
-    if (token && typeof fetch === 'function') {
-      try {
-        await fetch('/api/sync/reset', {
-          method: 'POST',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ clientId: this.clientTabId })
-        });
-      } catch {
-        /* lanjutkan reset lokal */
-      }
+    if (!token) {
+      throw new Error('Reset dibatalkan karena sesi otorisasi server tidak tersedia; data lokal tidak diubah.');
     }
+    if (typeof fetch !== 'function') {
+      throw new Error('Reset dibatalkan karena koneksi server tidak tersedia; data lokal tidak diubah.');
+    }
+    let response: Response;
+    try {
+      response = await fetch('/api/sync/reset', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ expectedRevision: this.serverRevision, clientId: this.clientTabId })
+      });
+    } catch (error) {
+      console.error('[sync] Reset tidak dapat dikonfirmasi.', error);
+      throw new Error('Reset dibatalkan karena server tidak dapat dihubungi; data lokal tidak diubah.');
+    }
+    const payload = await response.json().catch(() => null) as { pesan?: string; revision?: number } | null;
+    if (!response.ok) {
+      throw new Error(payload?.pesan || 'Reset ditolak oleh server; data lokal tidak diubah.');
+    }
+    if (typeof payload?.revision !== 'number' || !Number.isSafeInteger(payload.revision) || payload.revision < 0) {
+      throw new Error('Server tidak mengonfirmasi revisi reset; data lokal tidak diubah. Muat ulang dan verifikasi server.');
+    }
+    this.serverRevision = payload.revision;
     this.serverVersions = {};
     this.pendingSyncKeys.clear();
     this.latestSyncOp.clear();

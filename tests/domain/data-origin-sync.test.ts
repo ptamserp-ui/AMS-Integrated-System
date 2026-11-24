@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   INITIAL_IZIN_EDAR,
   INITIAL_JEJAK_PERGERAKAN,
@@ -29,6 +29,7 @@ import { tambahJejakPergerakan, verifikasiRantaiHash } from '../../src/utils/gud
 import {
   PUBLIC_SYNC_KEYS,
   ServerDataSyncStore,
+  SyncVersionConflictError,
   canDeleteSyncKey,
   canWriteSyncKey,
   isLegacyRbacSyncKey,
@@ -562,6 +563,40 @@ describe('db.purgeDummyData() & db.pulihkanDataDummy() — isolasi localStorage 
       judulKatalog: 'Katalog Resmi User 2026'
     });
   });
+
+  it('membatalkan purge lokal saat server menolak versi basi tanpa mengantrekan overwrite', async () => {
+    const storage = globalThis.localStorage as MemoryStorage;
+    db.saveIzinEdar([
+      ...INITIAL_IZIN_EDAR,
+      { ...INITIAL_IZIN_EDAR[0], id: 'NIE-LOCAL-DRAFT', nomorIzinEdar: 'KEMENKES RI AKL 12345678' }
+    ]);
+    const beforeIzinEdar = db.getIzinEdar();
+    storage.setItem('ams_alkes_sesi_login_v2', JSON.stringify({
+      token: 'test-token',
+      expiresAt: new Date(Date.now() + 60_000).toISOString()
+    }));
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: 'SYNC_VERSION_CONFLICT',
+      pesan: 'Data berubah di server.'
+    }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', request);
+
+    try {
+      const result = await db.purgeDummyData();
+      expect(result.ok).toBe(false);
+      expect(result.pesan).toContain('Data berubah di server.');
+      expect(db.getIzinEdar()).toEqual(beforeIzinEdar);
+      expect(db.hasPendingOfflineChanges()).toBe(false);
+
+      const payload = JSON.parse(String(request.mock.calls[0][1]?.body)) as {
+        updates: Record<string, unknown>;
+        expectedVersions: Record<string, number>;
+      };
+      expect(Object.keys(payload.expectedVersions).sort()).toEqual(Object.keys(payload.updates).sort());
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
@@ -608,6 +643,32 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
     expect(new ServerDataSyncStore(freshDir).getEntry('website_draft')?.value).toEqual({ judul: 'Draf tersimpan' });
   });
 
+  it('tidak membuat state kosong ketika state hilang dan file sementara masih ada', () => {
+    const dir = createTempDir();
+    const file = path.join(dir, 'app-state.json');
+    const pending = `${file}.tmp`;
+    const content = '{"entries":{"draft":"pending"}}';
+    fs.writeFileSync(pending, content);
+
+    expect(() => new ServerDataSyncStore(dir)).toThrow(/hilang.*berkas sementara/);
+    expect(fs.existsSync(file)).toBe(false);
+    expect(fs.readFileSync(pending, 'utf8')).toBe(content);
+  });
+
+  it('tidak menimpa file sementara yang belum direkonsiliasi saat menulis state', () => {
+    const dir = createTempDir();
+    const store = new ServerDataSyncStore(dir);
+    store.setKey('website_draft', { judul: 'Semula' }, 'admin');
+    const pending = path.join(dir, 'app-state.json.tmp');
+    const content = '{"belumDirekonsiliasi":true}';
+    fs.writeFileSync(pending, content);
+
+    expect(() => store.setKey('website_draft', { judul: 'Baru' }, 'admin')).toThrow();
+    expect(store.getEntry('website_draft')?.value).toEqual({ judul: 'Semula' });
+    expect(new ServerDataSyncStore(dir).getEntry('website_draft')?.value).toEqual({ judul: 'Semula' });
+    expect(fs.readFileSync(pending, 'utf8')).toBe(content);
+  });
+
   it('membaca state lama tanpa version dan revision tingkat teratas', () => {
     const dir = createTempDir();
     fs.writeFileSync(path.join(dir, 'app-state.json'), JSON.stringify({
@@ -618,6 +679,29 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
     const store = new ServerDataSyncStore(dir);
     expect(store.getRevision()).toBe(0);
     expect(store.getEntry('website_draft')?.value).toEqual({ judul: 'Draf lama' });
+  });
+
+  it('membandingkan versi sebelum mutasi batch dan mempertahankan versi tombstone setelah hapus', () => {
+    const dir = createTempDir();
+    const store = new ServerDataSyncStore(dir);
+    store.setKey('website_draft', { judul: 'Awal' }, 'admin', 0);
+
+    expect(() => store.setKey('website_draft', { judul: 'Basi' }, 'admin', 0))
+      .toThrow(SyncVersionConflictError);
+    expect(() => store.setBatch(
+      { website_draft: { judul: 'Basi' }, website_content_v: 1 },
+      [],
+      'admin',
+      { website_draft: 0, website_content_v: 0 }
+    )).toThrow(SyncVersionConflictError);
+    expect(store.getEntry('website_content_v')).toBeUndefined();
+    expect(store.getEntry('website_draft')?.value).toEqual({ judul: 'Awal' });
+
+    store.deleteKey('website_draft', 1);
+    expect(store.getVersions(['website_draft'])).toEqual({ website_draft: 2 });
+    const reloaded = new ServerDataSyncStore(dir);
+    expect(reloaded.getVersions(['website_draft'])).toEqual({ website_draft: 2 });
+    expect(reloaded.setKey('website_draft', { judul: 'Buat ulang' }, 'admin', 2).entry.version).toBe(3);
   });
 
   it('setBatch menulis pembaruan dan penghapusan secara atomik, memelihara versi, delta query, dan persistensi disk', () => {

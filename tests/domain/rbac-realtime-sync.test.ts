@@ -13,7 +13,7 @@ import {
   mergeCatalogIntoDraftConfig,
   mergeCatalogIntoPublishedSnapshot
 } from '../../server/dataSyncStore';
-import type { RoleDefinition } from '../../src/types/index';
+import type { RoleDefinition, ServerAuditEntry } from '../../src/types/index';
 
 const createdDirs: string[] = [];
 
@@ -32,6 +32,106 @@ afterEach(() => {
 });
 
 describe('ServerRbacStore & ServerDataSyncStore — Sinkronisasi Multi-User & Login Internet Real-Time', () => {
+  it('menyimpan seluruh audit RBAC dan mengarsipkannya per bulan tanpa batas 500 entri', () => {
+    const dataDir = createTempDataDir();
+    new ServerRbacStore(dataDir);
+    const dbPath = path.join(dataDir, 'rbac-db.json');
+    const state = JSON.parse(fs.readFileSync(dbPath, 'utf8')) as { auditLogs: ServerAuditEntry[] };
+    const bootstrapAudit = state.auditLogs[0];
+    expect(bootstrapAudit).toBeDefined();
+    if (!bootstrapAudit) return;
+    const month = bootstrapAudit.timestamp.slice(0, 7);
+    const timestamp = `${month}-01T00:00:00.000Z`;
+    state.auditLogs = [
+      bootstrapAudit,
+      ...Array.from({ length: 499 }, (_, index): ServerAuditEntry => ({
+        id: `aud-retained-${index}`,
+        timestamp,
+        actorUsername: 'auditor.test',
+        actorRole: 'developer',
+        action: 'TEST_AUDIT',
+        resource: 'audit-test',
+        status: 'ALLOWED',
+        ip: '127.0.0.1',
+        detail: `Catatan audit uji ${index}`
+      }))
+    ];
+    fs.writeFileSync(dbPath, JSON.stringify(state));
+
+    const store = new ServerRbacStore(dataDir);
+    store.recordAudit({
+      actorUsername: 'auditor.test',
+      actorRole: 'developer',
+      action: 'TEST_AUDIT',
+      resource: 'audit-test',
+      status: 'ALLOWED',
+      ip: '127.0.0.1',
+      detail: 'Catatan audit setelah ambang lama'
+    });
+
+    const archivePath = path.join(dataDir, 'audit-archive', `${month}.jsonl`);
+    const archived = fs.readFileSync(archivePath, 'utf8').trim().split(/\r?\n/);
+    expect(store.getAuditLogs(600)).toHaveLength(501);
+    expect(store.getAuditLogsForMonth(month)).toHaveLength(501);
+    expect(archived).toHaveLength(501);
+    expect(store.getAuditArchiveJsonl(month).trim().split(/\r?\n/)).toHaveLength(501);
+    expect(new ServerRbacStore(dataDir).getAuditLogs(600)).toHaveLength(501);
+  });
+
+  it('mempertahankan audit RBAC saat arsip gagal dan mengarsipkan ulang setelah restart', () => {
+    const dataDir = createTempDataDir();
+    const store = new ServerRbacStore(dataDir);
+    const month = new Date().toISOString().slice(0, 7);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const appendFailure = vi.spyOn(fs, 'appendFileSync').mockImplementationOnce(() => {
+      throw new Error('archive unavailable');
+    });
+
+    let auditId = '';
+    try {
+      auditId = store.recordAudit({
+        actorUsername: 'auditor.test',
+        actorRole: 'developer',
+        action: 'TEST_ARCHIVE_RETRY',
+        resource: 'audit-test',
+        status: 'ALLOWED',
+        ip: '127.0.0.1',
+        detail: 'Audit tetap tersimpan saat arsip gagal'
+      }).id;
+      expect(consoleError).toHaveBeenCalledWith(
+        '[audit] Arsip bulanan RBAC tertunda; riwayat tetap tersimpan di rbac-db.json.',
+        expect.any(Error)
+      );
+    } finally {
+      appendFailure.mockRestore();
+      consoleError.mockRestore();
+    }
+
+    const database = JSON.parse(fs.readFileSync(path.join(dataDir, 'rbac-db.json'), 'utf8')) as {
+      auditLogs: ServerAuditEntry[];
+    };
+    expect(database.auditLogs.some((entry) => entry.id === auditId)).toBe(true);
+
+    const restarted = new ServerRbacStore(dataDir);
+    const archivePath = path.join(dataDir, 'audit-archive', `${month}.jsonl`);
+    const archived = fs.readFileSync(archivePath, 'utf8').trim().split(/\r?\n/).map((line) => JSON.parse(line));
+    expect(archived.some((entry: ServerAuditEntry) => entry.id === auditId)).toBe(true);
+    expect(restarted.getAuditLogsForMonth(month).some((entry) => entry.id === auditId)).toBe(true);
+  });
+
+  it('menolak riwayat audit rusak tanpa menimpa basis data RBAC', () => {
+    const dataDir = createTempDataDir();
+    new ServerRbacStore(dataDir);
+    const dbPath = path.join(dataDir, 'rbac-db.json');
+    const state = JSON.parse(fs.readFileSync(dbPath, 'utf8')) as { auditLogs: unknown[] };
+    state.auditLogs = [{ id: 'invalid' }];
+    const content = JSON.stringify(state);
+    fs.writeFileSync(dbPath, content);
+
+    expect(() => new ServerRbacStore(dataDir)).toThrow(/Riwayat audit.*tidak valid/);
+    expect(fs.readFileSync(dbPath, 'utf8')).toBe(content);
+  });
+
   it('tidak menimpa secret sesi RBAC yang sudah ada tetapi tidak valid', () => {
     const dataDir = createTempDataDir();
     const file = path.join(dataDir, '.session-secret');

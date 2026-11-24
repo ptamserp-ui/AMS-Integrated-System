@@ -29,8 +29,12 @@ Keputusan diambil oleh pengguna pada 24 November 2026.
 
 | Topik | Keputusan | Konsekuensi teknis |
 | --- | --- | --- |
-| Verifikasi email dan reset password | Firebase Authentication (Email/Password) | Email verifikasi dan reset dikirim oleh Firebase. Password tidak pernah disimpan di server AMS. Provider Email/Password harus diaktifkan di Firebase Console. |
+| Verifikasi email dan reset password | Firebase Authentication (Email/Password) | Email verifikasi dan reset dikirim oleh Firebase. Password tidak pernah disimpan di server AMS; sejak login username, password melewati server AMS (HTTPS) hanya untuk diteruskan ke Firebase dan tidak dicatat. Provider Email/Password harus diaktifkan di Firebase Console. |
+| Identitas masuk customer | Username unik (keputusan pengguna 25 November 2026) | Customer memilih username saat mendaftar dan masuk dengan username + kata sandi, bukan email. Username tidak membedakan huruf besar/kecil, unik, tidak dapat diubah, dan tidak sama dengan nama sistem (mis. `admin`). |
 | Metode pembayaran | Transfer bank manual + unggah bukti, diverifikasi tim finance | Perlu penyimpanan privat untuk bukti bayar dan tampilan verifikasi bagi finance. Data rekening tujuan dikonfigurasi oleh admin, bukan ditulis di kode. |
+| Lingkup akun awal | B2B saja; akun perorangan ditunda (keputusan pengguna 24 November 2026) | Akun portal harus ditautkan ke satu `sales_pelanggan` aktif; pemetaan perorangan tidak masuk lingkup tahap ini. |
+| Pajak ongkir | Sales/Finance menetapkan perlakuan pajak per penawaran (keputusan pengguna 24 November 2026) | Server menyimpan perlakuan yang dipilih per versi penawaran; tidak mengasumsikan ongkir selalu kena atau bebas PPN. |
+| Pembayaran tahap awal | Pelunasan penuh; pembayaran sebagian dan refund ditunda (keputusan pengguna 24 November 2026) | Alur portal awal tidak menghitung cicilan/refund; keduanya memerlukan desain ERP terpisah. |
 | Harga | Checkout sebagai permintaan pesanan; sales menetapkan harga, lalu customer menyetujui | Katalog tidak membutuhkan harga numerik. Total transaksi berasal dari penawaran sales yang disetujui customer. |
 | Aktivasi customer | Customer bebas melihat katalog; checkout setelah admin menautkan akun ke data pelanggan B2B | Akun baru berstatus menunggu verifikasi. Tim sales menautkan akun ke `sales_pelanggan` sebelum customer dapat mengajukan pesanan. |
 | URL portal | `/akun` | Rute `/`, `/web` dan `/mobile` tidak berubah. |
@@ -41,7 +45,7 @@ Keputusan diambil oleh pengguna pada 24 November 2026.
 
 - **Teknologi:** React 19 + Vite 8, Express 4, TypeScript, Vitest, Firebase/Firestore Admin dan WebSocket `ws`. Tidak ada database SQL; state server disimpan dalam berkas JSON di `AMS_DATA_DIR`.
 - **Routing frontend:** [main.tsx](../src/main.tsx) memilih aplikasi berdasarkan pathname: `/mobile`, `/web`, dan selain itu `App` (halaman depan + ERP). Tombol Masuk di [HalamanDepan.tsx](../src/components/modules/website/site/HalamanDepan.tsx) membuka [KartuMasuk.tsx](../src/components/modules/website/site/KartuMasuk.tsx).
-- **Login karyawan:** [rbacStore.ts](../server/rbacStore.ts) menyimpan user, role, sesi dan audit di `rbac-db.json`. Password memakai scrypt, token sesi bertanda tangan HMAC, sesi berlaku 12 jam, dan cookie bernama `ams_session`. Batas total sesi adalah 200 dan audit log dibatasi 500 entri. Login Google melalui `/api/auth/firebase-login` hanya menerima email terverifikasi yang cocok dengan akun RBAC.
+- **Login karyawan:** [rbacStore.ts](../server/rbacStore.ts) menyimpan user, role, sesi dan audit di `rbac-db.json`. Password memakai scrypt, token sesi bertanda tangan HMAC, sesi berlaku 12 jam, dan cookie bernama `ams_session`. Batas total sesi adalah 200. Baseline audit pernah dibatasi 500 entri; kode lokal saat ini mempertahankan seluruh riwayat dan menyalinnya ke arsip bulanan `audit-archive/YYYY-MM.jsonl`. Login Google melalui `/api/auth/firebase-login` hanya menerima email terverifikasi yang cocok dengan akun RBAC.
 - **Otorisasi:** [rbacMiddleware.ts](../server/rbacMiddleware.ts) menyediakan `attachAuth`, `requireAuth` dan `requirePermission(resource, action)`. Data ERP disinkronkan melalui `/api/sync/*` yang mewajibkan sesi karyawan dan difilter per peran di [dataSyncStore.ts](../server/dataSyncStore.ts).
 - **Firestore Rules:** default deny. Akses admin dan pemilik mewajibkan email terverifikasi.
 
@@ -84,9 +88,9 @@ Baseline di atas dipertahankan sebagai riwayat. Pembatasan provider, store custo
 | Alur | Rancangan |
 | --- | --- |
 | Pilihan login | Tombol Masuk di halaman depan membuka pilihan **Masuk Karyawan** dan **Masuk / Daftar Customer**. Masuk Karyawan memakai `KartuMasuk` tanpa perubahan. `?masuk=1`, setup awal dan reset developer tetap langsung membuka form karyawan. |
-| Registrasi | Klien membuat akun dengan `createUserWithEmailAndPassword`, lalu memanggil `POST /api/customer/auth/daftar` dengan ID token dan data profil sebelum mengirim email verifikasi. Server memverifikasi token, memvalidasi profil, memeriksa rate limit, mewajibkan persetujuan kebijakan privasi, lalu membuat profil berstatus `menunggu-email`. Jika sudah terverifikasi, status awal `menunggu-verifikasi`, bukan `aktif`. Password tidak melewati server AMS. |
-| Verifikasi email | Customer membuka tautan dari Firebase. Sesi portal baru diterbitkan setelah `email_verified` bernilai `true`. |
-| Login | Klien masuk ke Firebase lalu menukar ID token melalui `POST /api/customer/auth/sesi`. Server memverifikasi token dengan Firebase Admin (`checkRevoked`) dan menolak UID yang belum memiliki profil customer. Akun Firebase tanpa profil diarahkan ke langkah melengkapi pendaftaran. |
+| Registrasi | Klien memeriksa username melalui `POST /api/customer/auth/cek-username` sebelum membuat akun Firebase dengan `createUserWithEmailAndPassword`, lalu memanggil `POST /api/customer/auth/daftar` dengan ID token, username dan data profil sebelum mengirim email verifikasi. Server memverifikasi token, memvalidasi profil dan username, menolak username yang sudah dipakai (409 `USERNAME_TAKEN`), memeriksa rate limit, mewajibkan persetujuan kebijakan privasi, lalu membuat profil berstatus `menunggu-email`. Jika sudah terverifikasi, status awal `menunggu-verifikasi`, bukan `aktif`. Jika email sudah punya identitas Firebase tanpa profil (pendaftaran terputus), kata sandi yang sama melanjutkannya. |
+| Verifikasi email | Customer membuka tautan dari Firebase. Sesi portal baru diterbitkan setelah `email_verified` bernilai `true`. Login username sebelum verifikasi mengirim ulang tautan paling banyak sekali per 10 menit per akun. |
+| Login | Customer mengisi username dan kata sandi di `POST /api/customer/auth/masuk`. Server mencari email secara privat, masuk ke Firebase melalui Identity Toolkit REST (`signInWithPassword`, header Referer `APP_URL`), memverifikasi ID token dengan Admin SDK (`checkRevoked`), lalu menerbitkan cookie. Username tidak dikenal, salah sandi dan akun ditangguhkan menerima respons 401 yang sama; email tidak pernah dikembalikan. Batas: 20 percobaan per IP/15 menit dan 10 kegagalan per username/15 menit. `POST /auth/sesi` tetap dipakai untuk penukaran ID token setelah pendaftaran/verifikasi. |
 | Logout | `POST /api/customer/auth/keluar` mencabut sesi server, menghapus cookie, lalu klien keluar dari Firebase. |
 | Lupa password | `sendPasswordResetEmail` dari Firebase dengan pesan yang sama untuk email terdaftar maupun tidak terdaftar. |
 | Ganti password | Reautentikasi lalu `updatePassword` di klien. Server mencabut sesi lain dan refresh token Firebase. |
@@ -104,10 +108,10 @@ Instance karyawan dipilih dengan nama `[DEFAULT]`, bukan urutan pertama `getApps
 - **Pencabutan:** seluruh sesi dicabut saat password atau email berubah, akun ditangguhkan, atau customer memilih keluar dari semua perangkat.
 - **Sinkron dengan status Firebase:** reset password di halaman Firebase tidak melewati server AMS. Implementasi awal memeriksa `disabled`, `tokensValidAfterTime`, verifikasi dan email melalui Admin SDK pada **setiap** request terautentikasi, tanpa cache. Waktu autentikasi Firebase (`auth_time`), bukan waktu penukaran cookie, dibandingkan dengan waktu pencabutan. Error jaringan menolak akses dengan 503; logout lokal tetap tersedia. Sesi diperiksa lagi setelah I/O agar logout paralel tidak dibatalkan oleh request yang sedang berjalan. Cache baru boleh diperkenalkan setelah kebijakan pencabutan diuji.
 - **CSRF:** endpoint yang mengubah data mewajibkan `Content-Type: application/json` (kecuali unggahan berkas), `Origin` atau `Sec-Fetch-Site` dari origin yang sama, dan cookie SameSite=Lax. Pemeriksaan Origin yang sama **wajib** untuk seluruh mutasi staf `/api/erp/portal/*`, karena cookie internal `ams_session` masih `SameSite=None` di HTTPS.
-- **Rate limit (memori, dengan batas jumlah kunci):** daftar 5/jam/IP; tukar sesi 20/15 menit/IP; pesanan 10/jam/akun; unggah bukti 10/jam/akun.
+- **Rate limit (memori, dengan batas jumlah kunci):** daftar 5/jam/IP; tukar sesi 20/15 menit/IP; pengajuan pesanan 20/jam **per akun** (termasuk retry idempoten dan percobaan gagal, agar customer di balik NAT rumah sakit tidak berbagi kuota), ditambah maksimal 10 permintaan berstatus `menunggu-penawaran` per akun; unggah bukti 10/jam/akun (rancangan).
 - **Validasi input:** validator bersama untuk klien dan server, batas panjang setiap kolom, maksimal 30 baris keranjang, dan jumlah bilangan bulat 1–1.000.000 (memakai `jumlahRfqValid`).
 - **XSS:** seluruh teks dirender sebagai teks React tanpa `dangerouslySetInnerHTML`. Nama berkas unggahan tidak pernah dipakai sebagai path.
-- **Audit:** aktivitas penting customer dan mutasi staf portal ditulis ke `customer-portal-audit.jsonl` (append-only, tanpa token, password, email atau isi profil; mutasi staf mencatat username pelaku). Catatan `attempt` ditulis sebelum commit dan `committed` setelahnya, dengan ID event dan revisi yang sama. Jika penulisan audit gagal, API melaporkan kegagalan; `attempt` tanpa `committed` harus direkonsiliasi dengan revisi database, bukan dianggap sukses atau gagal secara otomatis. Log ini terpisah dari audit RBAC umum.
+- **Audit:** event baru ditulis append-only ke `customer-portal-audit-archive/YYYY-MM.jsonl`; pada startup, entri dari `customer-portal-audit.jsonl` legacy disalin ke arsip bulanan tanpa mengubah atau menghapus file lama. Event tidak memuat token, password, email atau isi profil; mutasi staf mencatat username pelaku. Catatan `attempt` ditulis sebelum commit dan `committed` setelahnya, dengan ID event dan revisi yang sama. Jika penulisan arsip gagal, API melaporkan kegagalan; `attempt` tanpa `committed` harus direkonsiliasi dengan revisi database, bukan dianggap sukses atau gagal secara otomatis. Audit ini terpisah dari audit RBAC umum. Belum ada penghapusan otomatis atau endpoint ekspor arsip Customer Portal.
 - **Pemisahan provider Firebase (wajib sebelum Email/Password diaktifkan):** `/api/auth/firebase-login` dan `/api/firebase/hydrate` hanya menerima token dengan `firebase.sign_in_provider == 'google.com'`, sesuai tombol yang tersedia saat ini. Fungsi admin di Firestore Rules juga mewajibkan provider Google. Alasannya, token Email/Password customer tidak boleh menjadi jalur masuk ERP atau Firestore, walaupun emailnya sama dengan email karyawan. Perubahan ini dilakukan bersama tes regresi login karyawan, hydrate dan rules.
 
 ### 3.4 Status akun customer
@@ -116,7 +120,7 @@ Instance karyawan dipilih dengan nama `[DEFAULT]`, bukan urutan pertama `getApps
 | --- | --- | --- |
 | `menunggu-email` | Profil dibuat, email belum diverifikasi | Belum dapat masuk portal; hanya kirim ulang verifikasi |
 | `menunggu-verifikasi` | Email terverifikasi, menunggu tautan pelanggan B2B oleh sales | Katalog, keranjang, profil, alamat, notifikasi; belum dapat mengajukan pesanan |
-| `aktif` | Tertaut ke `sales_pelanggan` | Akses ke fitur portal yang sudah tersedia; checkout, pesanan, faktur dan pembayaran belum dibangun |
+| `aktif` | Tertaut ke `sales_pelanggan` | Seluruh fitur portal yang tersedia, termasuk pengajuan permintaan penawaran dan pembatalannya; penawaran harga, faktur dan pembayaran belum dibangun |
 | `ditangguhkan` | Dinonaktifkan oleh staf | Sesi dicabut; login ditolak dengan pesan umum |
 
 Jenis akun: `bisnis` (dengan data perusahaan) dan `perorangan`. Cara mencatat pelanggan perorangan di ERP masih memerlukan keputusan (lihat [bagian 7](#7-tindakan-dan-keputusan-yang-masih-diperlukan)).
@@ -136,11 +140,13 @@ Keranjang
 dibatalkan: lihat aturan pembatalan di bawah.
 ```
 
+**Status implementasi (25 November 2026, lokal):** baru status `menunggu-penawaran` dan `dibatalkan` yang dibangun. Pengajuan memotret baris keranjang server (nama, model, SKU, izin edar, satuan dari katalog terbit saat itu) dan alamat, lalu mengosongkan keranjang dalam satu penulisan. Browser hanya mengirim `requestId`, revisi keranjang, ID alamat dan catatan; baris tidak pernah diambil dari body. Nomor `PRT-YYMMDD-XXXXXX` adalah nomor permintaan portal, bukan nomor Sales Order. Pesanan dari ruang kerja developer diberi penanda `uji` dan tampil sebagai "uji developer" di inbox staf. Status setelah `menunggu-penawaran` belum tersedia karena penawaran membutuhkan tarif PPN dari konfigurasi finance (`keuangan_tetapan_pajak`, `PPN Keluaran`, terverifikasi) yang saat ini hanya tersedia di klien, serta konversi Sales Order yang masih terhalang P0-02.
+
 **Penawaran dihitung secara kanonik di server.** Form Sales Order existing menurunkan harga dari kontrak/skema harga dan menetapkan PPN 11% secara tetap ([SalesOrderModule.tsx](../src/components/modules/commercial/sales/SalesOrderModule.tsx)), serta tidak memiliki ongkir. Karena itu, nilai penawaran tidak boleh dihitung ulang oleh form tersebut.
 
 - Sales mengisi harga satuan dan diskon per baris dalam rupiah bulat, ongkir, dan masa berlaku. Tarif PPN diambil dari konfigurasi finance, bukan konstanta.
 - Server menghitung DPP, PPN, dan total per baris. Ongkir dan pembulatan dialokasikan secara proporsional ke baris, dan selisih pembulatan ditempatkan di baris terakhir. Dengan begitu, jumlah seluruh Sales Order sama persis dengan total penawaran.
-- `PenjualanAlkes` tidak memiliki field ongkir, sehingga alokasi ongkir disimpan di field opsional baru `ongkirAlokasi`. Perlakuan pajak ongkir masih menunggu keputusan di [bagian 7](#7-tindakan-dan-keputusan-yang-masih-diperlukan).
+- `PenjualanAlkes` tidak memiliki field ongkir, sehingga alokasi ongkir disimpan di field opsional baru `ongkirAlokasi`. Sesuai keputusan pengguna 24 November 2026, Sales/Finance menetapkan perlakuan pajak ongkir pada setiap penawaran; server harus menyimpan pilihan itu pada versi penawaran.
 - Penawaran memiliki nomor versi. Persetujuan customer mengacu pada versi tertentu dan menyimpan snapshot nilai per baris. Akibatnya, harga tidak dapat berubah diam-diam setelah disetujui.
 
 **Konversi ke Sales Order dilakukan di server dan bersifat idempoten.** Form klien hanya menyimpan ke localStorage dan antrean sinkronisasi, sehingga status "tersimpan" belum menjamin data sudah sampai di server. Karena itu, endpoint staf `POST /api/erp/portal/pesanan/:id/konversi` menjalankan langkah berikut:
@@ -187,8 +193,8 @@ dibatalkan: lihat aturan pembatalan di bawah.
 
 ### 3.7 Notifikasi
 
-- **Belum diimplementasikan:** notifikasi pesanan, penawaran, pembayaran, perubahan status akun, dan pengumuman perusahaan.
-- `GET /api/customer/notifikasi` saat ini hanya mengembalikan daftar kosong; endpoint ini tidak menyiratkan bahwa event sudah dibuat.
+- **Tersedia lokal:** notifikasi pesanan diturunkan dari riwayat status pesanan milik customer (diterima, dibatalkan customer, dibatalkan tim beserta alasannya), maksimal 50 terbaru. Status baca disimpan per ID event pada `notificationReads`, sehingga event yang terjadi bersamaan dengan "tandai sudah dibaca" tetap belum dibaca. Username staf tidak pernah tampil ke customer.
+- **Belum diimplementasikan:** notifikasi penawaran, pembayaran, perubahan status akun, dan pengumuman perusahaan.
 - Pengumuman direncanakan untuk staf dengan izin `sales-marketing:publish`; email di luar email autentikasi Firebase belum termasuk.
 - Refetch saat tab aktif dan polling 30 detik adalah rancangan. Kanal WebSocket khusus customer dievaluasi setelah alur dasar stabil.
 
@@ -199,17 +205,22 @@ dibatalkan: lihat aturan pembatalan di bawah.
 | Endpoint | Fungsi |
 | --- | --- |
 | `GET /api/customer/status` | Publik: apakah portal aktif (untuk menampilkan pilihan login) |
-| `POST /api/customer/auth/daftar` | Membuat profil customer dari ID token terverifikasi |
+| `POST /api/customer/auth/daftar` | Membuat profil customer dari ID token terverifikasi dan username unik |
+| `POST /api/customer/auth/cek-username` | Memeriksa format dan ketersediaan username (rate limit 30/15 menit) |
+| `POST /api/customer/auth/masuk` | Login username + kata sandi, menerbitkan sesi portal |
 | `POST /api/customer/auth/sesi` | Menukar ID token menjadi sesi portal |
 | `POST /api/customer/auth/keluar`, `/api/customer/auth/keluar-semua` | Mencabut sesi aktif atau semua sesi milik customer |
 | `GET /api/customer/auth/saya`, `GET /api/customer/profil` | Profil ringkas dan status akun |
 | `GET /api/customer/katalog`, `GET /api/customer/katalog/:id` | Katalog terbit: pencarian, kategori, detail dan label ketersediaan |
-| `GET` / `PUT /api/customer/keranjang` | Keranjang server per customer, tanpa checkout |
+| `GET` / `PUT /api/customer/keranjang` | Keranjang server per customer dengan nomor revisi |
 | `GET` / `POST` / `PATCH` / `DELETE /api/customer/alamat[/:id]` | Alamat pengiriman |
 | `PATCH /api/customer/profil` | Memperbarui nama, telepon belum terverifikasi dan perusahaan |
-| `GET /api/customer/notifikasi` | Endpoint tersedia, saat ini selalu mengembalikan daftar kosong |
+| `GET /api/customer/pesanan`, `GET /api/customer/pesanan/:id` | Riwayat dan detail permintaan milik akun; ID milik customer lain menjawab 404 |
+| `POST /api/customer/pesanan` (body: `requestId`, `cartRevision`, `alamatId`, `catatan`) | Mengajukan permintaan penawaran dari keranjang server. Hanya akun `aktif` tertaut (atau developer). 201 saat dibuat, 200 untuk `requestId` yang sama; `CART_CHANGED`, `CART_EMPTY`, `ADDRESS_NOT_FOUND`, `CART_PRODUCT_UNAVAILABLE`, `TOO_MANY_OPEN_ORDERS` |
+| `POST /api/customer/pesanan/:id/batal` (body: `alasan` opsional) | Membatalkan permintaan yang masih `menunggu-penawaran` |
+| `GET /api/customer/notifikasi`, `POST /api/customer/notifikasi/baca` | Notifikasi pesanan dan penandaan sudah dibaca |
 
-**Rancangan customer API — belum tersedia:** pengajuan/riwayat/detail pesanan, keputusan penawaran, tagihan, unggah/unduh bukti bayar, dan operasi baca notifikasi.
+**Rancangan customer API — belum tersedia:** keputusan penawaran, tagihan, unggah/unduh bukti bayar, dan unduh PDF.
 
 **Staf ERP — tersedia lokal** (sesi `ams_session` + `requirePermission`; semua mutasi wajib lolos pemeriksaan Origin yang sama):
 
@@ -218,17 +229,19 @@ dibatalkan: lihat aturan pembatalan di bawah.
 | `GET /api/erp/portal/customers` | `sales-marketing:view` |
 | `POST /api/erp/portal/customers/:id/tautkan` (body: `pelangganId`) | `sales-marketing:update` |
 | `POST /api/erp/portal/customers/:id/tangguhkan` | `sales-marketing:update` |
+| `GET /api/erp/portal/pesanan` | `sales-marketing:view` |
+| `POST /api/erp/portal/pesanan/:id/batalkan` (body: `alasan` wajib) | `sales-marketing:update` |
 
-Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_pelanggan` yang unik dan aktif; akun yang belum memverifikasi email atau telah ditangguhkan tidak dapat diaktifkan melalui endpoint ini. Satu pelanggan B2B tidak boleh tertaut ke lebih dari satu akun portal. Penangguhan mencabut sesi server customer dan dicatat bersama username staf. Endpoint ini belum memiliki UI staf dan belum menyediakan pemulihan akun yang ditangguhkan. Data akun portal **tidak** dimasukkan ke kunci `/api/sync`, sehingga data pribadi customer tidak tersalin ke cache localStorage browser karyawan.
+Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_pelanggan` yang unik dan aktif; akun yang belum memverifikasi email atau telah ditangguhkan tidak dapat diaktifkan melalui endpoint ini. Satu pelanggan B2B tidak boleh tertaut ke lebih dari satu akun portal. Penangguhan mencabut sesi server customer dan dicatat bersama username staf. Inbox pesanan menampilkan ringkasan akun pengaju, baris, alamat, catatan dan riwayat, tanpa `requestId` atau ID internal customer; pembatalan staf menyimpan username pelaku untuk audit tetapi tidak menampilkannya ke customer. Pemulihan akun yang ditangguhkan belum tersedia. Data akun portal **tidak** dimasukkan ke kunci `/api/sync`, sehingga data pribadi customer tidak tersalin ke cache localStorage browser karyawan.
 
-**Rancangan endpoint staf yang belum tersedia** (jangan dianggap sebagai fitur berjalan): inbox pesanan/penawaran, persetujuan kredit, konversi Sales Order, rekonsiliasi, pembayaran, pengumuman dan notifikasi. Aksi `publish` dimiliki `sales_manager`/`pjt`, bukan `sales_medrep`; role bawaan finance belum memiliki `finance-akuntansi:approve`. Seluruh workflow tersebut masih memerlukan implementasi backend, UI dan validasi sebelum checkout portal diaktifkan.
+**Rancangan endpoint staf yang belum tersedia** (jangan dianggap sebagai fitur berjalan): form penawaran berversi, persetujuan kredit, konversi Sales Order, rekonsiliasi, pembayaran, pengumuman dan pemulihan akun. Aksi `publish` dimiliki `sales_manager`/`pjt`, bukan `sales_medrep`; role bawaan finance belum memiliki `finance-akuntansi:approve`. Seluruh workflow tersebut masih memerlukan implementasi backend, UI dan validasi.
 
 ### 3.9 Frontend dan UI/UX
 
 - `src/main.tsx`: path `/akun` memuat `CustomerPortalApp` secara lazy sebagai bundle terpisah yang tidak memuat layanan sinkronisasi ERP (`pocketbase.ts`).
-- Rute UI yang tersedia: `/akun/masuk`, `/akun/daftar`, `/akun/lupa-sandi`, `/akun/verifikasi`, `/akun` (ringkasan), `/akun/katalog`, `/akun/katalog/:id`, `/akun/keranjang`, `/akun/alamat`, `/akun/profil`, dan `/akun/notifikasi` (endpoint notifikasi masih kosong). Halaman pesanan dan tagihan belum dibangun.
+- Rute UI yang tersedia: `/akun/masuk`, `/akun/daftar`, `/akun/lupa-sandi`, `/akun/verifikasi`, `/akun` (ringkasan dengan statistik dan 3 pesanan terbaru), `/akun/katalog`, `/akun/katalog/:id`, `/akun/keranjang` (dengan panel pengajuan permintaan penawaran), `/akun/pesanan`, `/akun/alamat`, `/akun/profil`, dan `/akun/notifikasi` (dengan badge belum dibaca). Halaman tagihan belum dibangun. Detail pesanan menyatakan "belum ada penawaran" untuk harga dan tagihan, bukan angka contoh.
 - Halaman depan: pilihan login dua kartu yang responsif. Kartu karyawan membuka `KartuMasuk` existing.
-- ERP: tab **Portal Customer** pada modul Sales & Marketing dan tab **Bukti Bayar Portal** pada modul Finance merupakan rancangan; belum tersedia di UI. API staf yang telah tersedia dijelaskan pada bagian 3.8.
+- ERP: tab **Portal Customer** pada modul Sales & Marketing tersedia lokal (`PortalCustomerModule.tsx`): inbox permintaan dengan detail dan pembatalan beralasan, serta daftar akun dengan penautan ke `sales_pelanggan` aktif dan penangguhan. Tombol aksi tetap divalidasi RBAC di server. Tab **Bukti Bayar Portal** pada modul Finance masih rancangan.
 - Identitas visual: logo dan warna brand dari identitas website CMS. Layout bersih dengan header dan navigasi samping di desktop, navigasi bawah di mobile, serta tipografi yang mudah dibaca. Tampilan dibuat berbeda dari dashboard ERP internal.
 - Aksesibilitas: target sentuh minimal 44 px, label form yang jelas, status loading, kosong dan error di setiap halaman, serta tidak memakai data contoh.
 
@@ -236,8 +249,8 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 
 | Perubahan | Sifat |
 | --- | --- |
-| `AMS_DATA_DIR/customer-portal-db.json` | Versi 2 berisi `version`, `revision`, `customers`, `sessions` ter-hash, keranjang dan alamat. `pelangganId` ditambahkan sebagai field opsional pada record customer; data versi 2 yang sudah ada tetap valid tanpa migrasi destructive. Ditulis atomik tmp + rename; loader berhenti tanpa menimpa jika berkas rusak/versi tidak didukung. Pesanan, notifikasi dan metadata bukti belum ditambahkan. |
-| `AMS_DATA_DIR/customer-portal-audit.jsonl` | Berkas baru, append-only |
+| `AMS_DATA_DIR/customer-portal-db.json` | Versi 2 berisi `version`, `revision`, `customers`, `sessions` ter-hash, keranjang dan alamat. `pelangganId` ditambahkan sebagai field opsional pada record customer; data versi 2 yang sudah ada tetap valid tanpa migrasi destructive. Ditulis atomik tmp + rename; loader berhenti tanpa menimpa jika berkas rusak/versi tidak didukung. Koleksi aditif `orders` dan `notificationReads` ditambahkan tanpa menaikkan versi: berkas lama tanpa koleksi ini dimuat sebagai daftar kosong, dan kode lama mengabaikannya. Metadata bukti bayar belum ditambahkan. |
+| `AMS_DATA_DIR/customer-portal-audit-archive/YYYY-MM.jsonl` | Arsip bulanan append-only untuk event baru; entri dari `customer-portal-audit.jsonl` legacy disalin tanpa menghapus sumber legacy |
 | `AMS_DATA_DIR/customer-private/bukti-bayar/` | Direktori baru, privat |
 | `PenjualanAlkes.referensiPortal?` (`pesananId`, `barisId`, `versiPenawaran`) dan `PenjualanAlkes.ongkirAlokasi?` | Field opsional tambahan; data lama tetap valid |
 | `TransaksiKeuangan.penjualanId?` dan `TransaksiKeuangan.pelunasan?` | Field opsional tambahan; transaksi lama tanpa `penjualanId` tidak tampil di portal |
@@ -264,27 +277,32 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 - [x] ✅ **Lokal — pilihan akses:** modal dua pilihan; flag nonaktif kembali ke form karyawan existing. `?masuk=1`, setup awal dan reset developer tetap langsung ke `KartuMasuk`. Browser memeriksa tautan customer dan callback karyawan; tes server memeriksa kredensial karyawan.
 - [x] ✅ **Lokal — UI customer:** masuk, daftar, lupa sandi, verifikasi email, pemulihan pendaftaran yang terputus, ringkasan akun dan profil dasar. Memakai SDK Firebase nyata; lalu lintas Firebase disimulasikan hanya di tes browser terisolasi.
 - [x] ✅ **Lokal — pemisahan akses:** tes router dengan RBAC nyata dan tes server terisolasi memeriksa cookie customer tidak diterima API ERP; cookie/bearer karyawan tidak diterima API customer.
+- [x] ✅ **Lokal — masuk dengan Google (Gmail pribadi):** 25 November 2026. Tombol "Lanjutkan dengan Google" di halaman masuk/daftar. Server customer menerima provider `password` dan `google.com` (Google wajib `email_verified`); provider lain ditolak. Akun Google baru wajib melengkapi username, profil dan persetujuan kebijakan; login ERP tetap hanya untuk email karyawan RBAC. Bukti: `firebase-provider-isolation.test.ts`.
 
 ### Tahap 4 — Customer Dashboard
 
 - [x] ✅ **Lokal — kerangka akun:** layout dan navigasi ringkasan/profil, link katalog existing, serta penanganan 401. Browser memeriksa profil pada lebar CSS 360, 768 dan 1280 px tanpa overflow horizontal. Navigasi modul transaksi menyusul bersama backend-nya.
-- [x] ✅ **Lokal — ringkasan dan navigasi:** ringkasan akun menampilkan jumlah baris keranjang, jumlah alamat dan jumlah notifikasi dari data portal. Akses cepat menuju katalog dan keranjang tersedia. Statistik pesanan, pesanan terbaru dan event transaksi belum ditampilkan karena modul ERP belum diintegrasikan.
+- [x] ✅ **Lokal — ringkasan dan navigasi:** ringkasan akun menampilkan jumlah baris keranjang, jumlah alamat, jumlah notifikasi belum dibaca, jumlah permintaan menunggu penawaran, dan 3 pesanan terbaru dari data server. Akses cepat menuju katalog, keranjang dan pesanan tersedia. Data dimuat langsung setelah login tanpa perlu memuat ulang halaman. Event transaksi/tagihan belum ditampilkan karena modulnya belum dibangun.
 - [x] ✅ **Lokal — katalog terbit:** pencarian nama/model/produsen/SKU/izin edar, kategori, foto, spesifikasi dan detail per produk. Pilihan SKU dilakukan eksplisit sebelum masuk keranjang. Harga final dan ketersediaan diberi keterangan perlu konfirmasi sales, bukan angka atau stok operasional yang belum tersambung. Sumbernya snapshot CMS terbit; API terautentikasi hanya mengembalikan field non-internal.
-- [x] ✅ **Lokal — keranjang server:** tambah varian, ubah jumlah, hapus baris dan persistensi lintas restart. Keranjang divalidasi terhadap katalog terbit, dibatasi 30 baris, dan dipisah per customer. Checkout/pengajuan pesanan belum aktif.
-- [ ] Pengajuan pesanan dengan alamat pengiriman, catatan, dan requestId idempoten.
+- [x] ✅ **Lokal — keranjang server:** tambah varian, ubah jumlah, hapus baris dan persistensi lintas restart. Keranjang divalidasi terhadap katalog terbit, dibatasi 30 baris, dan dipisah per customer.
+- [x] ✅ **Lokal — pengajuan permintaan penawaran:** 25 November 2026. Alamat tersimpan, catatan (maks. 1.000 karakter) dan `requestId` idempoten; baris diambil dari keranjang server dan katalog terbit, keranjang dikosongkan dalam penulisan yang sama, dan revisi keranjang mencegah pengajuan isi yang sudah berubah di perangkat lain. Hanya akun `aktif` tertaut atau developer (ditandai uji). Bukti: `customer-auth.test.ts`.
 - [ ] Pesanan: riwayat, detail, status, penawaran (setujui/tolak), pembatalan, dan unduh PDF.
+  - [x] ✅ **Lokal — riwayat, detail dan pembatalan:** halaman `/akun/pesanan` dengan daftar, detail baris/alamat/catatan/riwayat status, dan pembatalan beralasan opsional selama `menunggu-penawaran`. ID milik customer lain menjawab 404. Penawaran, persetujuan dan PDF menunggu Tahap 5.
 - [ ] Tagihan: daftar faktur, status pembayaran, instruksi transfer, serta unggah dan unduh bukti.
 - [ ] Profil: nama, telepon, data perusahaan, alamat, ganti password, ganti email, dan keluar dari semua perangkat.
   - [x] ✅ **Lokal — profil dasar:** nama, telepon belum terverifikasi, perusahaan, tautan reset sandi dan keluar semua perangkat. Tes dua customer, simpan/reload browser dan persistensi disk lulus. Email/alamat belum dapat diubah dari portal.
   - [x] ✅ **Lokal — alamat pengiriman:** tambah, ubah, hapus, dan alamat utama melalui UI serta penyimpanan server. Endpoint dan data dipisah per customer; perubahan antar-customer ditolak melalui sesi.
-- [ ] Pusat notifikasi dan pengumuman nyata. Endpoint saat ini mengembalikan daftar kosong dan tidak membuat notifikasi palsu.
+- [ ] Pusat notifikasi dan pengumuman nyata.
+  - [x] ✅ **Lokal — notifikasi pesanan:** diturunkan dari riwayat status pesanan, badge belum dibaca, "tandai semua sudah dibaca" per ID event, dan tautan ke pesanan. Pengumuman perusahaan serta notifikasi penawaran/pembayaran belum ada.
 
 ### Tahap 5 — Integrasi ERP
 
 - [x] ✅ **Lokal — API staf akun customer:** daftar data minimum, penautan ke satu `sales_pelanggan` aktif yang unik, dan penangguhan dengan pencabutan sesi. RBAC `sales-marketing:view/update`, guard Origin, larangan aktivasi sebelum verifikasi email, pencegahan tautan ganda, dan audit username pelaku diuji dengan router/store terisolasi.
-- [ ] UI staf Portal Customer untuk meninjau dan mengelola akun; endpoint lokal belum tersedia di UI ERP.
+- [x] ✅ **Lokal — UI staf Portal Customer:** tab baru di Sales & Marketing untuk meninjau akun, menautkan ke `sales_pelanggan` aktif dan menangguhkan akun. Typecheck dan build lulus; aksi divalidasi oleh endpoint yang sudah diuji.
+- [x] ✅ **Lokal — saran penautan dari email:** 25 November 2026. Field opsional `emailPortal` pada master B2B (diisi di detail CRM, unik). `GET /api/erp/portal/customers` menambahkan `saranB2B` hanya jika email akun cocok (tanpa membedakan huruf besar) dengan tepat satu B2B aktif yang belum tertaut. Staf menekan **Konfirmasi tautan**; tidak ada penautan otomatis. Bukti: `customer-auth.test.ts`.
 - [ ] Alur pemulihan/aktivasi ulang akun ditangguhkan dengan pemeriksaan ulang master B2B dan audit.
 - [ ] Inbox pesanan portal dan form penawaran berversi dengan perhitungan kanonik di server (tarif PPN dari konfigurasi, ongkir, alokasi pembulatan).
+  - [x] ✅ **Lokal — inbox dan pembatalan staf:** `GET /api/erp/portal/pesanan` (`sales-marketing:view`) dan pembatalan dengan alasan wajib (`sales-marketing:update`, Origin sama, audit username). Sales rep tanpa izin update ditolak 403. Form penawaran belum dibangun karena tarif PPN finance belum tersedia di server.
 - [ ] Endpoint konversi idempoten: validasi regulasi semua baris, kredit agregat dan persetujuan manajer, ID Sales Order deterministik, jurnal konversi, dan rekonsiliasi saat start.
 - [ ] Guard sinkronisasi untuk baris `penjualan` dan `transaksi` yang tertaut ke portal, sehingga penghapusan atau perubahan nilai dan status pembayaran ditolak dengan `409`.
 - [ ] Isi `TransaksiKeuangan.penjualanId` saat faktur terbit dan relasi tagihan yang menolak data ambigu.
@@ -297,10 +315,13 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 ### Tahap 6 — Pengujian dan validasi
 
 - [ ] Seluruh skenario pada [matriks pengujian](#5-matriks-pengujian) lulus di lokal.
-- [ ] Regresi penuh: `npm test`, `npm run lint`, `npm run lint:rules`, dan `npm run build`.
+- [x] ✅ **Lokal — konfigurasi popup Google:** 24 November 2026. Resolver browser dikonfigurasi bersama persistensi memori; tes mock memverifikasi konfigurasi dan pesan kegagalan popup. Regresi penuh 41 file / 508 tes, TypeScript dan build lulus di Windows lokal. Login Firebase nyata dan browser staging tetap belum diuji.
+- [x] ✅ **Lokal — regresi penuh:** 24 November 2026; `npm test` lulus 40 file/497 tes, `npm run lint`, `npm run lint:rules`, dan `npm run build` lulus.
 - [ ] Uji browser desktop, tablet, dan mobile dengan data uji yang jelas ditandai, bukan data dummy produk.
 - [ ] Staging Linux: Firebase Email/Password nyata dengan akun uji, backup data portal, dan rollback dengan flag.
 - [ ] Tinjauan keamanan sebelum flag diaktifkan untuk pengguna nyata.
+
+**Status Tahap 4–6:** belum selesai. Hasil regresi di atas hanya mencakup kode dan skenario yang sudah ada; penawaran, konversi Sales Order, tagihan/pembayaran, notifikasi transaksi, dan sebagian profil belum dibangun. Uji Firebase nyata, staging Linux, dan tinjauan keamanan juga belum dilakukan. Lingkup penyelesaian yang dikonfirmasi pengguna: B2B saja, pajak ongkir ditetapkan per penawaran, pembayaran penuh saja, dan lokal saja; tidak ada izin deploy pada tahap ini.
 
 ## 5. Matriks pengujian
 
@@ -308,8 +329,8 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 | --- | --- |
 | Login karyawan | Username/password, Google Firebase, setup awal, reset developer, logout, dan dashboard sesuai role tidak berubah |
 | Pemisahan provider | Token Email/Password ditolak di `/api/auth/firebase-login`, `/api/firebase/hydrate`, dan rules admin, termasuk jika emailnya sama dengan akun karyawan |
-| Registrasi customer | Data valid, email sudah terdaftar, data tidak valid, tanpa persetujuan privasi, dan rate limit |
-| Login customer | Email belum terverifikasi, UID tanpa profil, akun ditangguhkan, sesi kedaluwarsa, logout, dan keluar dari semua perangkat |
+| Registrasi customer | Data valid, username format salah/terlarang/sudah dipakai (tanpa membedakan huruf besar), email sudah terdaftar, data tidak valid, tanpa persetujuan privasi, dan rate limit |
+| Login customer | Login username, respons sama untuk username tidak dikenal/salah sandi/ditangguhkan, throttle per username, email belum terverifikasi, sesi kedaluwarsa, logout, dan keluar dari semua perangkat |
 | Reset password | Email terdaftar dan tidak terdaftar menerima pesan yang sama; sesi portal lama dicabut setelah reset melalui Firebase, termasuk reset yang tidak melewati server AMS |
 | Role-based access | Customer ditolak di API internal; sesi karyawan ditolak di API customer; customer tidak dapat mengubah status, role, `pelangganId`, harga, atau status pembayaran |
 | Proteksi dashboard internal | Customer yang membuka `/` atau modul ERP tidak mendapatkan data ERP |
@@ -347,17 +368,24 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 - [ ] Siapkan `CUSTOMER_PORTAL_ENABLED`, `CUSTOMER_PRIVACY_URL`, `CUSTOMER_TERMS_URL`, dan `CUSTOMER_PRIVACY_VERSION` memakai [template environment](../.env.example). URL kebijakan harus benar-benar memuat teks yang disetujui; jangan memakai placeholder.
 - [ ] Verifikasi `APP_URL` sebagai origin kanonik HTTPS dan project Firebase Admin sama dengan konfigurasi browser. Pastikan endpoint hanya dicapai melalui proxy tepercaya; rate limit memakai alamat dari konfigurasi `trust proxy` Express existing.
 - [ ] Aktifkan provider **Email/Password** di Firebase Console proyek akun `ptams.erp@gmail.com`, atur bahasa template email, nama pengirim, dan domain staging/produksi di **Authorized domains**.
+- [ ] Pastikan provider **Google** aktif (sudah dipakai karyawan) dan `erp.remediams.com` tercantum di **Authorized domains** agar pop-up "Lanjutkan dengan Google" customer berfungsi.
 - [ ] Pastikan Firebase Admin (service account) aktif di VPS Linux. Tanpa Admin SDK, pendaftaran customer dinonaktifkan.
 - [ ] Siapkan teks **Kebijakan Privasi** dan **Syarat Layanan** untuk persetujuan saat registrasi.
 - [ ] Buat atau tetapkan role finance dengan izin `finance-akuntansi:view` dan `finance-akuntansi:approve` melalui Manajemen RBAC.
-- [ ] Tentukan rekening tujuan transfer, kebijakan PPN dan perlakuan pajak ongkir pada penawaran, aturan pembulatan, serta masa berlaku penawaran default.
-- [ ] Tentukan apakah pelanggan **perorangan** dilayani dan bagaimana dicatat di ERP.
+- [ ] Tetapkan rekening tujuan transfer, sumber tarif PPN finance yang otoritatif untuk server, aturan pembulatan, serta masa berlaku penawaran default. Perlakuan pajak ongkir per penawaran sudah diputuskan; implementasinya belum ada.
+- [x] ✅ Keputusan 24 November 2026: pelanggan **perorangan** ditunda; tahap awal hanya melayani customer B2B yang ditautkan ke `sales_pelanggan` aktif.
 - [ ] Tentukan apakah nomor telepon perlu verifikasi OTP SMS (berbiaya).
 - [ ] Tentukan masa retensi bukti bayar dan data akun yang dinonaktifkan.
 - [ ] Rancang alur **retur/refund**, pelunasan sebagian, dan jurnal penerimaan kas otomatis jika dibutuhkan. Fitur ini belum didukung ERP saat ini dan di luar lingkup awal portal.
 - [ ] Tutup P0-02 (pemeriksaan versi dasar sinkronisasi) sebelum konversi Sales Order portal dipakai oleh pengguna nyata.
 
 ## 8. Riwayat
+
+### 24 November 2026 — resolver popup Google lokal
+
+- Inisialisasi Firebase customer kini menetapkan `browserPopupRedirectResolver` sekaligus mempertahankan `inMemoryPersistence`; tidak ada perubahan provider, akun, atau rules Firebase.
+- `customer-firebase-config.test.ts` menguji konfigurasi melalui mock dan pesan popup diblokir/dibatalkan. Regresi lokal Windows: 41 file / 508 tes, TypeScript, build dan `git diff --check` lulus.
+- **Batasan:** tes mock bukan bukti popup atau autentikasi Google bekerja pada browser, Firebase nyata, atau staging. Tahap 4–6 dan P1-10 tetap terbuka; belum commit atau deploy.
 
 ### 24 November 2026 — audit, keputusan desain, dan rencana kerja
 
@@ -421,3 +449,29 @@ Rancangan ditinjau secara independen sebelum Tahap 3. Klaim temuan dicocokkan la
 - **Cara kerja:** jika request ke `/api/customer/*` tidak membawa sesi customer yang valid tetapi membawa sesi ERP developer, server memakai ruang kerja portal milik developer. Ruang kerja dibuat sekali (audit `DEVELOPER_WORKSPACE_CREATED`). Sesi customer yang valid tetap diutamakan, Origin tetap diwajibkan untuk mutasi, dan "keluar dari semua perangkat" ditolak karena akses mengikuti sesi ERP.
 - **Isolasi:** ruang kerja tidak memakai Firebase, tidak tampil di `GET /api/erp/portal/customers`, dan endpoint tautkan/tangguhkan menjawab 404. UID Firebase berawalan `rbac-developer:` ditolak saat pendaftaran. UI menampilkan penanda "Mode developer" dan tautan kembali ke ERP.
 - **Bukti lokal:** `customer-auth.test.ts` lulus 26 tes, termasuk penolakan sales rep dan staf role `developer_it_support`, isolasi keranjang antara developer dan customer, prioritas cookie customer, Origin silang, dan persistensi setelah restart. Regresi penuh lulus 40 file / 484 tes, `npm run lint`, `npm run build`.
+
+### 25 November 2026 — login customer dengan username (lokal)
+
+- **Keputusan pengguna:** customer masuk dengan username, bukan email. Username dibuat saat mendaftar dan tidak boleh sama dengan yang sudah dipakai.
+- **Implementasi:** field `username` pada record customer (huruf kecil, 3–30 karakter `a-z0-9._-`, unik, divalidasi saat store dimuat). `POST /auth/daftar` mewajibkan username; `POST /auth/cek-username` memeriksa ketersediaan; `POST /auth/masuk` memetakan username ke email di server, masuk melalui Firebase Identity Toolkit REST, lalu memakai verifikasi ID token dan sesi yang sama. Email tetap dipakai untuk verifikasi dan lupa sandi. Profil menampilkan username.
+- **Keamanan:** respons 401 identik untuk username tidak dikenal, salah sandi dan akun ditangguhkan; email tidak dikembalikan; throttle per username (10 gagal/15 menit) di samping batas per IP; kiriman ulang verifikasi maksimal sekali per 10 menit. Password kini melewati server AMS melalui HTTPS hanya untuk diteruskan ke Firebase dan tidak disimpan atau dicatat.
+- **Kompatibilitas:** username opsional pada record lama. Staging belum memiliki customer terdaftar karena registrasi masih tertutup, sehingga tidak ada akun yang kehilangan jalur masuk. Ruang kerja developer tidak memakai username.
+- **Bukti lokal:** `customer-auth.test.ts` dan `firebase-provider-isolation.test.ts` lulus 33 tes (registrasi username, duplikat tanpa membedakan huruf besar, nama terlarang, login username, respons generik, throttle, verifikasi ulang, akun ditangguhkan, pemetaan error REST dan header Referer). Regresi penuh lulus 40 file / 488 tes, `npm run lint`, `npm run build`. Login nyata ke Firebase staging belum diuji.
+
+### 25 November 2026 — permintaan penawaran, inbox staf dan notifikasi pesanan (lokal)
+
+- **Lingkup:** pengajuan permintaan penawaran dari keranjang, halaman Pesanan saya, pembatalan oleh customer dan staf, notifikasi pesanan nyata, serta tab ERP **Portal Customer** (inbox pesanan dan manajemen akun).
+- **Keputusan teknis:** harga, PPN dan penawaran **belum** dibangun. Tarif PPN wajib berasal dari `keuangan_tetapan_pajak` yang terverifikasi dan saat ini hanya dibaca di klien; menghitung penawaran tanpa sumber itu akan melanggar rancangan 3.5. Konversi Sales Order tetap menunggu P0-02. UI menyatakan "belum ada penawaran" alih-alih menampilkan angka.
+- **Perbaikan bersamaan:** data ringkasan/katalog/keranjang kini dimuat segera setelah login (sebelumnya baru tampil setelah memuat ulang); teks profil tidak lagi menyebut alamat belum dapat diubah; rate limit pengajuan berbasis akun, bukan IP.
+- **Bukti lokal:** `customer-auth.test.ts` lulus 33 tes, termasuk akun belum tertaut ditolak, idempotensi `requestId`, revisi keranjang, alamat/produk tidak tersedia, batas 10 permintaan terbuka, IDOR GET/batal, Origin silang, RBAC inbox dan pembatalan staf, alasan staf wajib, username staf tidak bocor ke customer, status baca notifikasi, rate limit per akun, persistensi restart, berkas tanpa koleksi pesanan, dan penolakan data pesanan yang dirusak. Regresi penuh lulus 40 file / 492 tes, `npm run lint`, `npm run build`, `git diff --check`.
+- **Batasan:** belum di-commit, di-push atau di-deploy. UI baru belum diuji di browser staging. Penawaran berversi, persetujuan customer, konversi Sales Order, tagihan, bukti bayar, PDF, pengumuman, dan pemulihan akun ditangguhkan masih terbuka.
+
+### 25 November 2026 — masuk dengan Google dan saran penautan B2B (lokal)
+
+- **Keputusan pengguna:** customer boleh masuk dengan Gmail pribadi; akun dicocokkan dengan pelanggan B2B sebagai **saran** yang dikonfirmasi staf, bukan penautan otomatis.
+- **Alur:** pop-up Google pada app Firebase `portal-customer` (persistensi memori) → ID token ditukar di `POST /auth/sesi`. Jika belum ada profil (409 `REGISTRATION_REQUIRED`), form daftar terbuka dengan email Google terkunci dan tanpa kata sandi; customer mengisi username unik, profil dan persetujuan. Email Google sudah terverifikasi sehingga status awal `menunggu-verifikasi`. Jika pendaftaran belum dibuka, sesi Google ditutup dengan pesan jelas. Firebase memakai satu akun per email, sehingga Gmail yang sebelumnya terdaftar dengan email/sandi masuk ke akun customer yang sama.
+- **Pemisahan:** login ERP tetap hanya memetakan email Google ke pengguna RBAC; Gmail customer tidak mendapat akses ERP. Karyawan tidak otomatis menjadi customer; mereka harus mendaftar sendiri.
+- **Saran B2B:** field opsional `emailPortal` pada `sales_pelanggan` (aditif, data lama tetap valid). Saran hanya muncul jika tepat satu B2B aktif yang belum tertaut memiliki email sama; staf mengonfirmasi melalui endpoint `tautkan` yang sudah ada (RBAC, Origin, audit).
+- **Risiko yang diterima:** (1) "Keluar dari semua perangkat" mencabut refresh token Firebase untuk UID tersebut; jika Gmail yang sama juga akun karyawan, sesi klien Firebase karyawan ikut dicabut, sedangkan sesi ERP `ams_session` tidak terpengaruh. (2) Rules Firestore yang sudah ada mengizinkan pengguna Google terverifikasi membaca `/test` dan membuat profil `public` sendiri; paparan ini sudah ada melalui tombol Google ERP dan tidak bertambah, tetapi tetap perlu ditinjau sebelum produksi.
+- **Bukti lokal:** `customer-auth.test.ts` dan `firebase-provider-isolation.test.ts` lulus 39 tes (Google terverifikasi diterima, Google tanpa verifikasi dan provider lain ditolak, saran hanya untuk kecocokan unik/aktif/belum tertaut, tanpa penautan otomatis). Regresi penuh lulus 40 file / 493 tes, `npm run lint`, `npm run build`, `git diff --check`.
+- **Batasan:** belum di-commit/di-deploy. Pop-up Google nyata di staging belum diuji; registrasi staging masih menunggu URL kebijakan.

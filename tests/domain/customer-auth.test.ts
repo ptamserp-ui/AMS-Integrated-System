@@ -7,7 +7,7 @@ import express from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomerError, ServerCustomerStore, type CustomerIdentity } from '../../server/customerStore';
 import { createCustomerRouter, CUSTOMER_COOKIE } from '../../server/customerRoutes';
-import { createCustomerErpRouter } from '../../server/customerErpRoutes';
+import { createCustomerErpRouter, type B2BCustomerReference } from '../../server/customerErpRoutes';
 import type { CustomerIdentityService, CustomerIdentityState } from '../../server/customerAuth';
 import type { CustomerPortalStatus } from '../../src/types/customerPortal';
 import { ServerRbacStore } from '../../server/rbacStore';
@@ -26,30 +26,74 @@ afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+function readCustomerAudit(dataDir: string): string {
+  const legacyFile = path.join(dataDir, 'customer-portal-audit.jsonl');
+  const archiveDir = path.join(dataDir, 'customer-portal-audit-archive');
+  const files = [
+    ...(fs.existsSync(legacyFile) ? [legacyFile] : []),
+    ...(fs.existsSync(archiveDir)
+      ? fs.readdirSync(archiveDir).filter((name) => name.endsWith('.jsonl')).map((name) => path.join(archiveDir, name))
+      : [])
+  ];
+  return files.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
+}
+
 describe('customer store: durability and session lifecycle', () => {
   it('keeps hashed sessions across restart without storing password or token in audit', () => {
     const store = new ServerCustomerStore(dir);
-    const account = store.register(identity, profile, 'privacy-v1');
+    const account = store.register(identity, profile, 'privacy-v1', 'customer.uji');
     const session = store.login(identity);
     const loaded = new ServerCustomerStore(dir);
     expect(loaded.resolve(session.token)?.account.id).toBe(account.id);
     const disk = fs.readFileSync(path.join(dir, 'customer-portal-db.json'), 'utf8');
-    const audit = fs.readFileSync(path.join(dir, 'customer-portal-audit.jsonl'), 'utf8');
+    const audit = readCustomerAudit(dir);
     expect(disk).not.toContain(session.token);
     expect(audit).not.toContain(session.token);
     expect(audit).not.toContain(identity.email);
     expect(audit).not.toContain(profile.nama);
     expect(audit).toContain('"phase":"committed"');
+    expect(fs.readdirSync(path.join(dir, 'customer-portal-audit-archive')).some((name) => /^\d{4}-\d{2}\.jsonl$/.test(name))).toBe(true);
     expect(session.account).not.toHaveProperty('firebaseUid');
     expect(session.account.status).toBe('menunggu-verifikasi');
     store.logout(session.token);
     expect(new ServerCustomerStore(dir).resolve(session.token)).toBeNull();
   });
 
+  it('migrates legacy audit entries to monthly archives without changing the legacy file', () => {
+    const legacyEvent = {
+      id: 'legacy-audit-1', at: '2025-11-24T12:00:00.000Z', action: 'REGISTER',
+      customerId: 'legacy-customer', revision: 1, phase: 'committed'
+    };
+    const legacyFile = path.join(dir, 'customer-portal-audit.jsonl');
+    const legacyContent = `${JSON.stringify(legacyEvent)}\n`;
+    fs.writeFileSync(legacyFile, legacyContent);
+
+    new ServerCustomerStore(dir);
+    const archiveFile = path.join(dir, 'customer-portal-audit-archive', '2025-11.jsonl');
+    expect(fs.readFileSync(archiveFile, 'utf8')).toBe(legacyContent);
+    expect(fs.readFileSync(legacyFile, 'utf8')).toBe(legacyContent);
+    new ServerCustomerStore(dir);
+    expect(fs.readFileSync(archiveFile, 'utf8')).toBe(legacyContent);
+  });
+
+  it('does not commit a customer write when its attempt audit cannot be archived', () => {
+    const store = new ServerCustomerStore(dir, () => Date.parse('2026-11-24T12:00:00.000Z'));
+    const blockedArchive = path.join(dir, 'customer-portal-audit-archive', '2026-11.jsonl');
+    fs.mkdirSync(blockedArchive);
+
+    expect(() => store.register(identity, profile, 'privacy-v1', 'customer.uji')).toThrow('bukan file reguler');
+    expect(store.listCustomersForStaff()).toHaveLength(0);
+
+    fs.rmdirSync(blockedArchive);
+    expect(store.register(identity, profile, 'privacy-v1', 'customer.uji').username).toBe('customer.uji');
+    const events = fs.readFileSync(blockedArchive, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    expect(events.map((event: { phase: string }) => event.phase)).toEqual(['attempt', 'attempt', 'committed']);
+  });
+
   it('rejects unverified identities and never creates a profile implicitly on login', () => {
     const store = new ServerCustomerStore(dir);
     expect(() => store.login(identity)).toThrow('Lengkapi pendaftaran');
-    store.register({ ...identity, emailVerified: false }, profile, 'v1');
+    store.register({ ...identity, emailVerified: false }, profile, 'v1', 'customer.uji');
     expect(() => store.login({ ...identity, emailVerified: false })).toThrow('Verifikasi email');
     expect(() => store.linkCustomerToB2B(store.listCustomersForStaff()[0].id, 'b2b-active', 'dev.test')).toThrow('Verifikasi email');
     expect(store.login(identity).account.status).toBe('menunggu-verifikasi');
@@ -57,7 +101,7 @@ describe('customer store: durability and session lifecycle', () => {
 
   it('rejects a suspended account and its previously issued sessions after restart', () => {
     const store = new ServerCustomerStore(dir);
-    store.register(identity, profile, 'v1');
+    store.register(identity, profile, 'v1', 'customer.uji');
     const session = store.login(identity);
     const file = path.join(dir, 'customer-portal-db.json');
     const database = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -70,7 +114,7 @@ describe('customer store: durability and session lifecycle', () => {
 
   it('preserves file and in-memory state on write failure and permits safe registration retry', () => {
     const store = new ServerCustomerStore(dir);
-    const account = store.register(identity, profile, 'v1');
+    const account = store.register(identity, profile, 'v1', 'customer.uji');
     const session = store.login(identity);
     const file = path.join(dir, 'customer-portal-db.json');
     const before = fs.readFileSync(file, 'utf8');
@@ -78,7 +122,7 @@ describe('customer store: durability and session lifecycle', () => {
     expect(() => store.updateProfile(account.id, { ...profile, nama: 'Changed' })).toThrow('disk failure');
     expect(fs.readFileSync(file, 'utf8')).toBe(before);
     expect(store.resolve(session.token)?.account.nama).toBe(profile.nama);
-    expect(store.register(identity, profile, 'v1').id).toBe(account.id);
+    expect(store.register(identity, profile, 'v1', 'customer.uji').id).toBe(account.id);
     expect(fs.readdirSync(dir).some((name) => name.endsWith('.tmp'))).toBe(false);
   });
 
@@ -92,8 +136,8 @@ describe('customer store: durability and session lifecycle', () => {
   it('enforces idle, absolute and per-customer session limits without evicting other customers', () => {
     let now = Date.now();
     const store = new ServerCustomerStore(dir, () => now);
-    store.register(identity, profile, 'v1');
-    store.register(otherIdentity, profile, 'v1');
+    store.register(identity, profile, 'v1', 'customer.uji');
+    store.register(otherIdentity, profile, 'v1', 'other.uji');
     const other = store.login(otherIdentity);
     const first = store.login(identity);
     for (let i = 0; i < 10; i++) { now += 1; store.login(identity); }
@@ -115,7 +159,7 @@ describe('customer store: durability and session lifecycle', () => {
 
   it('migrates version 1 safely and persists isolated cart and address data', () => {
     const store = new ServerCustomerStore(dir);
-    const account = store.register(identity, profile, 'v1');
+    const account = store.register(identity, profile, 'v1', 'customer.uji');
     const file = path.join(dir, 'customer-portal-db.json');
     const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
     disk.version = 1;
@@ -136,6 +180,39 @@ describe('customer store: durability and session lifecycle', () => {
     expect(restarted.getCart(account.id).items).toHaveLength(1);
     expect(restarted.getAddresses(account.id)).toHaveLength(1);
   });
+
+  it('caps open quotation requests, loads databases without orders and rejects tampered order data', () => {
+    const store = new ServerCustomerStore(dir);
+    const account = store.register(identity, profile, 'v1', 'customer.uji');
+    store.linkCustomerToB2B(account.id, 'b2b-active', 'dev.test');
+    const [address] = store.saveAddress(account.id, {
+      label: 'Klinik', penerima: 'Customer Uji', telepon: '081234567890',
+      alamat: 'Jl. Uji 1', kota: 'Jakarta', provinsi: 'DKI Jakarta', kodePos: '10110', isUtama: true
+    });
+    const describeLine = () => ({ produkId: 'produk-1', varianId: 'varian-1', nama: 'Alat Uji', tipeModel: 'AU-1', kodeSKU: 'SKU-1', nomorIzinEdar: 'AKL-1', satuan: 'unit' });
+    const submit = () => {
+      const cart = store.updateCart(account.id, [{ produkId: 'produk-1', varianId: 'varian-1', jumlah: 1 }]);
+      return store.createOrder(account.id, { requestId: crypto.randomUUID(), cartRevision: cart.revision, alamatId: address.id, catatan: '' }, describeLine);
+    };
+    const first = submit();
+    for (let index = 1; index < 10; index += 1) submit();
+    expect(() => submit()).toThrow(expect.objectContaining({ code: 'TOO_MANY_OPEN_ORDERS' }));
+    store.cancelOrderByCustomer(account.id, first.order.id, '');
+    expect(submit().created).toBe(true);
+
+    const file = path.join(dir, 'customer-portal-db.json');
+    const disk = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(disk.orders).toHaveLength(11);
+    const withoutOrders = { ...disk };
+    delete withoutOrders.orders;
+    delete withoutOrders.notificationReads;
+    fs.writeFileSync(file, JSON.stringify(withoutOrders));
+    expect(new ServerCustomerStore(dir).listOrders(account.id)).toEqual([]);
+
+    disk.orders[1].requestId = disk.orders[0].requestId;
+    fs.writeFileSync(file, JSON.stringify(disk));
+    expect(() => new ServerCustomerStore(dir)).toThrow();
+  });
 });
 
 describe('customer HTTP authentication: isolated identity service, real disk and cookies', () => {
@@ -150,8 +227,10 @@ describe('customer HTTP authentication: isolated identity service, real disk and
   let salesRepToken: string;
   let rbac: ServerRbacStore;
   let catalogPublished: boolean;
+  let b2bList: B2BCustomerReference[];
 
   beforeEach(async () => {
+    b2bList = [];
     enabled = true;
     available = true;
     privacyReady = true;
@@ -169,7 +248,14 @@ describe('customer HTTP authentication: isolated identity service, real disk and
         if (!available) throw new CustomerError(503, 'IDENTITY_UNAVAILABLE', 'Unavailable');
         return uid === otherIdentity.uid ? { ...current, email: otherIdentity.email } : current;
       }),
-      revoke: vi.fn(async () => { current.validAfter = Date.now() + 1000; })
+      revoke: vi.fn(async () => { current.validAfter = Date.now() + 1000; }),
+      signIn: vi.fn(async (email: string, password: string) => {
+        if (password !== 'BenarSekali123!') throw new CustomerError(401, 'INVALID_CREDENTIALS', 'Username atau kata sandi salah.');
+        if (email === identity.email) return 'valid';
+        if (email === otherIdentity.email) return 'other';
+        throw new CustomerError(401, 'INVALID_CREDENTIALS', 'Username atau kata sandi salah.');
+      }),
+      sendVerification: vi.fn(async () => undefined)
     };
     rbac = new ServerRbacStore(dir);
     const developer = rbac.bootstrapFirstDeveloper({ username: 'dev.test', password: 'TestPassword123!', fullName: 'Test Developer' }, '127.0.0.1', 'Vitest');
@@ -219,7 +305,8 @@ describe('customer HTTP authentication: isolated identity service, real disk and
         ? [{ id, nama: 'Fasyankes Uji', status: 'Aktif' }]
         : id === 'b2b-inactive'
           ? [{ id, nama: 'Fasyankes Nonaktif', status: 'Non-aktif' }]
-          : []
+          : [],
+      listB2BCustomers: () => b2bList
     }));
     for (const endpoint of ['/api/sync/state', '/api/rbac/users', '/api/media']) app.get(endpoint, requireAuth, (_req, res) => res.json({ ok: true }));
     server = app.listen(0, '127.0.0.1');
@@ -237,8 +324,8 @@ describe('customer HTTP authentication: isolated identity service, real disk and
     });
     return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie'), cache: response.headers.get('cache-control') };
   }
-  async function register(token = 'valid') {
-    return request('/api/customer/auth/daftar', { ...profile, idToken: token, privacyAccepted: true, privacyVersion: 'v1' });
+  async function register(token = 'valid', username = token === 'valid' ? 'customer.uji' : `${token}.uji`) {
+    return request('/api/customer/auth/daftar', { ...profile, username, idToken: token, privacyAccepted: true, privacyVersion: 'v1' });
   }
   async function login(token = 'valid') {
     await register(token);
@@ -410,10 +497,169 @@ describe('customer HTTP authentication: isolated identity service, real disk and
     expect(suspended.body.customer.status).toBe('ditangguhkan');
     expect((await request('/api/customer/auth/saya', undefined, first)).status).toBe(401);
     expect((await request('/api/customer/auth/saya', undefined, second)).status).toBe(200);
-    const audit = fs.readFileSync(path.join(dir, 'customer-portal-audit.jsonl'), 'utf8');
+    const audit = readCustomerAudit(dir);
     expect(audit).toContain('"action":"CUSTOMER_LINKED_TO_B2B"');
     expect(audit).toContain('"actor":"dev.test"');
     expect(audit).toContain('"action":"CUSTOMER_SUSPENDED"');
+  });
+
+  it('suggests a B2B link only for a unique active unlinked email match and never links automatically', async () => {
+    await login();
+    await login('other');
+    const employeeCookie = `ams_session=${employeeToken}`;
+    b2bList = [
+      { id: 'b2b-active', nama: 'Fasyankes Uji', status: 'Aktif', email: identity.email.toUpperCase() },
+      { id: 'b2b-inactive', nama: 'Fasyankes Nonaktif', status: 'Non-aktif', email: otherIdentity.email }
+    ];
+    const byEmail = async (email: string) => (await request('/api/erp/portal/customers', undefined, employeeCookie))
+      .body.items.find((item: { email: string }) => item.email === email);
+    const first = await byEmail(identity.email);
+    expect(first.saranB2B).toEqual({ id: 'b2b-active', nama: 'Fasyankes Uji' });
+    expect(first).toMatchObject({ status: 'menunggu-verifikasi' });
+    expect(first.pelangganId).toBeUndefined();
+    expect((await byEmail(otherIdentity.email)).saranB2B).toBeUndefined();
+
+    b2bList.push({ id: 'b2b-dup', nama: 'Duplikat', status: 'Aktif', email: identity.email });
+    expect((await byEmail(identity.email)).saranB2B).toBeUndefined();
+    b2bList.pop();
+
+    await linkCustomer();
+    const linked = await byEmail(identity.email);
+    expect(linked).toMatchObject({ status: 'aktif', pelangganId: 'b2b-active' });
+    expect(linked.saranB2B).toBeUndefined();
+    b2bList[1] = { ...b2bList[0], email: otherIdentity.email };
+    expect((await byEmail(otherIdentity.email)).saranB2B).toBeUndefined();
+  });
+
+  async function prepareOrder(cookie: string) {
+    const address = await request('/api/customer/alamat', {
+      label: 'Klinik', penerima: 'Customer Uji', telepon: '081234567890',
+      alamat: 'Jl. Uji 1', kota: 'Jakarta', provinsi: 'DKI Jakarta', kodePos: '10110', isUtama: true
+    }, cookie);
+    const cart = await request('/api/customer/keranjang', { items: [{ produkId: 'produk-1', varianId: 'varian-1', jumlah: 3 }] }, cookie, {}, 'PUT');
+    expect(cart.status).toBe(200);
+    return { alamatId: address.body.items[0].id as string, cartRevision: cart.body.cart.revision as number };
+  }
+  async function linkCustomer(email = identity.email) {
+    const list = await request('/api/erp/portal/customers', undefined, `ams_session=${employeeToken}`);
+    const id = list.body.items.find((item: { email: string }) => item.email === email).id as string;
+    expect((await request(`/api/erp/portal/customers/${id}/tautkan`, { pelangganId: 'b2b-active' }, `ams_session=${employeeToken}`)).status).toBe(200);
+    return id;
+  }
+
+  it('submits a quotation request from the server-side cart only for a linked account, idempotently and in isolation', async () => {
+    const first = await login();
+    const second = await login('other');
+    let prepared = await prepareOrder(first);
+    const submit = (body: Record<string, unknown>, cookie = first, headers: Record<string, string> = {}) =>
+      request('/api/customer/pesanan', { requestId: crypto.randomUUID(), ...prepared, catatan: '', ...body }, cookie, headers);
+
+    expect((await submit({})).body.error).toBe('ACCOUNT_NOT_ACTIVE');
+    const customerId = await linkCustomer();
+    expect((await submit({}, first, { Origin: 'https://other.invalid' })).status).toBe(403);
+    expect((await submit({ requestId: 'bukan-uuid' })).body.error).toBe('INVALID_REQUEST_ID');
+    expect((await submit({ harga: 1 })).status).toBe(400);
+    expect((await submit({ cartRevision: prepared.cartRevision - 1 })).body.error).toBe('CART_CHANGED');
+    expect((await submit({ alamatId: 'alamat-lain' })).body.error).toBe('ADDRESS_NOT_FOUND');
+    catalogPublished = false;
+    expect((await submit({})).body.error).toBe('CART_PRODUCT_UNAVAILABLE');
+    catalogPublished = true;
+    expect((await request('/api/customer/keranjang', undefined, first)).body.cart.items).toHaveLength(1);
+
+    const requestId = crypto.randomUUID();
+    const created = await submit({ requestId, catatan: 'Mohon penawaran untuk 3 unit.' });
+    expect(created.status).toBe(201);
+    expect(created.body.order).toMatchObject({ status: 'menunggu-penawaran', catatan: 'Mohon penawaran untuk 3 unit.', alamat: { label: 'Klinik' } });
+    expect(created.body.order.baris[0]).toMatchObject({ nama: 'Alat Uji', kodeSKU: 'SKU-1', jumlah: 3 });
+    expect(created.body.order).not.toHaveProperty('customerId');
+    expect(created.body.order).not.toHaveProperty('requestId');
+    expect(created.body.order).not.toHaveProperty('uji');
+    expect(created.body.cart).toMatchObject({ items: [], revision: prepared.cartRevision + 1 });
+    const retried = await submit({ requestId: requestId.toUpperCase() });
+    expect(retried.status).toBe(200);
+    expect(retried.body.order.id).toBe(created.body.order.id);
+    expect((await submit({ cartRevision: prepared.cartRevision + 1 })).body.error).toBe('CART_EMPTY');
+
+    const orderId = created.body.order.id;
+    expect((await request('/api/customer/pesanan', undefined, first)).body.items).toHaveLength(1);
+    expect((await request('/api/customer/pesanan', undefined, second)).body.items).toEqual([]);
+    expect((await request(`/api/customer/pesanan/${orderId}`, undefined, second)).status).toBe(404);
+    expect((await request(`/api/customer/pesanan/${orderId}/batal`, { alasan: '' }, second)).status).toBe(404);
+    expect((await request('/api/customer/notifikasi', undefined, second)).body.items).toEqual([]);
+    expect((await request('/api/customer/pesanan', undefined, `ams_session=${salesRepToken}`)).status).toBe(401);
+
+    const developerCookie = `ams_session=${employeeToken}`;
+    prepared = await prepareOrder(developerCookie);
+    const developerOrder = await submit({}, developerCookie);
+    expect(developerOrder.status).toBe(201);
+    expect(developerOrder.body.order.uji).toBe(true);
+
+    expect(new ServerCustomerStore(dir).getOrder(customerId, orderId).nomor).toBe(created.body.order.nomor);
+    const audit = readCustomerAudit(dir);
+    expect(audit).toContain('"action":"ORDER_REQUESTED"');
+    expect(audit).not.toContain('Mohon penawaran');
+  });
+
+  it('limits quotation submissions per account rather than per shared address', async () => {
+    const first = await login();
+    const second = await login('other');
+    const attempt = (cookie: string) => request('/api/customer/pesanan', { requestId: 'bukan-uuid', cartRevision: 0, alamatId: 'x', catatan: '' }, cookie);
+    for (let index = 0; index < 20; index += 1) expect((await attempt(first)).status).toBe(403);
+    expect((await attempt(first)).status).toBe(429);
+    expect((await attempt(second)).body.error).toBe('ACCOUNT_NOT_ACTIVE');
+  });
+
+  it('cancels requests by customer or authorized staff and derives notifications from the order history', async () => {
+    const cookie = await login();
+    await linkCustomer();
+    const submitOne = async () => {
+      const prepared = await prepareOrder(cookie);
+      const result = await request('/api/customer/pesanan', { requestId: crypto.randomUUID(), ...prepared, catatan: '' }, cookie);
+      expect(result.status).toBe(201);
+      return result.body.order.id as string;
+    };
+    const ownCancel = await submitOne();
+    const staffCancel = await submitOne();
+
+    const unread = await request('/api/customer/notifikasi', undefined, cookie);
+    expect(unread.body.items).toHaveLength(2);
+    expect(unread.body.items.every((item: { dibaca: boolean }) => !item.dibaca)).toBe(true);
+    expect((await request('/api/customer/notifikasi/baca', {}, cookie, { Origin: 'https://other.invalid' })).status).toBe(403);
+    const read = await request('/api/customer/notifikasi/baca', {}, cookie);
+    expect(read.body.items.every((item: { dibaca: boolean }) => item.dibaca)).toBe(true);
+
+    const cancelled = await request(`/api/customer/pesanan/${ownCancel}/batal`, { alasan: 'Tidak jadi' }, cookie);
+    expect(cancelled.body.order.status).toBe('dibatalkan');
+    expect(cancelled.body.order.riwayat.at(-1)).toMatchObject({ oleh: 'customer', catatan: 'Tidak jadi' });
+    expect((await request(`/api/customer/pesanan/${ownCancel}/batal`, { alasan: '' }, cookie)).body.order.riwayat).toHaveLength(2);
+
+    const staffCookie = `ams_session=${employeeToken}`;
+    const salesCookie = `ams_session=${salesRepToken}`;
+    const inbox = await request('/api/erp/portal/pesanan', undefined, salesCookie);
+    expect(inbox.status).toBe(200);
+    expect(inbox.body.items).toHaveLength(2);
+    expect(inbox.body.items[0].customer).toMatchObject({ username: 'customer.uji', pelangganId: 'b2b-active' });
+    expect(inbox.body.items[0]).not.toHaveProperty('requestId');
+    expect(inbox.body.items[0]).not.toHaveProperty('customerId');
+    expect((await request('/api/erp/portal/pesanan', undefined, cookie)).status).toBe(401);
+    expect((await request(`/api/erp/portal/pesanan/${staffCancel}/batalkan`, { alasan: 'Stok habis' }, salesCookie)).status).toBe(403);
+    expect((await request(`/api/erp/portal/pesanan/${staffCancel}/batalkan`, { alasan: 'Stok habis' }, staffCookie, { Origin: 'https://other.invalid' })).status).toBe(403);
+    expect((await request(`/api/erp/portal/pesanan/${staffCancel}/batalkan`, { alasan: '  ' }, staffCookie)).body.error).toBe('INVALID_REASON');
+    const byStaff = await request(`/api/erp/portal/pesanan/${staffCancel}/batalkan`, { alasan: 'Produk dihentikan' }, staffCookie);
+    expect(byStaff.status).toBe(200);
+    expect(byStaff.body.order.riwayat.at(-1)).toMatchObject({ oleh: 'staf', aktor: 'dev.test' });
+
+    const seen = await request(`/api/customer/pesanan/${staffCancel}`, undefined, cookie);
+    expect(seen.body.order.riwayat.at(-1)).toMatchObject({ oleh: 'staf', catatan: 'Produk dihentikan' });
+    expect(seen.body.order.riwayat.at(-1)).not.toHaveProperty('aktor');
+    const notifications = (await request('/api/customer/notifikasi', undefined, cookie)).body.items;
+    expect(notifications).toHaveLength(4);
+    expect(notifications.filter((item: { dibaca: boolean }) => !item.dibaca)).toHaveLength(2);
+    expect(notifications.some((item: { pesan: string }) => item.pesan.includes('Produk dihentikan'))).toBe(true);
+    expect(JSON.stringify(notifications)).not.toContain('dev.test');
+    const audit = readCustomerAudit(dir);
+    expect(audit).toContain('"action":"ORDER_CANCELLED_BY_CUSTOMER"');
+    expect(audit).toContain('"action":"ORDER_CANCELLED_BY_STAFF"');
   });
 
   it.each(['disabled', 'password-reset', 'email-changed', 'email-unverified'])('revokes sessions when Firebase reports %s', async (change) => {
@@ -462,6 +708,54 @@ describe('customer HTTP authentication: isolated identity service, real disk and
     expect((await request('/api/customer/auth/saya', undefined, sameUser)).status).toBe(401);
     current.validAfter = 0;
     expect((await request('/api/customer/auth/saya', undefined, other)).status).toBe(200);
+  });
+
+  it('requires a unique username at registration and logs in by username without revealing the email', async () => {
+    expect((await register('valid', '')).body.error).toBe('INVALID_USERNAME');
+    expect((await register('valid', 'admin')).body.error).toBe('INVALID_USERNAME');
+    expect((await request('/api/customer/auth/cek-username', { username: 'Customer.Uji' })).body.available).toBe(true);
+    expect((await register('valid', 'Customer.Uji')).status).toBe(201);
+    expect((await request('/api/customer/auth/cek-username', { username: 'customer.uji' })).body.available).toBe(false);
+    const taken = await register('other', 'CUSTOMER.uji');
+    expect([taken.status, taken.body.error]).toEqual([409, 'USERNAME_TAKEN']);
+    expect((await register('other', 'other.uji')).status).toBe(201);
+
+    const wrongPassword = await request('/api/customer/auth/masuk', { username: 'customer.uji', password: 'salah-sandi' });
+    const unknownUser = await request('/api/customer/auth/masuk', { username: 'tidak.ada', password: 'BenarSekali123!' });
+    expect([wrongPassword.status, unknownUser.status]).toEqual([401, 401]);
+    expect(wrongPassword.body).toEqual(unknownUser.body);
+    expect(JSON.stringify(unknownUser.body)).not.toContain('@');
+    expect((await request('/api/customer/auth/masuk', { username: 'customer.uji', password: 'x', email: identity.email })).status).toBe(400);
+
+    const ok = await request('/api/customer/auth/masuk', { username: ' Customer.UJI ', password: 'BenarSekali123!' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.account).toMatchObject({ username: 'customer.uji', email: identity.email });
+    expect(ok.body).not.toHaveProperty('token');
+    expect(service.signIn).toHaveBeenLastCalledWith(identity.email, 'BenarSekali123!');
+    const me = await request('/api/customer/auth/saya', undefined, ok.cookie!.split(';')[0]);
+    expect(me.body.account.username).toBe('customer.uji');
+  });
+
+  it('resends verification once per window for an unverified username login and blocks suspended accounts', async () => {
+    current.emailVerified = false;
+    expect((await register()).status).toBe(201);
+    for (let i = 0; i < 2; i++) {
+      const result = await request('/api/customer/auth/masuk', { username: 'customer.uji', password: 'BenarSekali123!' });
+      expect([result.status, result.body.error, result.cookie]).toEqual([403, 'EMAIL_UNVERIFIED', null]);
+    }
+    expect(service.sendVerification).toHaveBeenCalledTimes(1);
+    current.emailVerified = true;
+    store.suspendCustomer(store.listCustomersForStaff()[0].id, 'staf.uji');
+    const suspended = await request('/api/customer/auth/masuk', { username: 'customer.uji', password: 'BenarSekali123!' });
+    expect([suspended.status, suspended.body.error]).toEqual([401, 'INVALID_CREDENTIALS']);
+  });
+
+  it('throttles repeated failures per username below the per-address limit', async () => {
+    expect((await register()).status).toBe(201);
+    for (let i = 0; i < 10; i++) {
+      expect((await request('/api/customer/auth/masuk', { username: 'customer.uji', password: 'salah' })).status).toBe(401);
+    }
+    expect((await request('/api/customer/auth/masuk', { username: 'customer.uji', password: 'BenarSekali123!' })).status).toBe(429);
   });
 
   it('limits registration and session exchange attempts', async () => {

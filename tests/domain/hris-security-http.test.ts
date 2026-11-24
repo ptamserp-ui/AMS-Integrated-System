@@ -12,7 +12,9 @@ import { bangunKontenDefault } from '../../src/utils/website';
 
 type JsonRecord = Record<string, unknown>;
 type SyncState = {
+  revision: number;
   entries: Record<string, { value: unknown }>;
+  versions: Record<string, number>;
   allowedKeys: string[];
   writableKeys: string[];
   deletableKeys: string[];
@@ -74,14 +76,45 @@ describe('isolasi HRIS melalui HTTP dan WebSocket', () => {
     body?: unknown,
     extraHeaders: Record<string, string> = {}
   ) {
+    let requestBody = body;
+    const requestHeaders = { ...extraHeaders };
+    const syncKeys = endpoint.startsWith('/api/sync/keys/')
+      ? [decodeURIComponent(endpoint.slice('/api/sync/keys/'.length))]
+      : endpoint === '/api/sync/batch' && body && typeof body === 'object'
+        ? [
+            ...Object.keys((body as { updates?: Record<string, unknown> }).updates ?? {}),
+            ...((body as { deletes?: string[] }).deletes ?? [])
+          ]
+        : [];
+    if (token && syncKeys.length > 0) {
+      const stateResponse = await fetch(
+        `${baseUrl}/api/sync/state?known=${encodeURIComponent(JSON.stringify(syncKeys))}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...extraHeaders
+          }
+        }
+      );
+      const state = stateResponse.ok
+        ? await stateResponse.json() as { versions?: Record<string, number> }
+        : {};
+      const versions = Object.fromEntries(syncKeys.map((key) => [key, state.versions?.[key] ?? 0]));
+      if (endpoint === '/api/sync/batch') {
+        const batch = body as { expectedVersions?: Record<string, number> };
+        if (!batch.expectedVersions) requestBody = { ...batch, expectedVersions: versions };
+      } else if (!Object.hasOwn(requestHeaders, 'If-Match')) {
+        requestHeaders['If-Match'] = `"${versions[syncKeys[0]]}"`;
+      }
+    }
     const response = await fetch(`${baseUrl}${endpoint}`, {
       method,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...extraHeaders
+        ...(requestBody !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...requestHeaders
       },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {})
+      ...(requestBody !== undefined ? { body: JSON.stringify(requestBody) } : {})
     });
     return { status: response.status, body: await response.json() as T };
   }
@@ -233,6 +266,105 @@ describe('isolasi HRIS melalui HTTP dan WebSocket', () => {
     expect(unchanged.body.entries.hris_cuti.value).toEqual([approvedLeave, otherLeave]);
   });
 
+  it('menolak PUT, batch, dan DELETE dengan versi basi tanpa menerapkan bagian batch lain', async () => {
+    const known = encodeURIComponent(JSON.stringify(['website_draft', 'website_content_v']));
+    const before = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    const initialVersion = before.body.versions.website_draft ?? 0;
+    const simultaneousWrites = await Promise.all([
+      request('/api/sync/keys/website_draft', 'PUT', developerToken, {
+        value: { judul: 'Perubahan editor satu' }
+      }, { 'If-Match': `"${initialVersion}"` }),
+      request('/api/sync/keys/website_draft', 'PUT', developerToken, {
+        value: { judul: 'Perubahan editor dua' }
+      }, { 'If-Match': `"${initialVersion}"` })
+    ]);
+    expect(simultaneousWrites.map((write) => write.status).sort()).toEqual([200, 409]);
+
+    const staleHeader = { 'If-Match': `"${initialVersion}"` };
+    expect((await request('/api/sync/keys/website_draft', 'PUT', developerToken, {
+      value: { judul: 'Draf basi' }
+    }, staleHeader)).status).toBe(409);
+
+    const afterFirstWrite = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    const acceptedDraft = afterFirstWrite.body.entries.website_draft.value;
+    const untouchedVersion = afterFirstWrite.body.versions.website_content_v ?? 0;
+    const revision = afterFirstWrite.body.revision;
+    expect((await request('/api/sync/batch', 'POST', developerToken, {
+      updates: {
+        website_draft: { judul: 'Draf batch basi' },
+        website_content_v: 99
+      },
+      expectedVersions: {
+        website_draft: initialVersion,
+        website_content_v: untouchedVersion
+      }
+    })).status).toBe(409);
+    expect((await request('/api/sync/keys/website_draft', 'DELETE', developerToken, undefined, staleHeader)).status).toBe(409);
+
+    const afterConflicts = await request<SyncState & { revision: number }>(
+      `/api/sync/state?known=${known}`,
+      'GET',
+      developerToken
+    );
+    expect(afterConflicts.body.revision).toBe(revision);
+    expect(afterConflicts.body.entries.website_draft.value).toEqual(acceptedDraft);
+    expect(afterConflicts.body.entries.website_content_v).toBeUndefined();
+
+    expect((await request('/api/sync/keys/website_draft', 'DELETE', developerToken, undefined, {
+      'If-Match': `"${afterConflicts.body.versions.website_draft}"`
+    })).status).toBe(200);
+    const afterDelete = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    expect(afterDelete.body.entries.website_draft).toBeUndefined();
+    expect(afterDelete.body.versions.website_draft).toBe(initialVersion + 2);
+    expect((await request('/api/sync/keys/website_draft', 'PUT', developerToken, {
+      value: { judul: 'Dibuat ulang' }
+    }, { 'If-Match': `"${afterDelete.body.versions.website_draft}"` })).status).toBe(200);
+
+    const missingVersion = await fetch(`${baseUrl}/api/sync/keys/website_draft`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${developerToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: { judul: 'Tanpa precondition' } })
+    });
+    expect(missingVersion.status).toBe(428);
+  });
+
+  it('melindungi purge administratif dengan versi setiap kunci dan menolak purge basi secara atomik', async () => {
+    const key = 'website_sync_conflict_probe';
+    const known = encodeURIComponent(JSON.stringify([key]));
+    const initial = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    const initialVersion = initial.body.versions[key] ?? 0;
+    const update = (value: string) => ({ updates: { [key]: { value } } });
+
+    expect((await request('/api/sync/purge-dummy', 'POST', developerToken, update('tanpa versi'))).status).toBe(428);
+    expect((await request('/api/sync/purge-dummy', 'POST', developerToken, {
+      ...update('versi tidak lengkap'),
+      expectedVersions: {}
+    })).status).toBe(428);
+
+    expect((await request(`/api/sync/keys/${key}`, 'PUT', developerToken, {
+      value: { value: 'versi terbaru' }
+    }, { 'If-Match': `"${initialVersion}"` })).status).toBe(200);
+    const afterWrite = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    const stale = await request<JsonRecord>('/api/sync/purge-dummy', 'POST', developerToken, {
+      ...update('purge basi'),
+      expectedVersions: { [key]: initialVersion }
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toBe('SYNC_VERSION_CONFLICT');
+
+    const afterConflict = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    expect(afterConflict.body.revision).toBe(afterWrite.body.revision);
+    expect(afterConflict.body.entries[key].value).toEqual({ value: 'versi terbaru' });
+
+    const accepted = await request('/api/sync/purge-dummy', 'POST', developerToken, {
+      ...update('purge tervalidasi'),
+      expectedVersions: { [key]: afterConflict.body.versions[key] }
+    });
+    expect(accepted.status).toBe(200);
+    const afterAccepted = await request<SyncState>(`/api/sync/state?known=${known}`, 'GET', developerToken);
+    expect(afterAccepted.body.entries[key].value).toEqual({ value: 'purge tervalidasi' });
+  });
+
   it('membatasi snapshot, event realtime, dan perubahan cuti self-service', async () => {
     const snapshot = await request<SyncState>('/api/sync/state', 'GET', employeeToken);
     expect(snapshot.status).toBe(200);
@@ -289,8 +421,14 @@ describe('isolasi HRIS melalui HTTP dan WebSocket', () => {
       deletes: ['hris_karyawan']
     })).status).toBe(403);
     expect((await request('/api/sync/reset', 'POST', pjtToken, {})).status).toBe(403);
+    const hrisState = await request<SyncState>(
+      `/api/sync/state?known=${encodeURIComponent(JSON.stringify(['hris_karyawan']))}`,
+      'GET',
+      developerToken
+    );
     expect((await request('/api/sync/purge-dummy', 'POST', developerToken, {
-      updates: { hris_karyawan: [profile, otherProfile] }
+      updates: { hris_karyawan: [profile, otherProfile] },
+      expectedVersions: { hris_karyawan: hrisState.body.versions.hris_karyawan }
     })).status).toBe(200);
     expect((await request('/api/media/upload', 'POST', developerToken, {
       id: 'sertifikat-uji',
@@ -334,6 +472,22 @@ describe('isolasi HRIS melalui HTTP dan WebSocket', () => {
         permissions: employeeRole.permissions
       })).status).toBe(200);
     }
+  });
+
+  it('membatasi ekspor arsip audit ke peran yang memiliki izin export', async () => {
+    const month = new Date().toISOString().slice(0, 7);
+    const archiveUrl = `${baseUrl}/api/rbac/audit/archive/${month}`;
+    const allowed = await fetch(archiveUrl, { headers: { Authorization: `Bearer ${developerToken}` } });
+    expect(allowed.status).toBe(200);
+    expect(allowed.headers.get('content-type')).toContain('application/x-ndjson');
+
+    const denied = await fetch(archiveUrl, { headers: { Authorization: `Bearer ${employeeToken}` } });
+    expect(denied.status).toBe(403);
+
+    const invalidMonth = await fetch(`${baseUrl}/api/rbac/audit/archive/2026-99`, {
+      headers: { Authorization: `Bearer ${developerToken}` }
+    });
+    expect(invalidMonth.status).toBe(400);
   });
 
   it('menonaktifkan self-service bila tautan akun atau master karyawan tidak unik', async () => {
@@ -389,7 +543,31 @@ describe('isolasi HRIS melalui HTTP dan WebSocket', () => {
     }
   });
 
-  it('tetap mengizinkan developer melakukan reset pada data uji', async () => {
-    expect((await request('/api/sync/reset', 'POST', developerToken, {})).status).toBe(200);
+  it('mensyaratkan revisi global dan menolak reset basi tanpa menghapus perubahan baru', async () => {
+    const before = await request<SyncState>('/api/sync/state', 'GET', developerToken);
+    expect((await request('/api/sync/reset', 'POST', developerToken, {})).status).toBe(428);
+    expect((await request('/api/sync/reset', 'POST', developerToken, {
+      expectedRevision: String(before.body.revision)
+    })).status).toBe(400);
+
+    expect((await request('/api/sync/keys/website_reset_conflict_probe', 'PUT', developerToken, {
+      value: { retained: true }
+    })).status).toBe(200);
+    const staleReset = await request<JsonRecord>('/api/sync/reset', 'POST', developerToken, {
+      expectedRevision: before.body.revision
+    });
+    expect(staleReset.status).toBe(409);
+    expect(staleReset.body.error).toBe('SYNC_REVISION_CONFLICT');
+
+    const unchanged = await request<SyncState>('/api/sync/state', 'GET', developerToken);
+    expect(unchanged.body.entries.website_reset_conflict_probe.value).toEqual({ retained: true });
+    expect(unchanged.body.revision).toBeGreaterThan(before.body.revision);
+
+    const reset = await request('/api/sync/reset', 'POST', developerToken, {
+      expectedRevision: unchanged.body.revision
+    });
+    expect(reset.status).toBe(200);
+    const afterReset = await request<SyncState>('/api/sync/state', 'GET', developerToken);
+    expect(afterReset.body.entries.website_reset_conflict_probe).toBeUndefined();
   });
 });

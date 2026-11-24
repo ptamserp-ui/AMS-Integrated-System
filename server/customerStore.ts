@@ -3,11 +3,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readJsonFileIfPresent } from './readJsonFile';
 import {
+  CUSTOMER_ORDER_NOTE_MAX,
   customerProfileError,
+  customerTextError,
+  customerUsernameError,
+  normalizeCustomerUsername,
   type CustomerAccount,
   type CustomerAddress,
   type CustomerCart,
   type CustomerCartItem,
+  type CustomerNotification,
+  type CustomerOrder,
+  type CustomerOrderEvent,
+  type CustomerOrderLine,
   type CustomerProfileInput
 } from '../src/types/customerPortal';
 
@@ -35,6 +43,7 @@ interface CustomerRecord extends CustomerAccount {
 
 export interface CustomerStaffSummary {
   id: string;
+  username?: string;
   email: string;
   nama: string;
   telepon: string;
@@ -55,6 +64,21 @@ export interface CustomerSession {
   expiresAt: number;
 }
 
+interface OrderEventRecord extends CustomerOrderEvent {
+  /** Staff username; internal only and never returned to customers. */
+  aktor?: string;
+}
+
+interface OrderRecord extends Omit<CustomerOrder, 'riwayat'> {
+  customerId: string;
+  requestId: string;
+  riwayat: OrderEventRecord[];
+}
+
+export interface CustomerOrderStaffView extends Omit<OrderRecord, 'customerId' | 'requestId'> {
+  customer: { id: string; username?: string; nama: string; perusahaan: string; status: CustomerAccount['status']; pelangganId?: string };
+}
+
 interface CustomerDatabase {
   version: 2;
   revision: number;
@@ -62,7 +86,26 @@ interface CustomerDatabase {
   sessions: CustomerSession[];
   carts: Array<{ customerId: string; cart: CustomerCart }>;
   addresses: Array<{ customerId: string; items: CustomerAddress[] }>;
+  /** Added after the first version-2 release; absent collections load as empty. */
+  orders: OrderRecord[];
+  notificationReads: Array<{ customerId: string; eventIds: string[] }>;
 }
+
+interface CustomerAuditEvent {
+  id: string;
+  at: string;
+  action?: string;
+  customerId?: string;
+  actor?: string;
+  revision: number;
+  phase: 'attempt' | 'committed';
+}
+
+const ORDER_STATUSES = ['menunggu-penawaran', 'dibatalkan'] as const;
+const OPEN_ORDER_LIMIT = 10;
+const NOTIFICATION_LIMIT = 50;
+const ORDER_LINE_LIMIT = 30;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const DAY = 86400000;
 const DEVELOPER_UID_PREFIX = 'rbac-developer:';
@@ -79,7 +122,12 @@ function validDatabase(value: unknown): value is CustomerDatabase {
   const uids = new Set<string>();
   const emails = new Set<string>();
   const developers = new Set<string>();
+  const usernames = new Set<string>();
   for (const c of value.customers) {
+    if (record(c) && c.username !== undefined) {
+      if (customerUsernameError(c.username) || c.username !== normalizeCustomerUsername(String(c.username)) || usernames.has(String(c.username))) return false;
+      usernames.add(String(c.username));
+    }
     if (record(c) && c.developerUserId !== undefined) {
       if (typeof c.developerUserId !== 'string' || !c.developerUserId || developers.has(c.developerUserId) ||
           c.firebaseUid !== `${DEVELOPER_UID_PREFIX}${c.developerUserId}` || c.aksesDeveloper !== true || c.pelangganId !== undefined) return false;
@@ -121,7 +169,7 @@ function validDatabase(value: unknown): value is CustomerDatabase {
     return true;
   })) return false;
   const addressCustomerIds = new Set<string>();
-  return value.addresses.every((entry: unknown) => {
+  if (!value.addresses.every((entry: unknown) => {
     if (!record(entry) || typeof entry.customerId !== 'string' || !ids.has(entry.customerId) || addressCustomerIds.has(entry.customerId) ||
         !Array.isArray(entry.items)) return false;
     addressCustomerIds.add(entry.customerId);
@@ -134,17 +182,85 @@ function validDatabase(value: unknown): value is CustomerDatabase {
       addressIds.add(address.id);
       return true;
     });
+  })) return false;
+  return validOrderCollections(value, ids);
+}
+
+const shortText = (v: unknown, max: number, required = true) =>
+  typeof v === 'string' && v.length <= max && (!required || v.trim().length > 0);
+
+function validOrderCollections(value: Record<string, unknown>, customerIds: Set<string>): boolean {
+  if (value.orders !== undefined && !Array.isArray(value.orders)) return false;
+  if (value.notificationReads !== undefined && !Array.isArray(value.notificationReads)) return false;
+  const orderIds = new Set<string>();
+  const numbers = new Set<string>();
+  const requests = new Set<string>();
+  const ordersValid = ((value.orders ?? []) as unknown[]).every((order) => {
+    if (!record(order) || typeof order.id !== 'string' || !order.id || orderIds.has(order.id) ||
+        typeof order.customerId !== 'string' || !customerIds.has(order.customerId) ||
+        typeof order.requestId !== 'string' || !UUID.test(order.requestId) || requests.has(`${order.customerId}:${order.requestId}`) ||
+        typeof order.nomor !== 'string' || !/^PRT-\d{6}-[A-F0-9]{6}$/.test(order.nomor) || numbers.has(order.nomor) ||
+        !ORDER_STATUSES.includes(order.status as typeof ORDER_STATUSES[number]) ||
+        customerTextError(order.catatan, 'Catatan', CUSTOMER_ORDER_NOTE_MAX) !== null ||
+        (order.uji !== undefined && order.uji !== true) ||
+        !dateString(order.createdAt) || !dateString(order.updatedAt) ||
+        !record(order.alamat) || !['label', 'penerima', 'telepon', 'alamat', 'kota', 'provinsi', 'kodePos'].every((key) => shortText((order.alamat as Record<string, unknown>)[key], 300)) ||
+        !Array.isArray(order.baris) || order.baris.length < 1 || order.baris.length > ORDER_LINE_LIMIT ||
+        !Array.isArray(order.riwayat) || order.riwayat.length < 1) return false;
+    const lineIds = new Set<string>();
+    const linesValid = order.baris.every((line: unknown) => {
+      if (!record(line) || typeof line.id !== 'string' || !line.id || lineIds.has(line.id) ||
+          !shortText(line.produkId, 100) || !shortText(line.varianId, 100) || !shortText(line.nama, 200) ||
+          !['tipeModel', 'kodeSKU', 'nomorIzinEdar', 'satuan'].every((key) => shortText(line[key], 160, false)) ||
+          typeof line.jumlah !== 'number' || !Number.isSafeInteger(line.jumlah) || line.jumlah < 1 || line.jumlah > 1000000) return false;
+      lineIds.add(line.id);
+      return true;
+    });
+    const eventsValid = order.riwayat.every((event: unknown) => record(event) && typeof event.id === 'string' && Boolean(event.id) &&
+      ORDER_STATUSES.includes(event.status as typeof ORDER_STATUSES[number]) && ['customer', 'staf'].includes(String(event.oleh)) &&
+      (event.catatan === undefined || customerTextError(event.catatan, 'Catatan', 500) === null) &&
+      (event.aktor === undefined || shortText(event.aktor, 120)) && dateString(event.at));
+    if (!linesValid || !eventsValid || (order.riwayat.at(-1) as Record<string, unknown>).status !== order.status) return false;
+    orderIds.add(order.id);
+    numbers.add(order.nomor);
+    requests.add(`${order.customerId}:${order.requestId}`);
+    return true;
   });
+  if (!ordersValid) return false;
+  const readers = new Set<string>();
+  return ((value.notificationReads ?? []) as unknown[]).every((entry) => {
+    if (!record(entry) || typeof entry.customerId !== 'string' || !customerIds.has(entry.customerId) ||
+        readers.has(entry.customerId) || !Array.isArray(entry.eventIds) || entry.eventIds.length > NOTIFICATION_LIMIT ||
+        !entry.eventIds.every((id) => typeof id === 'string' && UUID.test(id))) return false;
+    readers.add(entry.customerId);
+    return true;
+  });
+}
+
+function validCustomerAuditEvent(value: unknown): value is CustomerAuditEvent {
+  if (!record(value) || typeof value.id !== 'string' || !value.id ||
+      typeof value.at !== 'string' || !Number.isSafeInteger(value.revision) ||
+      !['attempt', 'committed'].includes(String(value.phase)) ||
+      (value.action !== undefined && typeof value.action !== 'string') ||
+      (value.customerId !== undefined && typeof value.customerId !== 'string') ||
+      (value.actor !== undefined && typeof value.actor !== 'string')) return false;
+  const date = new Date(value.at);
+  return Number.isFinite(date.getTime()) && date.toISOString() === value.at;
 }
 
 export class ServerCustomerStore {
   private data: CustomerDatabase;
   private readonly file: string;
   private readonly auditFile: string;
+  private readonly auditArchiveDir: string;
+  private readonly archivedAuditEvents = new Set<string>();
+  private readonly pendingAuditArchive = new Map<string, CustomerAuditEvent>();
 
   constructor(dataDir: string, private readonly now = Date.now) {
     this.file = path.join(dataDir, 'customer-portal-db.json');
     this.auditFile = path.join(dataDir, 'customer-portal-audit.jsonl');
+    this.auditArchiveDir = path.join(dataDir, 'customer-portal-audit-archive');
+    fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const loaded = readJsonFileIfPresent(this.file, 'Database Customer Portal');
     if (loaded !== undefined && record(loaded) && loaded.version === 1 &&
         Array.isArray(loaded.customers) && Array.isArray(loaded.sessions)) {
@@ -154,7 +270,9 @@ export class ServerCustomerStore {
         customers: loaded.customers as CustomerRecord[],
         sessions: loaded.sessions as CustomerSession[],
         carts: [],
-        addresses: []
+        addresses: [],
+        orders: [],
+        notificationReads: []
       };
       if (!validDatabase(migrated)) {
         throw new Error('Struktur database Customer Portal versi 1 tidak didukung. Berkas tidak diubah; periksa backup.');
@@ -164,15 +282,89 @@ export class ServerCustomerStore {
       throw new Error('Struktur atau versi database Customer Portal tidak didukung. Berkas tidak diubah; periksa backup.');
     } else {
       this.data = loaded === undefined
-        ? { version: 2, revision: 0, customers: [], sessions: [], carts: [], addresses: [] }
-        : loaded;
+        ? { version: 2, revision: 0, customers: [], sessions: [], carts: [], addresses: [], orders: [], notificationReads: [] }
+        : { ...loaded, orders: loaded.orders ?? [], notificationReads: loaded.notificationReads ?? [] };
+    }
+    this.loadAuditArchiveIndex();
+    this.archiveLegacyAuditEvents();
+    this.flushAuditArchive();
+  }
+
+  private loadAuditArchiveIndex(): void {
+    fs.mkdirSync(this.auditArchiveDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(this.auditArchiveDir, 0o700);
+    for (const filename of fs.readdirSync(this.auditArchiveDir)) {
+      const month = /^(\d{4}-(?:0[1-9]|1[0-2]))\.jsonl$/.exec(filename)?.[1];
+      if (!month) continue;
+      const archivePath = path.join(this.auditArchiveDir, filename);
+      if (!fs.lstatSync(archivePath).isFile()) {
+        throw new Error(`Arsip audit customer "${archivePath}" bukan file reguler; file tidak diubah.`);
+      }
+      const content = fs.readFileSync(archivePath, 'utf8');
+      for (const [index, line] of content.split(/\r?\n/).entries()) {
+        if (!line) continue;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(line);
+        } catch (error) {
+          throw new Error(`Arsip audit customer "${archivePath}" rusak pada baris ${index + 1}; file tidak diubah.`, { cause: error });
+        }
+        if (!validCustomerAuditEvent(parsed) || parsed.at.slice(0, 7) !== month) {
+          throw new Error(`Entri arsip audit customer "${archivePath}" tidak valid pada baris ${index + 1}; file tidak diubah.`);
+        }
+        const key = `${parsed.id}:${parsed.phase}`;
+        if (this.archivedAuditEvents.has(key)) {
+          throw new Error(`Entri audit customer "${key}" duplikat pada arsip; file tidak diubah.`);
+        }
+        this.archivedAuditEvents.add(key);
+      }
+    }
+  }
+
+  private archiveLegacyAuditEvents(): void {
+    if (!fs.existsSync(this.auditFile)) return;
+    const content = fs.readFileSync(this.auditFile, 'utf8');
+    for (const [index, line] of content.split(/\r?\n/).entries()) {
+      if (!line) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch (error) {
+        throw new Error(`Riwayat audit customer "${this.auditFile}" rusak pada baris ${index + 1}; file tidak diubah.`, { cause: error });
+      }
+      if (!validCustomerAuditEvent(parsed)) {
+        throw new Error(`Entri riwayat audit customer "${this.auditFile}" tidak valid pada baris ${index + 1}; file tidak diubah.`);
+      }
+      const key = `${parsed.id}:${parsed.phase}`;
+      if (!this.archivedAuditEvents.has(key)) this.pendingAuditArchive.set(key, parsed);
+    }
+  }
+
+  private flushAuditArchive(): void {
+    for (const [key, event] of this.pendingAuditArchive) {
+      const month = event.at.slice(0, 7);
+      if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month) || !validCustomerAuditEvent(event)) {
+        throw new Error(`Entri audit customer "${key}" tidak valid untuk arsip bulanan.`);
+      }
+      const archivePath = path.join(this.auditArchiveDir, `${month}.jsonl`);
+      if (fs.existsSync(archivePath) && !fs.lstatSync(archivePath).isFile()) {
+        throw new Error(`Arsip audit customer "${archivePath}" bukan file reguler.`);
+      }
+      fs.appendFileSync(archivePath, `${JSON.stringify(event)}\n`, { encoding: 'utf8', mode: 0o600 });
+      fs.chmodSync(archivePath, 0o600);
+      this.archivedAuditEvents.add(key);
+      this.pendingAuditArchive.delete(key);
     }
   }
 
   private save(next: CustomerDatabase, action?: string, customerId?: string, actor?: string) {
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const event = { id: crypto.randomUUID(), at: new Date(this.now()).toISOString(), action, customerId, actor, revision: this.data.revision + 1 };
-    const audit = (phase: string) => fs.appendFileSync(this.auditFile, JSON.stringify({ ...event, phase }) + '\n', { mode: 0o600 });
+    const audit = (phase: CustomerAuditEvent['phase']) => {
+      const record = { ...event, phase };
+      this.pendingAuditArchive.set(`${record.id}:${phase}`, record);
+      this.flushAuditArchive();
+    };
     if (action) audit('attempt');
     next.revision = this.data.revision + 1;
     const temp = `${this.file}.${crypto.randomUUID()}.tmp`;
@@ -218,9 +410,21 @@ export class ServerCustomerStore {
     return this.publicAccount(customer);
   }
 
+  isUsernameAvailable(rawUsername: string): boolean {
+    const username = normalizeCustomerUsername(rawUsername);
+    return !customerUsernameError(username) && !this.data.customers.some((c) => c.username === username);
+  }
+
+  /** Server-only lookup used to sign in by username; never return the email to the client. */
+  loginEmailForUsername(rawUsername: string): string | null {
+    const username = normalizeCustomerUsername(rawUsername);
+    const customer = this.data.customers.find((c) => c.username === username && !c.developerUserId);
+    return customer && customer.status !== 'ditangguhkan' ? customer.email : null;
+  }
+
   listCustomersForStaff(): CustomerStaffSummary[] {
     return this.data.customers.filter((customer) => !customer.developerUserId).map((customer) => ({
-      id: customer.id, email: customer.email, nama: customer.nama, telepon: customer.telepon,
+      id: customer.id, username: customer.username, email: customer.email, nama: customer.nama, telepon: customer.telepon,
       perusahaan: customer.perusahaan, status: customer.status, pelangganId: customer.pelangganId,
       createdAt: customer.createdAt, updatedAt: customer.updatedAt
     }));
@@ -257,7 +461,7 @@ export class ServerCustomerStore {
     return this.getCustomerForStaff(customerId)!;
   }
 
-  register(identity: CustomerIdentity, input: CustomerProfileInput, privacyVersion: string): CustomerAccount {
+  register(identity: CustomerIdentity, input: CustomerProfileInput, privacyVersion: string, rawUsername?: string): CustomerAccount {
     const error = customerProfileError(input);
     if (error) throw new CustomerError(400, 'INVALID_PROFILE', error);
     if (!validEmail(identity.email) || !identity.uid || identity.uid.startsWith(DEVELOPER_UID_PREFIX)) throw new CustomerError(401, 'INVALID_IDENTITY', 'Identitas customer tidak valid.');
@@ -266,11 +470,15 @@ export class ServerCustomerStore {
       if (existing.status === 'ditangguhkan') throw new CustomerError(403, 'ACCOUNT_UNAVAILABLE', 'Akun tidak dapat digunakan. Hubungi tim kami.');
       return this.publicAccount(existing);
     }
+    const usernameError = customerUsernameError(rawUsername);
+    if (usernameError) throw new CustomerError(400, 'INVALID_USERNAME', usernameError);
+    const username = normalizeCustomerUsername(rawUsername!);
+    if (!this.isUsernameAvailable(username)) throw new CustomerError(409, 'USERNAME_TAKEN', 'Username sudah digunakan. Pilih username lain.');
     const email = identity.email.toLowerCase();
     if (this.data.customers.some((c) => c.email === email)) throw new CustomerError(409, 'ACCOUNT_EXISTS', 'Akun tidak dapat didaftarkan. Gunakan pemulihan akun.');
     const now = new Date(this.now()).toISOString();
     const customer: CustomerRecord = {
-      id: crypto.randomUUID(), firebaseUid: identity.uid, email,
+      id: crypto.randomUUID(), firebaseUid: identity.uid, username, email,
       nama: input.nama.trim(), telepon: input.telepon.trim(), perusahaan: input.perusahaan.trim(),
       teleponTerverifikasi: false, status: identity.emailVerified ? 'menunggu-verifikasi' : 'menunggu-email',
       privacyVersion, privacyAcceptedAt: now, createdAt: now, updatedAt: now
@@ -434,5 +642,143 @@ export class ServerCustomerStore {
     });
     this.save(next, 'PROFILE_UPDATED', customerId);
     return this.publicAccount(customer);
+  }
+
+  private customerOrder(order: OrderRecord): CustomerOrder {
+    const { customerId: _customer, requestId: _request, riwayat, ...rest } = order;
+    return structuredClone({ ...rest, riwayat: riwayat.map(({ aktor: _actor, ...event }) => event) });
+  }
+
+  /**
+   * Snapshots the cart into a quotation request and empties the cart in the same write.
+   * A repeated requestId returns the original order so client retries never duplicate it.
+   */
+  createOrder(
+    customerId: string,
+    input: { requestId: unknown; cartRevision: unknown; alamatId: unknown; catatan: unknown },
+    describe: (item: CustomerCartItem) => Omit<CustomerOrderLine, 'id' | 'jumlah'> | null
+  ): { order: CustomerOrder; created: boolean } {
+    const customer = this.data.customers.find((c) => c.id === customerId);
+    if (!customer) throw new CustomerError(404, 'NOT_FOUND', 'Akun tidak ditemukan.');
+    if (!customer.developerUserId && (customer.status !== 'aktif' || !customer.pelangganId)) {
+      throw new CustomerError(403, 'ACCOUNT_NOT_ACTIVE', 'Pengajuan pesanan tersedia setelah tim kami menautkan akun Anda ke data pelanggan bisnis.');
+    }
+    if (typeof input.requestId !== 'string' || !UUID.test(input.requestId)) throw new CustomerError(400, 'INVALID_REQUEST_ID', 'ID permintaan tidak valid.');
+    const requestId = input.requestId.toLowerCase();
+    const existing = this.data.orders.find((o) => o.customerId === customerId && o.requestId === requestId);
+    if (existing) return { order: this.customerOrder(existing), created: false };
+    const noteError = customerTextError(input.catatan ?? '', 'Catatan', CUSTOMER_ORDER_NOTE_MAX);
+    if (noteError) throw new CustomerError(400, 'INVALID_NOTE', noteError);
+    const cart = this.getCart(customerId);
+    if (!cart.items.length) throw new CustomerError(400, 'CART_EMPTY', 'Keranjang masih kosong.');
+    if (input.cartRevision !== cart.revision) throw new CustomerError(409, 'CART_CHANGED', 'Keranjang berubah di perangkat lain. Periksa kembali sebelum mengajukan.');
+    const address = this.getAddresses(customerId).find((a) => a.id === input.alamatId);
+    if (!address) throw new CustomerError(404, 'ADDRESS_NOT_FOUND', 'Pilih alamat pengiriman yang tersimpan.');
+    if (this.data.orders.filter((o) => o.customerId === customerId && o.status === 'menunggu-penawaran').length >= OPEN_ORDER_LIMIT) {
+      throw new CustomerError(409, 'TOO_MANY_OPEN_ORDERS', `Maksimal ${OPEN_ORDER_LIMIT} permintaan menunggu penawaran. Tunggu tanggapan sales atau batalkan permintaan lama.`);
+    }
+    const baris = cart.items.map((item) => {
+      const described = describe(item);
+      if (!described) throw new CustomerError(409, 'CART_PRODUCT_UNAVAILABLE', 'Sebagian produk di keranjang tidak lagi tersedia. Perbarui keranjang Anda.');
+      return { id: crypto.randomUUID(), ...described, produkId: item.produkId, varianId: item.varianId, jumlah: item.jumlah };
+    });
+    const nowDate = new Date(this.now());
+    const now = nowDate.toISOString();
+    const day = now.slice(2, 10).replace(/-/g, '');
+    let nomor: string;
+    do { nomor = `PRT-${day}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`; } while (this.data.orders.some((o) => o.nomor === nomor));
+    const { id: _id, isUtama: _main, updatedAt: _updated, ...alamat } = address;
+    const order: OrderRecord = {
+      id: crypto.randomUUID(), nomor, customerId, requestId, status: 'menunggu-penawaran', baris, alamat,
+      catatan: typeof input.catatan === 'string' ? input.catatan.trim() : '',
+      riwayat: [{ id: crypto.randomUUID(), status: 'menunggu-penawaran', oleh: 'customer', at: now }],
+      ...(customer.developerUserId ? { uji: true as const } : {}),
+      createdAt: now, updatedAt: now
+    };
+    const next = structuredClone(this.data);
+    next.orders.push(order);
+    next.carts.find((entry) => entry.customerId === customerId)!.cart = { items: [], revision: cart.revision + 1, updatedAt: now };
+    this.save(next, 'ORDER_REQUESTED', customerId);
+    return { order: this.customerOrder(order), created: true };
+  }
+
+  listOrders(customerId: string): CustomerOrder[] {
+    return this.data.orders.filter((o) => o.customerId === customerId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((o) => this.customerOrder(o));
+  }
+
+  getOrder(customerId: string, orderId: string): CustomerOrder {
+    const order = this.data.orders.find((o) => o.id === orderId && o.customerId === customerId);
+    if (!order) throw new CustomerError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.');
+    return this.customerOrder(order);
+  }
+
+  private cancelOrder(match: (o: OrderRecord) => boolean, event: Omit<OrderEventRecord, 'id' | 'status' | 'at'>, action: string): OrderRecord {
+    const next = structuredClone(this.data);
+    const order = next.orders.find(match);
+    if (!order) throw new CustomerError(404, 'NOT_FOUND', 'Pesanan tidak ditemukan.');
+    if (order.status === 'dibatalkan') return order;
+    if (order.status !== 'menunggu-penawaran') throw new CustomerError(409, 'ORDER_NOT_CANCELLABLE', 'Pesanan pada status ini tidak dapat dibatalkan.');
+    const now = new Date(this.now()).toISOString();
+    order.status = 'dibatalkan';
+    order.updatedAt = now;
+    order.riwayat.push({ id: crypto.randomUUID(), status: 'dibatalkan', at: now, ...event });
+    this.save(next, action, order.customerId, event.aktor);
+    return order;
+  }
+
+  cancelOrderByCustomer(customerId: string, orderId: string, reason: unknown): CustomerOrder {
+    const error = customerTextError(reason ?? '', 'Alasan', 500);
+    if (error) throw new CustomerError(400, 'INVALID_REASON', error);
+    const catatan = typeof reason === 'string' && reason.trim() ? reason.trim() : undefined;
+    const order = this.cancelOrder((o) => o.id === orderId && o.customerId === customerId,
+      { oleh: 'customer', ...(catatan ? { catatan } : {}) }, 'ORDER_CANCELLED_BY_CUSTOMER');
+    return this.customerOrder(order);
+  }
+
+  cancelOrderByStaff(orderId: string, reason: unknown, actor: string): CustomerOrderStaffView {
+    const error = customerTextError(reason, 'Alasan pembatalan', 500, true);
+    if (error) throw new CustomerError(400, 'INVALID_REASON', error);
+    const order = this.cancelOrder((o) => o.id === orderId, { oleh: 'staf', catatan: String(reason).trim(), aktor: actor }, 'ORDER_CANCELLED_BY_STAFF');
+    return this.staffOrder(order);
+  }
+
+  private staffOrder(order: OrderRecord): CustomerOrderStaffView {
+    const customer = this.data.customers.find((c) => c.id === order.customerId)!;
+    const { customerId: _customer, requestId: _request, ...rest } = order;
+    return structuredClone({
+      ...rest,
+      customer: {
+        id: customer.id, username: customer.username, nama: customer.nama, perusahaan: customer.perusahaan,
+        status: customer.status, pelangganId: customer.pelangganId
+      }
+    });
+  }
+
+  listOrdersForStaff(): CustomerOrderStaffView[] {
+    return [...this.data.orders].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((o) => this.staffOrder(o));
+  }
+
+  notifications(customerId: string): CustomerNotification[] {
+    // Read state is tracked per event id so an event written in the same millisecond as "mark read" stays unread.
+    const read = new Set(this.data.notificationReads.find((entry) => entry.customerId === customerId)?.eventIds ?? []);
+    return this.data.orders.filter((o) => o.customerId === customerId).flatMap((order) => order.riwayat.map((event) => {
+      const [judul, pesan] = event.status === 'menunggu-penawaran'
+        ? ['Permintaan penawaran diterima', `Pesanan ${order.nomor} (${order.baris.length} produk) menunggu penawaran dari tim sales.`]
+        : event.oleh === 'staf'
+          ? ['Pesanan dibatalkan oleh tim kami', `Pesanan ${order.nomor} dibatalkan. Alasan: ${event.catatan}`]
+          : ['Pesanan dibatalkan', `Anda membatalkan pesanan ${order.nomor}.`];
+      return { id: event.id, judul, pesan, pesananId: order.id, dibaca: read.has(event.id), createdAt: event.at };
+    })).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, NOTIFICATION_LIMIT);
+  }
+
+  markNotificationsRead(customerId: string): CustomerNotification[] {
+    const next = structuredClone(this.data);
+    const eventIds = this.notifications(customerId).map((item) => item.id);
+    const entry = next.notificationReads.find((row) => row.customerId === customerId);
+    if (entry) entry.eventIds = eventIds;
+    else next.notificationReads.push({ customerId, eventIds });
+    this.save(next);
+    return this.notifications(customerId);
   }
 }

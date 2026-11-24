@@ -3,7 +3,7 @@ import path from 'path';
 import type { KonfigurasiSitus, ProdukKatalog, RbacResourceId, RoleDefinition } from '../src/types/index';
 import { normalisasiProdukKatalog, produkKatalogUntukWebsite } from '../src/utils/productCatalog';
 import { gabungkanRfqWebsite, KUNCI_RFQ_WEBSITE } from './websiteRfq';
-import { readJsonFileIfPresent } from './readJsonFile';
+import { assertNoPendingJsonFile, readJsonFileIfPresent } from './readJsonFile';
 
 export interface SyncEntry {
   value: unknown;
@@ -21,6 +21,27 @@ interface AppStateDatabase {
   version: number;
   revision: number;
   entries: Record<string, SyncEntry>;
+  keyVersions: Record<string, number>;
+}
+
+export interface SyncVersionConflict {
+  key: string;
+  expectedVersion: number;
+  actualVersion: number;
+}
+
+export class SyncVersionConflictError extends Error {
+  constructor(readonly conflicts: SyncVersionConflict[]) {
+    super('Data berubah di server sejak terakhir dibaca.');
+    this.name = 'SyncVersionConflictError';
+  }
+}
+
+export class SyncRevisionConflictError extends Error {
+  constructor(readonly expectedRevision: number, readonly actualRevision: number) {
+    super('State server berubah sejak terakhir dibaca.');
+    this.name = 'SyncRevisionConflictError';
+  }
 }
 
 export const PUBLIC_SYNC_KEYS = new Set<string>([
@@ -482,9 +503,12 @@ export class ServerDataSyncStore {
       }
       const state = parsed as Partial<AppStateDatabase>;
       const isCounter = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+      const hasKeyVersions = state.keyVersions !== undefined;
       if (!state.entries || typeof state.entries !== 'object' || Array.isArray(state.entries) ||
           (state.version !== undefined && !isCounter(state.version)) ||
           (state.revision !== undefined && !isCounter(state.revision)) ||
+          (hasKeyVersions && (!state.keyVersions || typeof state.keyVersions !== 'object' || Array.isArray(state.keyVersions) ||
+            !Object.entries(state.keyVersions).every(([key, value]) => isValidSyncKey(key) && isCounter(value)))) ||
           !Object.values(state.entries).every((entry) =>
             entry && typeof entry === 'object' && !Array.isArray(entry) &&
             Object.prototype.hasOwnProperty.call(entry, 'value') &&
@@ -492,25 +516,50 @@ export class ServerDataSyncStore {
           )) {
         throw new Error(`Format state sinkronisasi "${this.dbFile}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
       }
+      const keyVersions = { ...(state.keyVersions ?? {}) };
+      for (const [key, entry] of Object.entries(state.entries)) {
+        if (hasKeyVersions && (keyVersions[key] ?? 0) < entry.version) {
+          throw new Error(`Versi kunci "${key}" pada state sinkronisasi tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
+        }
+        keyVersions[key] = Math.max(keyVersions[key] ?? 0, entry.version);
+      }
       return {
         version: state.version ?? 1,
         revision: state.revision ?? 0,
-        entries: state.entries
+        entries: state.entries,
+        keyVersions
       };
     }
-    const fresh: AppStateDatabase = { version: 1, revision: 0, entries: {} };
+    assertNoPendingJsonFile(this.dbFile, 'State sinkronisasi');
+    const fresh: AppStateDatabase = { version: 1, revision: 0, entries: {}, keyVersions: {} };
     fs.writeFileSync(this.dbFile, JSON.stringify(fresh, null, 2), { encoding: 'utf8', flag: 'wx' });
     return fresh;
   }
 
   private persist(next: AppStateDatabase = this.state): void {
     const tmp = `${this.dbFile}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
+    fs.writeFileSync(tmp, JSON.stringify(next, null, 2), { encoding: 'utf8', flag: 'wx' });
     fs.renameSync(tmp, this.dbFile);
   }
 
   public getRevision(): number {
     return this.state.revision;
+  }
+
+  public getVersions(keys: string[]): Record<string, number> {
+    return Object.fromEntries(keys.map((key) => [
+      key,
+      this.state.keyVersions[key] ?? this.state.entries[key]?.version ?? 0
+    ]));
+  }
+
+  public assertExpectedVersions(keys: string[], expectedVersions: Record<string, number>): void {
+    const conflicts = keys.flatMap((key) => {
+      const expectedVersion = expectedVersions[key];
+      const actualVersion = this.state.keyVersions[key] ?? this.state.entries[key]?.version ?? 0;
+      return expectedVersion === actualVersion ? [] : [{ key, expectedVersion, actualVersion }];
+    });
+    if (conflicts.length > 0) throw new SyncVersionConflictError(conflicts);
   }
 
   public hasKey(key: string): boolean {
@@ -584,13 +633,14 @@ export class ServerDataSyncStore {
   public setKey(
     key: string,
     value: unknown,
-    actorUsername: string
+    actorUsername: string,
+    expectedVersion?: number
   ): { entry: SyncEntry; revision: number } {
     if (isLegacyRbacSyncKey(key)) {
       throw new Error(`Legacy RBAC sync key "${key}" is no longer supported.`);
     }
-    const prev = this.state.entries[key];
-    const nextVersion = (prev?.version ?? 0) + 1;
+    if (expectedVersion !== undefined) this.assertExpectedVersions([key], { [key]: expectedVersion });
+    const nextVersion = (this.state.keyVersions[key] ?? this.state.entries[key]?.version ?? 0) + 1;
     const nextRevision = this.state.revision + 1;
     const entry: SyncEntry = {
       value,
@@ -601,7 +651,8 @@ export class ServerDataSyncStore {
     const nextState: AppStateDatabase = {
       ...this.state,
       revision: nextRevision,
-      entries: { ...this.state.entries, [key]: entry }
+      entries: { ...this.state.entries, [key]: entry },
+      keyVersions: { ...this.state.keyVersions, [key]: nextVersion }
     };
     this.persist(nextState);
     this.state = nextState;
@@ -611,7 +662,8 @@ export class ServerDataSyncStore {
   public setBatch(
     updates: Record<string, unknown>,
     deletes: string[] = [],
-    actorUsername: string
+    actorUsername: string,
+    expectedVersions?: Record<string, number>
   ): {
     updated: Record<string, SyncEntry>;
     deleted: string[];
@@ -621,22 +673,26 @@ export class ServerDataSyncStore {
     if (legacyKey) {
       throw new Error(`Legacy RBAC sync key "${legacyKey}" is no longer supported.`);
     }
+    const changedKeys = [...new Set([...Object.keys(updates), ...deletes])].filter(isValidSyncKey);
+    if (expectedVersions) this.assertExpectedVersions(changedKeys, expectedVersions);
     const updated: Record<string, SyncEntry> = {};
     const deleted: string[] = [];
     const now = new Date().toISOString();
     const entries = { ...this.state.entries };
+    const keyVersions = { ...this.state.keyVersions };
     let changed = false;
 
     for (const [key, value] of Object.entries(updates)) {
       if (!isValidSyncKey(key)) continue;
-      const prev = entries[key];
+      const nextVersion = (keyVersions[key] ?? entries[key]?.version ?? 0) + 1;
       const entry: SyncEntry = {
         value,
-        version: (prev?.version ?? 0) + 1,
+        version: nextVersion,
         updatedAt: now,
         updatedBy: actorUsername
       };
       entries[key] = entry;
+      keyVersions[key] = nextVersion;
       updated[key] = entry;
       changed = true;
     }
@@ -644,6 +700,7 @@ export class ServerDataSyncStore {
     for (const key of deletes) {
       if (!isValidSyncKey(key)) continue;
       if (Object.prototype.hasOwnProperty.call(entries, key)) {
+        keyVersions[key] = (keyVersions[key] ?? entries[key].version) + 1;
         delete entries[key];
         deleted.push(key);
         changed = true;
@@ -651,7 +708,7 @@ export class ServerDataSyncStore {
     }
 
     if (changed) {
-      const nextState = { ...this.state, entries, revision: this.state.revision + 1 };
+      const nextState = { ...this.state, entries, keyVersions, revision: this.state.revision + 1 };
       this.persist(nextState);
       this.state = nextState;
     }
@@ -663,24 +720,45 @@ export class ServerDataSyncStore {
     };
   }
 
-  public deleteKey(key: string): { deleted: boolean; revision: number } {
+  public deleteKey(key: string, expectedVersion?: number): { deleted: boolean; revision: number; version: number } {
     if (isLegacyRbacSyncKey(key)) {
       throw new Error(`Legacy RBAC sync key "${key}" is no longer supported.`);
     }
+    if (expectedVersion !== undefined) this.assertExpectedVersions([key], { [key]: expectedVersion });
     if (!this.hasKey(key)) {
-      return { deleted: false, revision: this.state.revision };
+      return { deleted: false, revision: this.state.revision, version: this.state.keyVersions[key] ?? 0 };
     }
-    delete this.state.entries[key];
-    this.state.revision += 1;
-    this.persist();
-    return { deleted: true, revision: this.state.revision };
+    const version = (this.state.keyVersions[key] ?? this.state.entries[key].version) + 1;
+    const entries = { ...this.state.entries };
+    delete entries[key];
+    const nextState: AppStateDatabase = {
+      ...this.state,
+      entries,
+      keyVersions: { ...this.state.keyVersions, [key]: version },
+      revision: this.state.revision + 1
+    };
+    this.persist(nextState);
+    this.state = nextState;
+    return { deleted: true, revision: nextState.revision, version };
   }
 
-  public resetAll(): number {
-    this.state.entries = {};
-    this.state.revision += 1;
-    this.persist();
-    return this.state.revision;
+  public resetAll(expectedRevision: number): number {
+    if (expectedRevision !== this.state.revision) {
+      throw new SyncRevisionConflictError(expectedRevision, this.state.revision);
+    }
+    const keyVersions = { ...this.state.keyVersions };
+    for (const [key, entry] of Object.entries(this.state.entries)) {
+      keyVersions[key] = (keyVersions[key] ?? entry.version) + 1;
+    }
+    const nextState: AppStateDatabase = {
+      ...this.state,
+      entries: {},
+      keyVersions,
+      revision: this.state.revision + 1
+    };
+    this.persist(nextState);
+    this.state = nextState;
+    return nextState.revision;
   }
 
   public hydrateFromCloud(
@@ -688,18 +766,21 @@ export class ServerDataSyncStore {
   ): { appliedKeys: string[]; revision: number } {
     const appliedKeys: string[] = [];
     const entries = { ...this.state.entries };
+    const keyVersions = { ...this.state.keyVersions };
     for (const [key, item] of Object.entries(cloudEntries)) {
       if (!isValidSyncKey(key) || isLegacyRbacSyncKey(key) || !item || item.value === undefined) continue;
       const existing = entries[key];
       if (key === KUNCI_RFQ_WEBSITE) {
         const gabungan = gabungkanRfqWebsite(existing?.value, item.value);
         if (existing && Array.isArray(existing.value) && gabungan.length === existing.value.length) continue;
+        const version = Math.max((keyVersions[key] ?? existing?.version ?? 0) + 1, item.version ?? 1);
         entries[key] = {
           value: gabungan,
-          version: Math.max((existing?.version ?? 0) + 1, item.version ?? 1),
+          version,
           updatedAt: new Date().toISOString(),
           updatedBy: 'firebase-sync'
         };
+        keyVersions[key] = version;
         appliedKeys.push(key);
         continue;
       }
@@ -711,17 +792,19 @@ export class ServerDataSyncStore {
         ((item.version ?? 0) > (existing.version ?? 0) && incomingTime >= existingTime);
 
       if (shouldApply) {
+        const version = Math.max((keyVersions[key] ?? existing?.version ?? 0) + 1, item.version ?? 1);
         entries[key] = {
           value: item.value,
-          version: Math.max((existing?.version ?? 0) + 1, item.version ?? 1),
+          version,
           updatedAt: item.updatedAt || new Date().toISOString(),
           updatedBy: item.updatedBy || 'firebase-sync'
         };
+        keyVersions[key] = version;
         appliedKeys.push(key);
       }
     }
     if (appliedKeys.length > 0) {
-      const nextState = { ...this.state, entries, revision: this.state.revision + 1 };
+      const nextState = { ...this.state, entries, keyVersions, revision: this.state.revision + 1 };
       this.persist(nextState);
       this.state = nextState;
     }
