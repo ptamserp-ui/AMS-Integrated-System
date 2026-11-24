@@ -26,8 +26,21 @@ export interface CustomerIdentity {
 
 interface CustomerRecord extends CustomerAccount {
   firebaseUid: string;
+  pelangganId?: string;
   privacyVersion: string;
   privacyAcceptedAt: string;
+}
+
+export interface CustomerStaffSummary {
+  id: string;
+  email: string;
+  nama: string;
+  telepon: string;
+  perusahaan: string;
+  status: CustomerAccount['status'];
+  pelangganId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CustomerSession {
@@ -66,6 +79,7 @@ function validDatabase(value: unknown): value is CustomerDatabase {
     if (!record(c) || customerProfileError(c) || typeof c.id !== 'string' || !c.id ||
         typeof c.firebaseUid !== 'string' || !c.firebaseUid || !validEmail(c.email) ||
         c.email !== c.email.toLowerCase() || c.teleponTerverifikasi !== false ||
+        (c.pelangganId !== undefined && (typeof c.pelangganId !== 'string' || !c.pelangganId)) ||
         !['menunggu-email', 'menunggu-verifikasi', 'aktif', 'ditangguhkan'].includes(String(c.status)) ||
         typeof c.privacyVersion !== 'string' || !c.privacyVersion ||
         !dateString(c.privacyAcceptedAt) || !dateString(c.createdAt) || !dateString(c.updatedAt) ||
@@ -146,9 +160,9 @@ export class ServerCustomerStore {
     }
   }
 
-  private save(next: CustomerDatabase, action?: string, customerId?: string) {
+  private save(next: CustomerDatabase, action?: string, customerId?: string, actor?: string) {
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
-    const event = { id: crypto.randomUUID(), at: new Date(this.now()).toISOString(), action, customerId, revision: this.data.revision + 1 };
+    const event = { id: crypto.randomUUID(), at: new Date(this.now()).toISOString(), action, customerId, actor, revision: this.data.revision + 1 };
     const audit = (phase: string) => fs.appendFileSync(this.auditFile, JSON.stringify({ ...event, phase }) + '\n', { mode: 0o600 });
     if (action) audit('attempt');
     next.revision = this.data.revision + 1;
@@ -168,8 +182,47 @@ export class ServerCustomerStore {
   }
 
   private publicAccount(customer: CustomerRecord): CustomerAccount {
-    const { firebaseUid: _uid, privacyVersion: _version, privacyAcceptedAt: _accepted, ...account } = customer;
+    const { firebaseUid: _uid, pelangganId: _pelangganId, privacyVersion: _version, privacyAcceptedAt: _accepted, ...account } = customer;
     return structuredClone(account);
+  }
+
+  listCustomersForStaff(): CustomerStaffSummary[] {
+    return this.data.customers.map((customer) => ({
+      id: customer.id, email: customer.email, nama: customer.nama, telepon: customer.telepon,
+      perusahaan: customer.perusahaan, status: customer.status, pelangganId: customer.pelangganId,
+      createdAt: customer.createdAt, updatedAt: customer.updatedAt
+    }));
+  }
+
+  getCustomerForStaff(customerId: string): CustomerStaffSummary | null {
+    return this.listCustomersForStaff().find((customer) => customer.id === customerId) ?? null;
+  }
+
+  linkCustomerToB2B(customerId: string, pelangganId: string, actor: string): CustomerStaffSummary {
+    const next = structuredClone(this.data);
+    const customer = next.customers.find((entry) => entry.id === customerId);
+    if (!customer) throw new CustomerError(404, 'NOT_FOUND', 'Akun customer tidak ditemukan.');
+    if (customer.status === 'ditangguhkan') throw new CustomerError(409, 'ACCOUNT_SUSPENDED', 'Akun ditangguhkan; tinjau dan aktifkan melalui alur pemulihan staf.');
+    if (customer.status === 'menunggu-email') throw new CustomerError(409, 'EMAIL_UNVERIFIED', 'Verifikasi email customer sebelum mengaktifkan akun.');
+    const existing = next.customers.find((entry) => entry.id !== customerId && entry.pelangganId === pelangganId);
+    if (existing) throw new CustomerError(409, 'B2B_ACCOUNT_LINKED', 'Pelanggan B2B tersebut sudah ditautkan ke akun lain.');
+    customer.pelangganId = pelangganId;
+    customer.status = 'aktif';
+    customer.updatedAt = new Date(this.now()).toISOString();
+    this.save(next, 'CUSTOMER_LINKED_TO_B2B', customerId, actor);
+    return this.getCustomerForStaff(customerId)!;
+  }
+
+  suspendCustomer(customerId: string, actor: string): CustomerStaffSummary {
+    const next = structuredClone(this.data);
+    const customer = next.customers.find((entry) => entry.id === customerId);
+    if (!customer) throw new CustomerError(404, 'NOT_FOUND', 'Akun customer tidak ditemukan.');
+    if (customer.status === 'ditangguhkan') return this.getCustomerForStaff(customerId)!;
+    customer.status = 'ditangguhkan';
+    customer.updatedAt = new Date(this.now()).toISOString();
+    next.sessions = next.sessions.filter((session) => session.customerId !== customerId);
+    this.save(next, 'CUSTOMER_SUSPENDED', customerId, actor);
+    return this.getCustomerForStaff(customerId)!;
   }
 
   register(identity: CustomerIdentity, input: CustomerProfileInput, privacyVersion: string): CustomerAccount {

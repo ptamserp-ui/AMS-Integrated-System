@@ -48,6 +48,7 @@ import { loadDeploymentEnv, resolveDeploymentEnvironment } from './server/envLoa
 import { verifyEmployeeFirebaseToken } from './server/firebaseIdentity';
 import { createFirebaseCustomerIdentity } from './server/customerAuth';
 import { createCustomerRouter } from './server/customerRoutes';
+import { createCustomerErpRouter } from './server/customerErpRoutes';
 import { ServerCustomerStore } from './server/customerStore';
 import type { CustomerPortalStatus } from './src/types/customerPortal';
 import { buildWindowsDeploymentGuides } from './server/deploymentGuides';
@@ -733,6 +734,27 @@ async function startServer() {
     store: customerStore, identity: customerIdentity, status: customerStatus,
     origin: customerStore ? process.env.APP_URL?.trim() : undefined,
     catalog: bacaSnapshot
+  }));
+
+  app.use('/api/erp/portal', createCustomerErpRouter({
+    store: customerStore,
+    origin: process.env.APP_URL?.trim(),
+    requireView: requirePermission('sales-marketing', 'view'),
+    requireUpdate: requirePermission('sales-marketing', 'update'),
+    findB2BCustomers: (id) => {
+      const customers = dataSyncStore.getEntry('sales_pelanggan')?.value;
+      if (!Array.isArray(customers)) return [];
+      return customers.flatMap((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const customer = value as Record<string, unknown>;
+        if (customer.id !== id || typeof customer.namaInstalasi !== 'string') return [];
+        return [{
+          id,
+          nama: customer.namaInstalasi,
+          status: customer.statusPelanggan === 'Aktif' ? 'Aktif' : 'Non-aktif'
+        }];
+      });
+    }
   }));
 
   app.use(express.json({ limit: '10mb' }));

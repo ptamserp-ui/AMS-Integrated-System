@@ -43,7 +43,7 @@ export interface CustomerCatalogItem {
   satuan: string;
   hargaTayang?: string;
   referensiHarga?: string;
-  stokLabel: 'tersedia' | 'tidak-diketahui';
+  stokLabel: 'perlu-konfirmasi';
   imageUrls: string[];
   varian: Array<{
     id: string;

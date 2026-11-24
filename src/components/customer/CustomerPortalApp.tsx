@@ -5,7 +5,7 @@ import {
 } from 'firebase/auth';
 import {
   ArrowLeft, Bell, Building2, CheckCircle2, CircleUserRound, KeyRound, LogOut, Mail,
-  Minus, PackageSearch, Plus, ShieldCheck, ShoppingBag, Trash2
+  Minus, PackageSearch, Pencil, Plus, Search, ShieldCheck, ShoppingBag, Trash2, X
 } from 'lucide-react';
 import { customerApi, CustomerApiError } from '../../services/customerPortal';
 import { customerFirebaseMessage, getCustomerFirebase } from '../../services/customerFirebase';
@@ -54,10 +54,14 @@ export default function CustomerPortalApp() {
   const [categories, setCategories] = useState<string[]>([]);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [category, setCategory] = useState('');
+  const [detailProduct, setDetailProduct] = useState<CustomerCatalogItem | null>(null);
+  const [detailVariantId, setDetailVariantId] = useState('');
+  const catalogRequestRef = useRef(0);
   const [cart, setCart] = useState<CustomerCart>({ items: [], revision: 0, updatedAt: '' });
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [notifications, setNotifications] = useState<Array<{ id: string; judul: string; pesan: string; dibaca: boolean; createdAt: string }>>([]);
   const [addressForm, setAddressForm] = useState({ label: '', penerima: '', telepon: '', alamat: '', kota: '', provinsi: '', kodePos: '', isUtama: false });
+  const [editingAddressId, setEditingAddressId] = useState<string | undefined>();
   const heading = useRef<HTMLHeadingElement>(null);
 
   const go = (next: Page) => {
@@ -86,6 +90,8 @@ export default function CustomerPortalApp() {
     setCart({ items: [], revision: 0, updatedAt: '' });
     setAddresses([]);
     setNotifications([]);
+    setDetailProduct(null);
+    setEditingAddressId(undefined);
   };
   useEffect(() => {
     const pop = () => setPage(initialPage());
@@ -126,18 +132,19 @@ export default function CustomerPortalApp() {
     return () => { active = false; };
   }, []);
 
-  const run = async (action: () => Promise<void>) => {
-    if (busyRef.current) return;
+  const run = async (action: () => Promise<void>): Promise<boolean> => {
+    if (busyRef.current) return false;
     busyRef.current = true;
     setBusy(true);
     setError('');
     setNotice('');
-    try { await action(); } catch (e) {
+    try { await action(); return true; } catch (e) {
       if (e instanceof CustomerApiError && e.status === 401 && account) {
         clearAccount();
         go('masuk');
       }
       setError(customerFirebaseMessage(e));
+      return false;
     } finally { busyRef.current = false; setBusy(false); }
   };
   const firebase = () => {
@@ -213,15 +220,17 @@ export default function CustomerPortalApp() {
     setNotice(all ? 'Anda telah keluar dari semua perangkat.' : 'Anda telah keluar dari Customer Portal.');
   });
   const muatKatalog = async (query: string, selectedCategory: string) => {
+    const requestId = ++catalogRequestRef.current;
     const params = new URLSearchParams();
     if (query.trim()) params.set('q', query.trim());
     if (selectedCategory) params.set('kategori', selectedCategory);
     const result = await customerApi.catalog(params.size ? `?${params.toString()}` : '');
+    if (requestId !== catalogRequestRef.current) return;
     setCatalog(result.items);
     setCategories(result.categories);
   };
-  const tambahKeKeranjang = (item: CustomerCatalogItem) => void run(async () => {
-    const variant = item.varian[0];
+  const tambahKeKeranjang = (item: CustomerCatalogItem, variantId = item.varian[0]?.id) => run(async () => {
+    const variant = item.varian.find((entry) => entry.id === variantId);
     if (!variant) throw new Error('Produk ini belum memiliki varian SKU yang dapat dipesan.');
     const existing = cart.items.find((row) => row.produkId === item.id && row.varianId === variant.id);
     const next = [
@@ -231,6 +240,11 @@ export default function CustomerPortalApp() {
     const result = await customerApi.updateCart(next);
     setCart(result.cart);
     setNotice(`${item.nama} ditambahkan ke keranjang.`);
+  });
+  const bukaDetailProduk = (id: string) => void run(async () => {
+    const result = await customerApi.catalogDetail(id);
+    setDetailProduct(result.item);
+    setDetailVariantId(result.item.varian[0]?.id ?? '');
   });
   const ubahJumlahKeranjang = (produkId: string, varianId: string, jumlah: number) => void run(async () => {
     const next = cart.items
@@ -244,6 +258,17 @@ export default function CustomerPortalApp() {
     setAddresses(result.items);
     setNotice('Alamat berhasil dihapus.');
   });
+  const mulaiEditAlamat = (address: CustomerAddress) => {
+    setEditingAddressId(address.id);
+    setAddressForm({
+      label: address.label, penerima: address.penerima, telepon: address.telepon, alamat: address.alamat,
+      kota: address.kota, provinsi: address.provinsi, kodePos: address.kodePos, isUtama: address.isUtama
+    });
+  };
+  const resetFormAlamat = () => {
+    setEditingAddressId(undefined);
+    setAddressForm({ label: '', penerima: '', telepon: '', alamat: '', kota: '', provinsi: '', kodePos: '', isUtama: false });
+  };
   const field = (label: string, value: string, setter: (v: string) => void, options: { type?: string; required?: boolean; maxLength?: number; autoComplete?: string } = {}) => (
     <label className="block space-y-1.5 text-sm font-medium text-slate-700">
       <span>{label}</span>
@@ -316,22 +341,23 @@ export default function CustomerPortalApp() {
               </div>
             ) : account && actualPage === 'katalog' ? (
               <div className="mt-6 space-y-5">
-                <div className="grid gap-3 sm:grid-cols-[1fr_220px]">
+                <form className="grid gap-3 sm:grid-cols-[1fr_220px_auto]" onSubmit={(event) => {
+                  event.preventDefault();
+                  void run(() => muatKatalog(catalogQuery, category));
+                }}>
                   <label className="block">
                     <span className="sr-only">Cari produk</span>
-                    <input className={inputClass} value={catalogQuery} onChange={(e) => {
-                      setCatalogQuery(e.target.value);
-                      void muatKatalog(e.target.value, category);
-                    }} placeholder="Cari nama, merek, SKU atau izin edar" />
+                    <input className={inputClass} value={catalogQuery} onChange={(e) => setCatalogQuery(e.target.value)} placeholder="Cari nama, merek, SKU atau izin edar" />
                   </label>
                   <select className={inputClass} value={category} onChange={(e) => {
                     setCategory(e.target.value);
-                    void muatKatalog(catalogQuery, e.target.value);
+                    void run(() => muatKatalog(catalogQuery, e.target.value));
                   }}>
                     <option value="">Semua kategori</option>
                     {categories.map((item) => <option key={item} value={item}>{item}</option>)}
                   </select>
-                </div>
+                  <button disabled={busy} className={secondaryClass}><Search className="mr-2 inline h-4 w-4" />Cari</button>
+                </form>
                 {catalog.length === 0 ? (
                   <div className="rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
                     <PackageSearch className="mx-auto mb-3 h-8 w-8 text-slate-300" /> Tidak ada produk yang cocok.
@@ -348,10 +374,10 @@ export default function CustomerPortalApp() {
                           <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">{item.kategori}</p>
                           <h2 className="font-bold leading-snug">{item.nama}</h2>
                           <p className="line-clamp-2 text-sm text-slate-600">{item.spesifikasi || item.tipeModel}</p>
-                          <p className="text-xs text-slate-500">{item.nomorIzinEdar || 'Izin edar tidak tersedia'} · {item.stokLabel === 'tersedia' ? 'Stok tersedia' : 'Ketersediaan perlu dikonfirmasi'}</p>
+                          <p className="text-xs text-slate-500">{item.nomorIzinEdar || 'Izin edar tidak tersedia'} · Ketersediaan dikonfirmasi saat penawaran</p>
                           <p className="text-sm font-semibold text-slate-800">{item.hargaTayang || 'Harga melalui penawaran sales'}</p>
-                          <button disabled={busy || item.varian.length === 0} className={`${primaryClass} w-full`} onClick={() => tambahKeKeranjang(item)}>
-                            <Plus className="mr-2 inline h-4 w-4" /> Tambah ke keranjang
+                          <button disabled={busy} className={`${primaryClass} w-full`} onClick={() => bukaDetailProduk(item.id)}>
+                            <Plus className="mr-2 inline h-4 w-4" /> Lihat detail & pilih varian
                           </button>
                         </div>
                       </article>
@@ -391,15 +417,19 @@ export default function CustomerPortalApp() {
                 {addresses.map((address) => (
                   <div key={address.id} className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-slate-200 p-4">
                     <div><p className="font-semibold">{address.label}{address.isUtama ? ' · Utama' : ''}</p><p className="mt-1 text-sm text-slate-600">{address.penerima} · {address.telepon}<br />{address.alamat}, {address.kota}, {address.provinsi} {address.kodePos}</p></div>
-                    <button className={secondaryClass} onClick={() => hapusAlamat(address.id)}>Hapus</button>
+                    <div className="flex gap-2">
+                      <button className={secondaryClass} onClick={() => mulaiEditAlamat(address)}><Pencil className="mr-2 inline h-4 w-4" />Ubah</button>
+                      <button className={secondaryClass} onClick={() => hapusAlamat(address.id)}>Hapus</button>
+                    </div>
                   </div>
                 ))}
                 <form className="space-y-3 border-t border-slate-200 pt-5" onSubmit={(event) => { event.preventDefault(); void run(async () => {
-                  const result = await customerApi.saveAddress(addressForm);
+                  const result = await customerApi.saveAddress({ ...addressForm, id: editingAddressId });
                   setAddresses(result.items);
-                  setAddressForm({ label: '', penerima: '', telepon: '', alamat: '', kota: '', provinsi: '', kodePos: '', isUtama: false });
-                  setNotice('Alamat berhasil disimpan.');
+                  resetFormAlamat();
+                  setNotice(editingAddressId ? 'Alamat berhasil diperbarui.' : 'Alamat berhasil disimpan.');
                 }); }}>
+                  <h2 className="font-semibold">{editingAddressId ? 'Ubah alamat' : 'Tambah alamat'}</h2>
                   {field('Nama alamat', addressForm.label, (value) => setAddressForm((old) => ({ ...old, label: value })), { required: true, maxLength: 60 })}
                   {field('Nama penerima', addressForm.penerima, (value) => setAddressForm((old) => ({ ...old, penerima: value })), { required: true, maxLength: 120 })}
                   {field('Nomor telepon penerima', addressForm.telepon, (value) => setAddressForm((old) => ({ ...old, telepon: value })), { required: true, maxLength: 40 })}
@@ -410,7 +440,10 @@ export default function CustomerPortalApp() {
                   </div>
                   {field('Kode pos', addressForm.kodePos, (value) => setAddressForm((old) => ({ ...old, kodePos: value })), { required: true, maxLength: 10 })}
                   <label className="flex items-center gap-3 text-sm text-slate-600"><input type="checkbox" className="h-5 w-5 accent-teal-700" checked={addressForm.isUtama} onChange={(e) => setAddressForm((old) => ({ ...old, isUtama: e.target.checked }))} /> Jadikan alamat utama</label>
-                  <button disabled={busy} className={primaryClass}>{busy ? 'Menyimpan...' : 'Simpan alamat'}</button>
+                  <div className="flex flex-wrap gap-2">
+                    <button disabled={busy} className={primaryClass}>{busy ? 'Menyimpan...' : editingAddressId ? 'Perbarui alamat' : 'Simpan alamat'}</button>
+                    {editingAddressId && <button type="button" disabled={busy} className={secondaryClass} onClick={resetFormAlamat}>Batal</button>}
+                  </div>
                 </form>
               </div>
             ) : account && actualPage === 'notifikasi' ? (
@@ -499,6 +532,53 @@ export default function CustomerPortalApp() {
           {account && <p className="mt-5 flex items-center gap-2 text-xs text-slate-500"><Building2 className="h-4 w-4" /> Remedi-AMS Customer Portal</p>}
         </main>
       </div>
+      {account && detailProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setDetailProduct(null);
+        }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="product-detail-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">{detailProduct.kategori}</p>
+                <h2 id="product-detail-title" className="mt-1 text-xl font-bold">{detailProduct.nama}</h2>
+              </div>
+              <button type="button" className={secondaryClass} aria-label="Tutup detail produk" onClick={() => setDetailProduct(null)}><X className="h-5 w-5" /></button>
+            </div>
+            {detailProduct.imageUrls[0] && <img src={detailProduct.imageUrls[0]} alt={detailProduct.nama} className="mt-5 max-h-64 w-full rounded-xl bg-slate-50 object-contain" />}
+            <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+              <div><dt className="text-slate-500">Model</dt><dd className="font-medium">{detailProduct.tipeModel || '-'}</dd></div>
+              <div><dt className="text-slate-500">Produsen</dt><dd className="font-medium">{detailProduct.produsen || '-'}</dd></div>
+              <div><dt className="text-slate-500">Izin edar</dt><dd className="font-medium">{detailProduct.nomorIzinEdar || 'Informasi tidak tersedia'}</dd></div>
+              <div><dt className="text-slate-500">Status izin edar</dt><dd className="font-medium">{detailProduct.statusIzinEdar || 'Informasi tidak tersedia'}</dd></div>
+            </dl>
+            {detailProduct.spesifikasi && <div className="mt-4"><h3 className="text-sm font-semibold">Spesifikasi</h3><p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-slate-600">{detailProduct.spesifikasi}</p></div>}
+            <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              Harga akhir dan ketersediaan dikonfirmasi oleh tim sales melalui penawaran.
+            </div>
+            {detailProduct.varian.length > 0 && (
+              <div className="mt-5 space-y-3">
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Pilih SKU / varian</span>
+                  <select className={inputClass} value={detailVariantId} onChange={(event) => setDetailVariantId(event.target.value)}>
+                    {detailProduct.varian.map((variant) => (
+                      <option key={variant.id} value={variant.id}>
+                        {[variant.kodeSKU, variant.tipeModel, variant.nomorIzinEdar].filter(Boolean).join(' · ') || variant.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button disabled={busy || !detailVariantId} className={`${primaryClass} w-full`} onClick={() => {
+                  void tambahKeKeranjang(detailProduct, detailVariantId).then((saved) => {
+                    if (saved) setDetailProduct(null);
+                  });
+                }}>
+                  <Plus className="mr-2 inline h-4 w-4" /> Tambahkan varian ke keranjang
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
 }

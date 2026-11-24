@@ -107,7 +107,7 @@ Instance karyawan dipilih dengan nama `[DEFAULT]`, bukan urutan pertama `getApps
 - **Rate limit (memori, dengan batas jumlah kunci):** daftar 5/jam/IP; tukar sesi 20/15 menit/IP; pesanan 10/jam/akun; unggah bukti 10/jam/akun.
 - **Validasi input:** validator bersama untuk klien dan server, batas panjang setiap kolom, maksimal 30 baris keranjang, dan jumlah bilangan bulat 1–1.000.000 (memakai `jumlahRfqValid`).
 - **XSS:** seluruh teks dirender sebagai teks React tanpa `dangerouslySetInnerHTML`. Nama berkas unggahan tidak pernah dipakai sebagai path.
-- **Audit:** aktivitas penting customer ditulis ke `customer-portal-audit.jsonl` (append-only, tanpa token, password, email atau isi profil). Catatan `attempt` ditulis sebelum commit dan `committed` setelahnya, dengan ID event dan revisi yang sama. Jika penulisan audit gagal, API melaporkan kegagalan; `attempt` tanpa `committed` harus direkonsiliasi dengan revisi database, bukan dianggap sukses atau gagal secara otomatis. Audit staf RBAC menyusul bersama endpoint staf.
+- **Audit:** aktivitas penting customer dan mutasi staf portal ditulis ke `customer-portal-audit.jsonl` (append-only, tanpa token, password, email atau isi profil; mutasi staf mencatat username pelaku). Catatan `attempt` ditulis sebelum commit dan `committed` setelahnya, dengan ID event dan revisi yang sama. Jika penulisan audit gagal, API melaporkan kegagalan; `attempt` tanpa `committed` harus direkonsiliasi dengan revisi database, bukan dianggap sukses atau gagal secara otomatis. Log ini terpisah dari audit RBAC umum.
 - **Pemisahan provider Firebase (wajib sebelum Email/Password diaktifkan):** `/api/auth/firebase-login` dan `/api/firebase/hydrate` hanya menerima token dengan `firebase.sign_in_provider == 'google.com'`, sesuai tombol yang tersedia saat ini. Fungsi admin di Firestore Rules juga mewajibkan provider Google. Alasannya, token Email/Password customer tidak boleh menjadi jalur masuk ERP atau Firestore, walaupun emailnya sama dengan email karyawan. Perubahan ini dilakukan bersama tes regresi login karyawan, hydrate dan rules.
 
 ### 3.4 Status akun customer
@@ -116,7 +116,7 @@ Instance karyawan dipilih dengan nama `[DEFAULT]`, bukan urutan pertama `getApps
 | --- | --- | --- |
 | `menunggu-email` | Profil dibuat, email belum diverifikasi | Belum dapat masuk portal; hanya kirim ulang verifikasi |
 | `menunggu-verifikasi` | Email terverifikasi, menunggu tautan pelanggan B2B oleh sales | Katalog, keranjang, profil, alamat, notifikasi; belum dapat mengajukan pesanan |
-| `aktif` | Tertaut ke `sales_pelanggan` | Semua fitur portal |
+| `aktif` | Tertaut ke `sales_pelanggan` | Akses ke fitur portal yang sudah tersedia; checkout, pesanan, faktur dan pembayaran belum dibangun |
 | `ditangguhkan` | Dinonaktifkan oleh staf | Sesi dicabut; login ditolak dengan pesan umum |
 
 Jenis akun: `bisnis` (dengan data perusahaan) dan `perorangan`. Cara mencatat pelanggan perorangan di ERP masih memerlukan keputusan (lihat [bagian 7](#7-tindakan-dan-keputusan-yang-masih-diperlukan)).
@@ -187,57 +187,48 @@ dibatalkan: lihat aturan pembatalan di bawah.
 
 ### 3.7 Notifikasi
 
-- Notifikasi dalam aplikasi dibuat server untuk pesanan baru, penawaran dikirim, perubahan status pesanan, verifikasi atau penolakan pembayaran, dan perubahan status akun.
-- Pengumuman perusahaan dibuat staf yang memiliki izin `sales-marketing:publish`.
-- Pembaruan memakai refetch saat tab aktif kembali dan polling 30 detik saat tab terlihat. Kanal WebSocket khusus customer dievaluasi setelah alur dasar stabil.
-- Notifikasi email selain email autentikasi Firebase belum termasuk lingkup.
+- **Belum diimplementasikan:** notifikasi pesanan, penawaran, pembayaran, perubahan status akun, dan pengumuman perusahaan.
+- `GET /api/customer/notifikasi` saat ini hanya mengembalikan daftar kosong; endpoint ini tidak menyiratkan bahwa event sudah dibuat.
+- Pengumuman direncanakan untuk staf dengan izin `sales-marketing:publish`; email di luar email autentikasi Firebase belum termasuk.
+- Refetch saat tab aktif dan polling 30 detik adalah rancangan. Kanal WebSocket khusus customer dievaluasi setelah alur dasar stabil.
 
-### 3.8 Rancangan API
+### 3.8 API tersedia dan rancangan
 
-**Customer** (sesi `ams_customer_session`, semua dibatasi ke `customerId` sesi):
+**Customer — tersedia lokal** (selain `/status`, rute pendaftaran, sesi dan keluar, endpoint memerlukan cookie sesi `ams_customer_session`; API portal selain `/status` mengembalikan 404 saat flag nonaktif):
 
 | Endpoint | Fungsi |
 | --- | --- |
 | `GET /api/customer/status` | Publik: apakah portal aktif (untuk menampilkan pilihan login) |
 | `POST /api/customer/auth/daftar` | Membuat profil customer dari ID token terverifikasi |
 | `POST /api/customer/auth/sesi` | Menukar ID token menjadi sesi portal |
-| `POST /api/customer/auth/keluar` | Mencabut sesi aktif |
-| `POST /api/customer/auth/keluar-semua` | Mencabut semua sesi milik customer |
-| `GET /api/customer/auth/saya` | Profil ringkas dan status akun |
+| `POST /api/customer/auth/keluar`, `/api/customer/auth/keluar-semua` | Mencabut sesi aktif atau semua sesi milik customer |
+| `GET /api/customer/auth/saya`, `GET /api/customer/profil` | Profil ringkas dan status akun |
 | `GET /api/customer/katalog`, `GET /api/customer/katalog/:id` | Katalog terbit: pencarian, kategori, detail dan label ketersediaan |
-| `GET` / `PUT /api/customer/keranjang` | Keranjang server per customer |
-| `GET` / `POST /api/customer/pesanan` | Riwayat dan pengajuan pesanan |
-| `GET /api/customer/pesanan/:id` | Detail pesanan milik sendiri |
-| `POST /api/customer/pesanan/:id/setujui`, `/tolak`, `/batalkan` | Keputusan customer atas penawaran |
-| `GET /api/customer/tagihan` | Faktur dan status pembayaran dari relasi tervalidasi |
-| `POST /api/customer/tagihan/:transaksiId/bukti` | Unggah bukti bayar (ID internal transaksi milik sendiri, bukan nomor faktur) |
-| `GET /api/customer/bukti/:id` | Unduh bukti milik sendiri |
-| `GET` / `PATCH /api/customer/profil` | Profil dan data perusahaan (field terbatas) |
+| `GET` / `PUT /api/customer/keranjang` | Keranjang server per customer, tanpa checkout |
 | `GET` / `POST` / `PATCH` / `DELETE /api/customer/alamat[/:id]` | Alamat pengiriman |
-| `GET /api/customer/notifikasi`, `POST /api/customer/notifikasi/:id/dibaca`, `/baca-semua` | Pusat notifikasi |
+| `PATCH /api/customer/profil` | Memperbarui nama, telepon belum terverifikasi dan perusahaan |
+| `GET /api/customer/notifikasi` | Endpoint tersedia, saat ini selalu mengembalikan daftar kosong |
 
-**Staf ERP** (sesi `ams_session` + `requirePermission`; semua mutasi wajib lolos pemeriksaan Origin yang sama):
+**Rancangan customer API — belum tersedia:** pengajuan/riwayat/detail pesanan, keputusan penawaran, tagihan, unggah/unduh bukti bayar, dan operasi baca notifikasi.
+
+**Staf ERP — tersedia lokal** (sesi `ams_session` + `requirePermission`; semua mutasi wajib lolos pemeriksaan Origin yang sama):
 
 | Endpoint | Izin |
 | --- | --- |
-| `GET /api/erp/portal/akun` | `sales-marketing:view` |
-| `POST /api/erp/portal/akun/:id/verifikasi` (dengan `pelangganId`), `/tangguhkan`, `/aktifkan` | `sales-marketing:publish` |
-| `GET /api/erp/portal/pesanan`, `GET /api/erp/portal/pesanan/:id` | `sales-marketing:view` |
-| `POST /api/erp/portal/pesanan/:id/penawaran`, `/batalkan`, `/setujui-kredit` | `sales-marketing:publish` |
-| `POST /api/erp/portal/pesanan/:id/konversi` | `sales-marketing:create` |
-| `GET /api/erp/portal/rekonsiliasi` | `sales-marketing:view` |
-| `GET /api/erp/portal/pembayaran`, `GET /api/erp/portal/bukti/:id` | `finance-akuntansi:view` |
-| `POST /api/erp/portal/pembayaran/:id/verifikasi`, `/tolak` | `finance-akuntansi:approve` |
-| `POST /api/erp/portal/pengumuman` | `sales-marketing:publish` |
+| `GET /api/erp/portal/customers` | `sales-marketing:view` |
+| `POST /api/erp/portal/customers/:id/tautkan` (body: `pelangganId`) | `sales-marketing:update` |
+| `POST /api/erp/portal/customers/:id/tangguhkan` | `sales-marketing:update` |
 
-Tidak ada resource atau aksi RBAC baru. Resource `sales-marketing` tidak memiliki aksi `approve`, sehingga aksi `publish` dipakai sebagai gerbang tingkat manajer. Pada role bawaan, aksi ini dimiliki `sales_manager` dan `pjt`, tidak dimiliki `sales_medrep`. Belum ada role bawaan dengan `finance-akuntansi:approve`; role finance harus dibuat atau ditetapkan melalui Manajemen RBAC sebelum verifikasi pembayaran dapat dipakai. Data akun dan pesanan portal **tidak** dimasukkan ke kunci `/api/sync`, sehingga data pribadi customer tidak tersalin ke cache localStorage browser karyawan. Staf menerima event WebSocket ringan `portal:berubah` tanpa data pribadi untuk memicu refetch.
+Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_pelanggan` yang unik dan aktif; akun yang belum memverifikasi email atau telah ditangguhkan tidak dapat diaktifkan melalui endpoint ini. Satu pelanggan B2B tidak boleh tertaut ke lebih dari satu akun portal. Penangguhan mencabut sesi server customer dan dicatat bersama username staf. Endpoint ini belum memiliki UI staf dan belum menyediakan pemulihan akun yang ditangguhkan. Data akun portal **tidak** dimasukkan ke kunci `/api/sync`, sehingga data pribadi customer tidak tersalin ke cache localStorage browser karyawan.
+
+**Rancangan endpoint staf yang belum tersedia** (jangan dianggap sebagai fitur berjalan): inbox pesanan/penawaran, persetujuan kredit, konversi Sales Order, rekonsiliasi, pembayaran, pengumuman dan notifikasi. Aksi `publish` dimiliki `sales_manager`/`pjt`, bukan `sales_medrep`; role bawaan finance belum memiliki `finance-akuntansi:approve`. Seluruh workflow tersebut masih memerlukan implementasi backend, UI dan validasi sebelum checkout portal diaktifkan.
 
 ### 3.9 Frontend dan UI/UX
 
 - `src/main.tsx`: path `/akun` memuat `CustomerPortalApp` secara lazy sebagai bundle terpisah yang tidak memuat layanan sinkronisasi ERP (`pocketbase.ts`).
-- Rute portal: `/akun/masuk`, `/akun/daftar`, `/akun/lupa-sandi`, `/akun` (ringkasan), `/akun/katalog`, `/akun/katalog/:id`, `/akun/keranjang`, `/akun/pesanan`, `/akun/pesanan/:id`, `/akun/tagihan`, `/akun/profil`, `/akun/notifikasi`.
+- Rute UI yang tersedia: `/akun/masuk`, `/akun/daftar`, `/akun/lupa-sandi`, `/akun/verifikasi`, `/akun` (ringkasan), `/akun/katalog`, `/akun/katalog/:id`, `/akun/keranjang`, `/akun/alamat`, `/akun/profil`, dan `/akun/notifikasi` (endpoint notifikasi masih kosong). Halaman pesanan dan tagihan belum dibangun.
 - Halaman depan: pilihan login dua kartu yang responsif. Kartu karyawan membuka `KartuMasuk` existing.
-- ERP: tab **Portal Customer** pada modul Sales & Marketing (akun menunggu verifikasi, pesanan masuk, penawaran, proses ke Sales Order) dan tab **Bukti Bayar Portal** pada modul Finance.
+- ERP: tab **Portal Customer** pada modul Sales & Marketing dan tab **Bukti Bayar Portal** pada modul Finance merupakan rancangan; belum tersedia di UI. API staf yang telah tersedia dijelaskan pada bagian 3.8.
 - Identitas visual: logo dan warna brand dari identitas website CMS. Layout bersih dengan header dan navigasi samping di desktop, navigasi bawah di mobile, serta tipografi yang mudah dibaca. Tampilan dibuat berbeda dari dashboard ERP internal.
 - Aksesibilitas: target sentuh minimal 44 px, label form yang jelas, status loading, kosong dan error di setiap halaman, serta tidak memakai data contoh.
 
@@ -245,7 +236,7 @@ Tidak ada resource atau aksi RBAC baru. Resource `sales-marketing` tidak memilik
 
 | Perubahan | Sifat |
 | --- | --- |
-| `AMS_DATA_DIR/customer-portal-db.json` | Versi 1 kini berisi `version`, `revision`, `customers`, dan `sessions` ter-hash. Ditulis atomik tmp + rename; loader berhenti tanpa menimpa jika berkas rusak/versi tidak didukung. Keranjang, pesanan, notifikasi dan metadata bukti belum ditambahkan. |
+| `AMS_DATA_DIR/customer-portal-db.json` | Versi 2 berisi `version`, `revision`, `customers`, `sessions` ter-hash, keranjang dan alamat. `pelangganId` ditambahkan sebagai field opsional pada record customer; data versi 2 yang sudah ada tetap valid tanpa migrasi destructive. Ditulis atomik tmp + rename; loader berhenti tanpa menimpa jika berkas rusak/versi tidak didukung. Pesanan, notifikasi dan metadata bukti belum ditambahkan. |
 | `AMS_DATA_DIR/customer-portal-audit.jsonl` | Berkas baru, append-only |
 | `AMS_DATA_DIR/customer-private/bukti-bayar/` | Direktori baru, privat |
 | `PenjualanAlkes.referensiPortal?` (`pesananId`, `barisId`, `versiPenawaran`) dan `PenjualanAlkes.ongkirAlokasi?` | Field opsional tambahan; data lama tetap valid |
@@ -255,8 +246,8 @@ Tidak ada resource atau aksi RBAC baru. Resource `sales-marketing` tidak memilik
 | Environment `CUSTOMER_PORTAL_ENABLED` (default `false`) | Flag fitur |
 | `rbac-db.json`, resource RBAC, dan koleksi Firestore | **Tidak diubah** |
 
-- **Migrasi:** versi 1 adalah berkas baru, tanpa migrasi atau penulisan data ERP existing. Loader menolak versi lain tanpa mengubahnya. Sebelum kenaikan versi berikutnya, wajib implementasikan salinan `customer-portal-db.v{n}.bak.json`, migrasi aditif, dan uji rollback; belum ada migrasi antarversi pada lot pertama ini.
-- **Rollback:** set `CUSTOMER_PORTAL_ENABLED=false` lalu restart service. Endpoint portal menjawab `404 PORTAL_NONAKTIF`, pilihan login customer disembunyikan, dan data portal tetap utuh. Rollback skema dilakukan dengan memulihkan salinan `.bak.json` versi sebelumnya.
+- **Migrasi:** store awal versi 1 kini dimigrasikan secara aditif ke versi 2 dengan keranjang/alamat kosong; loader menolak versi rusak/tidak didukung tanpa mengubah berkas. Field `pelangganId` bersifat opsional pada versi 2. Sebelum kenaikan versi berikutnya, wajib implementasikan salinan `customer-portal-db.v{n}.bak.json`, migrasi aditif, dan uji rollback.
+- **Rollback:** set `CUSTOMER_PORTAL_ENABLED=false` lalu restart service. Endpoint Customer Portal selain `/status` menjawab `404 PORTAL_NONAKTIF`, pilihan login customer disembunyikan, dan data portal tetap utuh. Rollback skema dilakukan dengan memulihkan salinan `.bak.json` versi sebelumnya.
 - **Backup:** seluruh isi `AMS_DATA_DIR`, termasuk berkas dan direktori baru, harus masuk backup VPS Linux dan diuji restore-nya.
 - **Skalabilitas:** berkas JSON tunggal cukup untuk tahap awal. Jika ukuran melewati sekitar 5 MB atau penulisan lebih dari 50 per menit, pindahkan ke database transaksional (sejalan dengan rencana PostgreSQL Fase 2).
 
@@ -278,19 +269,21 @@ Tidak ada resource atau aksi RBAC baru. Resource `sales-marketing` tidak memilik
 
 - [x] ✅ **Lokal — kerangka akun:** layout dan navigasi ringkasan/profil, link katalog existing, serta penanganan 401. Browser memeriksa profil pada lebar CSS 360, 768 dan 1280 px tanpa overflow horizontal. Navigasi modul transaksi menyusul bersama backend-nya.
 - [x] ✅ **Lokal — ringkasan dan navigasi:** ringkasan akun menampilkan jumlah baris keranjang, jumlah alamat dan jumlah notifikasi dari data portal. Akses cepat menuju katalog dan keranjang tersedia. Statistik pesanan, pesanan terbaru dan event transaksi belum ditampilkan karena modul ERP belum diintegrasikan.
-- [x] ✅ **Lokal — katalog terbit:** pencarian, kategori, foto, spesifikasi, harga teks/referensi dan label ketersediaan disediakan dari snapshot CMS yang terbit. Detail melalui API terautentikasi hanya mengembalikan field non-internal. Tidak ada fallback ke data dummy ERP.
+- [x] ✅ **Lokal — katalog terbit:** pencarian nama/model/produsen/SKU/izin edar, kategori, foto, spesifikasi dan detail per produk. Pilihan SKU dilakukan eksplisit sebelum masuk keranjang. Harga final dan ketersediaan diberi keterangan perlu konfirmasi sales, bukan angka atau stok operasional yang belum tersambung. Sumbernya snapshot CMS terbit; API terautentikasi hanya mengembalikan field non-internal.
 - [x] ✅ **Lokal — keranjang server:** tambah varian, ubah jumlah, hapus baris dan persistensi lintas restart. Keranjang divalidasi terhadap katalog terbit, dibatasi 30 baris, dan dipisah per customer. Checkout/pengajuan pesanan belum aktif.
 - [ ] Pengajuan pesanan dengan alamat pengiriman, catatan, dan requestId idempoten.
 - [ ] Pesanan: riwayat, detail, status, penawaran (setujui/tolak), pembatalan, dan unduh PDF.
 - [ ] Tagihan: daftar faktur, status pembayaran, instruksi transfer, serta unggah dan unduh bukti.
 - [ ] Profil: nama, telepon, data perusahaan, alamat, ganti password, ganti email, dan keluar dari semua perangkat.
   - [x] ✅ **Lokal — profil dasar:** nama, telepon belum terverifikasi, perusahaan, tautan reset sandi dan keluar semua perangkat. Tes dua customer, simpan/reload browser dan persistensi disk lulus. Email/alamat belum dapat diubah dari portal.
-  - [x] ✅ **Lokal — alamat pengiriman:** tambah, ubah penyimpanan server, hapus, dan alamat utama. Endpoint dan data dipisah per customer; perubahan antar-customer ditolak melalui sesi.
+  - [x] ✅ **Lokal — alamat pengiriman:** tambah, ubah, hapus, dan alamat utama melalui UI serta penyimpanan server. Endpoint dan data dipisah per customer; perubahan antar-customer ditolak melalui sesi.
 - [ ] Pusat notifikasi dan pengumuman nyata. Endpoint saat ini mengembalikan daftar kosong dan tidak membuat notifikasi palsu.
 
 ### Tahap 5 — Integrasi ERP
 
-- [ ] Tab Portal Customer: daftar akun, verifikasi dan penautan ke `sales_pelanggan`, penangguhan.
+- [x] ✅ **Lokal — API staf akun customer:** daftar data minimum, penautan ke satu `sales_pelanggan` aktif yang unik, dan penangguhan dengan pencabutan sesi. RBAC `sales-marketing:view/update`, guard Origin, larangan aktivasi sebelum verifikasi email, pencegahan tautan ganda, dan audit username pelaku diuji dengan router/store terisolasi.
+- [ ] UI staf Portal Customer untuk meninjau dan mengelola akun; endpoint lokal belum tersedia di UI ERP.
+- [ ] Alur pemulihan/aktivasi ulang akun ditangguhkan dengan pemeriksaan ulang master B2B dan audit.
 - [ ] Inbox pesanan portal dan form penawaran berversi dengan perhitungan kanonik di server (tarif PPN dari konfigurasi, ongkir, alokasi pembulatan).
 - [ ] Endpoint konversi idempoten: validasi regulasi semua baris, kredit agregat dan persetujuan manajer, ID Sales Order deterministik, jurnal konversi, dan rekonsiliasi saat start.
 - [ ] Guard sinkronisasi untuk baris `penjualan` dan `transaksi` yang tertaut ke portal, sehingga penghapusan atau perubahan nilai dan status pembayaran ditolak dengan `409`.
@@ -406,3 +399,18 @@ Rancangan ditinjau secara independen sebelum Tahap 3. Klaim temuan dicocokkan la
 - **Keamanan:** seluruh endpoint fitur baru memakai cookie customer terautentikasi, scoping customer, Origin/JSON guard existing, validasi varian, batas baris dan batas jumlah. Keranjang/alamat customer lain tidak dapat dibaca melalui ID akun.
 - **Bukti:** `customer-auth.test.ts` lulus 23 tes; migration versi 1, persistensi restart, isolasi keranjang/alamat antar-customer dan katalog terbit tercakup. `npm run lint` dan `npm run build` lulus.
 - **Batasan:** belum ada pengajuan pesanan, penawaran, invoice, bukti bayar atau notifikasi otomatis. Checkout tetap dinyatakan belum aktif sampai integrasi ERP Tahap 5 dan P0-02 ditutup.
+
+### 24 November 2026 — penyempurnaan katalog dan alamat Customer Dashboard
+
+- **UI katalog:** pencarian diajukan eksplisit, mencakup SKU, dan detail produk menampilkan spesifikasi/izin edar serta selector varian sebelum keranjang. Harga akhir dan ketersediaan tidak disajikan sebagai angka/stock live sebelum integrasi operasional.
+- **Alamat:** formulir akun kini mendukung edit alamat selain tambah/hapus; kepemilikan tetap diturunkan dari sesi di server.
+- **Bukti lokal:** tes Customer Portal dan typecheck dijalankan setelah perubahan. Belum dikirim atau dideploy ulang ke staging.
+- **Batasan tetap:** pengajuan pesanan, penawaran, invoice, pembayaran dan notifikasi otomatis memerlukan integrasi serta workflow staf Tahap 5; tidak dibuka sebagai checkout semu.
+
+### 24 November 2026 — API awal integrasi akun ERP (lokal)
+
+- **API staf:** `GET /api/erp/portal/customers`, `POST .../:id/tautkan`, dan `POST .../:id/tangguhkan` memakai sesi karyawan dan izin `sales-marketing:view/update`. Master pelanggan dibaca dari `ServerDataSyncStore` key `sales_pelanggan`; ID yang dikirim harus ditemukan tepat satu kali dan berstatus Aktif.
+- **Proteksi akun:** pendaftaran yang emailnya belum diverifikasi tidak dapat diaktifkan; satu record B2B tidak dapat dihubungkan ke dua akun customer. Penangguhan mencabut sesi portal yang tersimpan dan menghentikan login berikutnya. Customer tidak dapat melihat atau mengubah `pelangganId`.
+- **Audit dan data:** mutasi mencatat username pelaku dalam audit JSONL Customer Portal, tanpa menyertakan email atau isi profil. Field opsional `pelangganId` kompatibel dengan record store versi 2 yang sudah ada.
+- **Bukti lokal:** `customer-auth.test.ts` lulus 25 tes; regresi penuh lulus 40 file / 483 tes, `npm run lint`, dan `npm run build`. Cakupan termasuk RBAC (sales rep tanpa izin ditolak), Origin silang, master tidak aktif, batas payload, tautan ganda, audit, dan pencabutan sesi tanpa memengaruhi customer lain.
+- **Batasan:** hanya endpoint backend lokal; belum ada UI staf, aktivasi ulang akun, pesanan/penawaran, Sales Order, transaksi/pembayaran, Firebase nyata, deploy atau perubahan data VPS. P0-02 tetap terbuka dan konversi Sales Order belum boleh digunakan.

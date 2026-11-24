@@ -53,40 +53,45 @@ function fields(body: unknown, allowed: string[]): Record<string, unknown> {
   return body as Record<string, unknown>;
 }
 
-function catalogItems(snapshot: unknown): Array<Record<string, any>> {
-  if (!snapshot || typeof snapshot !== 'object') return [];
-  const root = snapshot as Record<string, unknown>;
-  if (root.isPublished !== true) return [];
-  const products = root.produk && typeof root.produk === 'object'
-    ? (root.produk as Record<string, unknown>).item
-    : undefined;
-  return Array.isArray(products) ? products.filter((item): item is Record<string, any> =>
-    Boolean(item && typeof item === 'object' && !Array.isArray(item) && item.isActive === true)
-  ) : [];
+function objectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function sanitizeCatalogItem(item: Record<string, any>) {
+function catalogItems(snapshot: unknown): Array<Record<string, unknown>> {
+  if (!objectRecord(snapshot)) return [];
+  const root = snapshot;
+  if (root.isPublished !== true) return [];
+  const products = objectRecord(root.produk)
+    ? root.produk.item
+    : undefined;
+  return Array.isArray(products)
+    ? products.filter((item): item is Record<string, unknown> => objectRecord(item) && item.isActive === true)
+    : [];
+}
+
+function sanitizeCatalogItem(item: Record<string, unknown>) {
   const text = (value: unknown, max = 500) => typeof value === 'string' ? value.trim().slice(0, max) : '';
-  const images = [...new Set([
+  const rawImages = [
     ...(Array.isArray(item.imageUrls) ? item.imageUrls : []),
-    ...(item.imageUrl ? [item.imageUrl] : [])
-  ].flatMap((value): string[] => {
-    if (typeof value !== 'string') return [];
-    if (/^https?:\/\//.test(value)) return [value];
-    if (/^media:[A-Za-z0-9_-]{1,80}$/.test(value)) {
-      return [`/api/website/media/${encodeURIComponent(value.slice('media:'.length))}`];
-    }
-    return [];
-  }).slice(0, 8))];
-  const variants = Array.isArray(item.varianSku) ? item.varianSku.slice(0, 50).filter((variant: any) =>
-    variant && typeof variant === 'object'
-  ).map((variant: any) => ({
+    ...(typeof item.imageUrl === 'string' ? [item.imageUrl] : [])
+  ];
+  const images = [...new Set([
+    ...rawImages.flatMap((value): string[] => {
+      if (typeof value !== 'string') return [];
+      if (/^https?:\/\//.test(value)) return [value];
+      if (/^media:[A-Za-z0-9_-]{1,80}$/.test(value)) {
+        return [`/api/website/media/${encodeURIComponent(value.slice('media:'.length))}`];
+      }
+      return [];
+    }).slice(0, 8)
+  ])];
+  const variants = Array.isArray(item.varianSku) ? item.varianSku.slice(0, 50).filter(objectRecord).map((variant) => ({
     id: text(variant.id, 100),
     kodeSKU: text(variant.kodeSKU, 100),
     tipeModel: text(variant.tipeModel, 160),
     nomorIzinEdar: text(variant.nomorIzinEdar, 100),
     satuan: text(variant.satuan, 40) || text(item.satuan, 40) || 'unit'
-  })).filter((variant: any) => variant.id) : [];
+  })).filter((variant) => variant.id) : [];
   return {
     id: text(item.id, 100),
     nama: text(item.nama, 200),
@@ -100,7 +105,7 @@ function sanitizeCatalogItem(item: Record<string, any>) {
     satuan: text(item.satuan, 40) || 'unit',
     hargaTayang: text(item.hargaTayang, 100) || undefined,
     referensiHarga: text(item.referensiHarga, 300) || undefined,
-    stokLabel: typeof item.stokTersedia === 'number' && item.stokTersedia > 0 ? 'tersedia' : 'tidak-diketahui',
+    stokLabel: 'perlu-konfirmasi' as const,
     imageUrls: images,
     varian: variants
   };
@@ -225,7 +230,11 @@ export function createCustomerRouter(options: {
     const query = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
     const category = typeof req.query.kategori === 'string' ? req.query.kategori.trim().toLowerCase() : '';
     const filtered = items.filter((item) => {
-      const matchesQuery = !query || [item.nama, item.tipeModel, item.produsen, item.nomorIzinEdar, item.kategori]
+      const matchesQuery = !query || [
+        item.nama, item.tipeModel, item.produsen, item.nomorIzinEdar, item.kategori,
+        ...item.varian.flatMap((variant: { kodeSKU: string; tipeModel: string; nomorIzinEdar: string }) =>
+          [variant.kodeSKU, variant.tipeModel, variant.nomorIzinEdar])
+      ]
         .some((value) => value.toLowerCase().includes(query));
       const matchesCategory = !category || [item.kategori, item.kategoriRegulasi]
         .some((value) => value?.toLowerCase() === category);

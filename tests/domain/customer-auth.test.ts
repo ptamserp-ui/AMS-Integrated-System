@@ -7,6 +7,7 @@ import express from 'express';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CustomerError, ServerCustomerStore, type CustomerIdentity } from '../../server/customerStore';
 import { createCustomerRouter, CUSTOMER_COOKIE } from '../../server/customerRoutes';
+import { createCustomerErpRouter } from '../../server/customerErpRoutes';
 import type { CustomerIdentityService, CustomerIdentityState } from '../../server/customerAuth';
 import type { CustomerPortalStatus } from '../../src/types/customerPortal';
 import { ServerRbacStore } from '../../server/rbacStore';
@@ -50,6 +51,7 @@ describe('customer store: durability and session lifecycle', () => {
     expect(() => store.login(identity)).toThrow('Lengkapi pendaftaran');
     store.register({ ...identity, emailVerified: false }, profile, 'v1');
     expect(() => store.login({ ...identity, emailVerified: false })).toThrow('Verifikasi email');
+    expect(() => store.linkCustomerToB2B(store.listCustomersForStaff()[0].id, 'b2b-active', 'dev.test')).toThrow('Verifikasi email');
     expect(store.login(identity).account.status).toBe('menunggu-verifikasi');
   });
 
@@ -145,11 +147,14 @@ describe('customer HTTP authentication: isolated identity service, real disk and
   let current: CustomerIdentityState;
   let service: CustomerIdentityService;
   let employeeToken: string;
+  let salesRepToken: string;
+  let catalogPublished: boolean;
 
   beforeEach(async () => {
     enabled = true;
     available = true;
     privacyReady = true;
+    catalogPublished = true;
     current = { email: identity.email, emailVerified: true, disabled: false, validAfter: 0 };
     store = new ServerCustomerStore(dir);
     service = {
@@ -171,6 +176,20 @@ describe('customer HTTP authentication: isolated identity service, real disk and
     const login = rbac.authenticate('dev.test', 'TestPassword123!', '127.0.0.1', 'Vitest');
     if (!login.ok) throw new Error(login.message);
     employeeToken = login.token;
+    const salesRole = rbac.listRoles().find((role) => role.id === 'sales_medrep');
+    if (!salesRole) throw new Error('Sales role missing');
+    const restrictedRole = rbac.updateRole('sales_medrep', {
+      permissions: { ...salesRole.permissions, 'sales-marketing': ['view'] }
+    }, 'dev.test', developer.role.id, '127.0.0.1');
+    if (!restrictedRole.ok) throw new Error(restrictedRole.message);
+    const salesRep = rbac.createUser({
+      username: 'sales.test', password: 'SalesPassword123!', fullName: 'Sales Rep',
+      roleId: 'sales_medrep', employeeId: 'EMP-TEST'
+    }, 'dev.test', developer.role.id, '127.0.0.1');
+    if (!salesRep.ok) throw new Error(salesRep.message);
+    const salesLogin = rbac.authenticate('sales.test', 'SalesPassword123!', '127.0.0.1', 'Vitest');
+    if (!salesLogin.ok) throw new Error(salesLogin.message);
+    salesRepToken = salesLogin.token;
     const { attachAuth, requireAuth } = createRbacMiddleware(rbac);
     const app = express();
     app.use(attachAuth);
@@ -181,7 +200,7 @@ describe('customer HTTP authentication: isolated identity service, real disk and
         privacyUrl: '/privacy', termsUrl: '/terms', privacyVersion: 'v1', firebase: null
       }),
       catalog: () => ({
-        isPublished: true,
+        isPublished: catalogPublished,
         produk: { item: [{
           id: 'produk-1', isActive: true, nama: 'Alat Uji', tipeModel: 'AU-1',
           kategori: 'Laboratorium', produsen: 'Merek Uji', spesifikasi: 'Spesifikasi uji',
@@ -190,6 +209,16 @@ describe('customer HTTP authentication: isolated identity service, real disk and
           varianSku: [{ id: 'varian-1', kodeSKU: 'SKU-1', tipeModel: 'AU-1', nomorIzinEdar: 'AKL-1', satuan: 'unit' }]
         }] }
       })
+    }));
+    app.use('/api/erp/portal', createCustomerErpRouter({
+      store,
+      requireView: createRbacMiddleware(rbac).requirePermission('sales-marketing', 'view'),
+      requireUpdate: createRbacMiddleware(rbac).requirePermission('sales-marketing', 'update'),
+      findB2BCustomers: (id) => id === 'b2b-active'
+        ? [{ id, nama: 'Fasyankes Uji', status: 'Aktif' }]
+        : id === 'b2b-inactive'
+          ? [{ id, nama: 'Fasyankes Nonaktif', status: 'Non-aktif' }]
+          : []
     }));
     for (const endpoint of ['/api/sync/state', '/api/rbac/users', '/api/media']) app.get(endpoint, requireAuth, (_req, res) => res.json({ ok: true }));
     server = app.listen(0, '127.0.0.1');
@@ -286,6 +315,8 @@ describe('customer HTTP authentication: isolated identity service, real disk and
     expect(catalog.body.items[0].nama).toBe('Alat Uji');
     expect(catalog.body.items[0].imageUrls).toContain('/api/website/media/image-1');
     expect(catalog.body.items[0]).not.toHaveProperty('firebaseUid');
+    expect((await request('/api/customer/katalog?q=SKU-1', undefined, first)).body.items).toHaveLength(1);
+    expect((await request('/api/customer/katalog/produk-1', undefined, first)).body.item.nama).toBe('Alat Uji');
     const cart = await request('/api/customer/keranjang', {
       items: [{ produkId: 'produk-1', varianId: 'varian-1', jumlah: 2 }]
     }, first, {}, 'PUT');
@@ -299,6 +330,55 @@ describe('customer HTTP authentication: isolated identity service, real disk and
     expect(address.status).toBe(201);
     expect(address.body.items).toHaveLength(1);
     expect((await request('/api/customer/alamat', undefined, second)).body.items).toHaveLength(0);
+    const addressId = address.body.items[0].id;
+    const changed = await request(`/api/customer/alamat/${addressId}`, {
+      label: 'Kantor pusat', penerima: 'Customer Uji', telepon: '081234567890',
+      alamat: 'Jl. Uji 2', kota: 'Jakarta', provinsi: 'DKI Jakarta', kodePos: '10110', isUtama: true
+    }, first, {}, 'PATCH');
+    expect(changed.body.items[0].label).toBe('Kantor pusat');
+    expect((await request(`/api/customer/alamat/${addressId}`, {
+      label: 'Tidak boleh', penerima: 'Customer Uji', telepon: '081234567890',
+      alamat: 'Jl. Uji 3', kota: 'Jakarta', provinsi: 'DKI Jakarta', kodePos: '10110', isUtama: true
+    }, second, {}, 'PATCH')).status).toBe(404);
+  });
+
+  it('only serves published catalog products and rejects items after they are unpublished', async () => {
+    const cookie = await login();
+    catalogPublished = false;
+    expect((await request('/api/customer/katalog', undefined, cookie)).body.items).toEqual([]);
+    expect((await request('/api/customer/katalog/produk-1', undefined, cookie)).status).toBe(404);
+  });
+
+  it('requires employee RBAC and same-origin staff action to link and suspend customer accounts', async () => {
+    const first = await login();
+    const second = await login('other');
+    const employeeCookie = `ams_session=${employeeToken}`;
+    const list = await request('/api/erp/portal/customers', undefined, employeeCookie);
+    expect(list.status).toBe(200);
+    expect(list.body.items[0]).not.toHaveProperty('firebaseUid');
+    expect(list.body.items[0]).not.toHaveProperty('privacyVersion');
+    expect((await request('/api/erp/portal/customers', undefined, first)).status).toBe(401);
+    expect((await request('/api/erp/portal/customers/customer-id/tautkan', { pelangganId: 'b2b-active' }, employeeCookie, { Origin: 'https://other.invalid' })).status).toBe(403);
+    expect((await request('/api/erp/portal/customers/customer-id/tautkan', { pelangganId: 'b2b-inactive' }, employeeCookie)).status).toBe(409);
+    expect((await request('/api/erp/portal/customers/customer-id/tautkan', { pelangganId: 'x'.repeat(17000) }, employeeCookie)).status).toBe(413);
+
+    const customerId = list.body.items.find((item: { email: string }) => item.email === identity.email).id;
+    expect((await request(`/api/erp/portal/customers/${customerId}/tautkan`, { pelangganId: 'b2b-active' }, `ams_session=${salesRepToken}`)).status).toBe(403);
+    const linked = await request(`/api/erp/portal/customers/${customerId}/tautkan`, { pelangganId: 'b2b-active' }, employeeCookie);
+    expect(linked.status).toBe(200);
+    expect(linked.body.customer).toMatchObject({ status: 'aktif', pelangganId: 'b2b-active' });
+    expect((await request('/api/customer/auth/saya', undefined, first)).body.account).not.toHaveProperty('pelangganId');
+
+    const secondId = list.body.items.find((item: { email: string }) => item.email === otherIdentity.email).id;
+    expect((await request(`/api/erp/portal/customers/${secondId}/tautkan`, { pelangganId: 'b2b-active' }, employeeCookie)).status).toBe(409);
+    const suspended = await request(`/api/erp/portal/customers/${customerId}/tangguhkan`, {}, employeeCookie);
+    expect(suspended.body.customer.status).toBe('ditangguhkan');
+    expect((await request('/api/customer/auth/saya', undefined, first)).status).toBe(401);
+    expect((await request('/api/customer/auth/saya', undefined, second)).status).toBe(200);
+    const audit = fs.readFileSync(path.join(dir, 'customer-portal-audit.jsonl'), 'utf8');
+    expect(audit).toContain('"action":"CUSTOMER_LINKED_TO_B2B"');
+    expect(audit).toContain('"actor":"dev.test"');
+    expect(audit).toContain('"action":"CUSTOMER_SUSPENDED"');
   });
 
   it.each(['disabled', 'password-reset', 'email-changed', 'email-unverified'])('revokes sessions when Firebase reports %s', async (change) => {

@@ -47,6 +47,7 @@ Pemeriksaan pada 24 November 2026 merangkum riwayat evaluasi dan commit; status 
 - [x] ✅ **Lokal — audit Tahap 1 Customer Portal:** autentikasi, sesi, RBAC, sinkronisasi dan model data penjualan/keuangan ditelaah tanpa perubahan kode; lihat [riwayat audit portal](#24-november-2026--audit-customer-portal-tahap-1-lokal).
 - [x] ✅ **Lokal — rancangan Tahap 2 Customer Portal:** keputusan pengguna, arsitektur, rencana kerja, matriks uji, dan revisi atas 9 temuan tinjauan dicatat di [customer-portal.md](./customer-portal.md). Pada tahap rancangan ini belum ada kode portal.
 - [x] ✅ **Lokal — implementasi autentikasi Customer Portal:** store/sesi terpisah, API autentikasi, pemisahan provider, pilihan login dan UI akun/profil dasar diuji. Lihat [bukti dan batasan](./customer-portal.md#24-november-2026--implementasi-autentikasi-lokal). Firebase pada browser disimulasikan; belum diaktifkan atau di-deploy.
+- [x] ✅ **Lokal — irisan pertama integrasi akun ERP:** API staf untuk daftar akun, tautan unik ke master B2B aktif, dan penangguhan dengan pencabutan sesi; tes RBAC, Origin, audit dan isolasi customer lulus. Belum ada UI staf atau deploy. Lihat [bukti dan batasan](./customer-portal.md#24-november-2026--api-awal-integrasi-akun-erp-lokal).
 
 **Belum selesai atau ditunda:**
 
@@ -57,7 +58,7 @@ Pemeriksaan pada 24 November 2026 merangkum riwayat evaluasi dan commit; status 
 - [ ] **Website:** pengujian seluruh seksi dan peran, Firebase nyata, performa jaringan serta perubahan lokal pada Linux staging.
 - [ ] **Restore lengkap dan login dari backup:** ditunda sampai fase lain selesai, tetapi wajib sebelum keputusan GO.
 - [ ] **Produksi dan API pemerintah:** produksi tetap NO-GO; integrasi pemerintah ditunda sesuai keputusan dan persetujuan yang masih diperlukan.
-- [ ] **Customer Portal Tahap 4–6 dan aktivasi nyata:** autentikasi telah diimplementasikan lokal; dashboard transaksi, integrasi ERP, Firebase nyata, rules terpasang dan validasi staging masih terbuka. Progres di [customer-portal.md](./customer-portal.md). Pembatasan provider wajib diverifikasi sebelum Email/Password diaktifkan, dan P0-02 wajib ditutup sebelum konversi Sales Order dipakai pengguna nyata.
+- [ ] **Customer Portal Tahap 4–6 dan aktivasi nyata:** dashboard transaksi, UI staf, pemulihan akun, workflow pesanan/invoice/pembayaran, Firebase nyata, rules terpasang dan validasi staging masih terbuka. API awal pengelolaan akun hanya tersedia lokal. Progres di [customer-portal.md](./customer-portal.md). Pembatasan provider wajib diverifikasi sebelum Email/Password diaktifkan, dan P0-02 wajib ditutup sebelum konversi Sales Order dipakai pengguna nyata.
 
 ## 1. Lingkup dan kesimpulan awal
 
@@ -352,6 +353,26 @@ Target checklist beban: **50 pengguna bersamaan, tanpa HTTP 5xx dan respons kura
 - Katalog berasal dari snapshot CMS yang terbit; keranjang dan alamat disimpan terpisah per customer pada store portal versi 2, dengan migrasi aman dari versi 1.
 - Validasi terarah `customer-auth.test.ts` lulus 23 tes, termasuk isolasi keranjang/alamat antar-customer. `npm run lint` dan `npm run build` lulus.
 - Pengajuan pesanan, penawaran, invoice, bukti bayar, notifikasi transaksi dan keputusan ERP masih terbuka pada Tahap 4/5. Portal tetap default-off dan belum diaktifkan.
+
+### 24 November 2026 — deployment staging Linux
+
+- [x] ✅ **Staging Linux:** commit `fe6b256` di-deploy ke service `ams`; pengguna melaporkan lint, lint rules, 40 file / 481 tes dan build staging lulus.
+- [x] ✅ **Pemeriksaan dasar:** health lokal dan publik aktif, Firebase Admin terhubung ke project staging `ams-integrated-system-2b9e2` dan database `(default)`; beranda dan `/web` setelah redirect merespons HTTP 200.
+- [x] ✅ **Snapshot lokal:** perubahan `public/website-published.json` dipertahankan dan salinan disimpan sebelum fast-forward.
+- [ ] Customer Portal masih nonaktif; Firebase Email/Password nyata, alur portal, login karyawan dan fungsi website setelah deployment belum dibuktikan pada tahap ini. Produksi tetap **NO-GO**.
+
+### 24 November 2026 — penyempurnaan katalog Customer Dashboard (lokal)
+
+- [x] ✅ Detail katalog, pencarian SKU, pemilihan varian eksplisit dan edit alamat ditambahkan. Label stok dan harga tidak mengklaim data live; tetap meminta konfirmasi sales.
+- [x] ✅ `customer-auth.test.ts` lulus 24 tes dan TypeScript lulus, termasuk SKU search, detail produk, produk unpublished, edit alamat dan isolasi customer.
+- [ ] Perubahan penyempurnaan ini masih lokal, belum commit/push/deploy. Fitur pemesanan/tagihan/notifikasi masih menunggu Tahap 5; portal staging tetap nonaktif.
+
+### 24 November 2026 — API awal integrasi akun ERP Customer Portal (lokal)
+
+- [x] ✅ Endpoint staf `GET /api/erp/portal/customers`, `POST .../:id/tautkan`, dan `POST .../:id/tangguhkan` ditambahkan; sesi karyawan dan `sales-marketing:view/update` diwajibkan. Mutasi juga mewajibkan Origin yang sama.
+- [x] ✅ Tautan mengacu pada master B2B `sales_pelanggan` dari store server, menolak ID tidak unik/tidak aktif, email belum diverifikasi, serta pelanggan yang sudah tertaut ke akun lain. Penangguhan mencabut sesi portal; audit mencatat username pelaku tanpa email customer.
+- [x] ✅ Tes terarah customer portal lulus 25 tes; regresi penuh lulus 40 file / 483 tes, `npm run lint`, dan `npm run build`.
+- [ ] Masih lokal; tidak ada UI staf, aktivasi ulang akun, order/penawaran, Sales Order, invoice/pembayaran, perubahan Firebase atau deploy. Portal tetap nonaktif, P0-02 terbuka, dan produksi tetap **NO-GO**.
 
 ### Format pembaruan berikutnya
 
