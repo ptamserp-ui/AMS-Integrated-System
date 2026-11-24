@@ -580,6 +580,46 @@ describe('ServerDataSyncStore & otorisasi kunci sinkronisasi server', () => {
     }
   });
 
+  it.each([
+    '{invalid json',
+    'null',
+    '{"entries":[]}',
+    '{"entries":{"website_draft":null}}',
+    '{"revision":"invalid","entries":{}}'
+  ])('menolak state sinkronisasi rusak tanpa menimpa berkas: %s', (content) => {
+    const dir = createTempDir();
+    const file = path.join(dir, 'app-state.json');
+    fs.writeFileSync(file, content);
+    expect(() => new ServerDataSyncStore(dir)).toThrow(/(rusak|tidak valid)/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false);
+  });
+
+  it('menolak state yang tidak dapat dibaca dan tetap membuat state baru saat belum ada', () => {
+    const dir = createTempDir();
+    const file = path.join(dir, 'app-state.json');
+    fs.mkdirSync(file);
+    expect(() => new ServerDataSyncStore(dir)).toThrow(/Gagal membaca State sinkronisasi/);
+    expect(fs.statSync(file).isDirectory()).toBe(true);
+
+    const freshDir = createTempDir();
+    const store = new ServerDataSyncStore(freshDir);
+    store.setKey('website_draft', { judul: 'Draf tersimpan' }, 'admin');
+    expect(new ServerDataSyncStore(freshDir).getEntry('website_draft')?.value).toEqual({ judul: 'Draf tersimpan' });
+  });
+
+  it('membaca state lama tanpa version dan revision tingkat teratas', () => {
+    const dir = createTempDir();
+    fs.writeFileSync(path.join(dir, 'app-state.json'), JSON.stringify({
+      entries: {
+        website_draft: { value: { judul: 'Draf lama' }, version: 1, updatedAt: '2026-01-01', updatedBy: 'admin' }
+      }
+    }));
+    const store = new ServerDataSyncStore(dir);
+    expect(store.getRevision()).toBe(0);
+    expect(store.getEntry('website_draft')?.value).toEqual({ judul: 'Draf lama' });
+  });
+
   it('setBatch menulis pembaruan dan penghapusan secara atomik, memelihara versi, delta query, dan persistensi disk', () => {
     const dir = createTempDir();
     const store = new ServerDataSyncStore(dir);

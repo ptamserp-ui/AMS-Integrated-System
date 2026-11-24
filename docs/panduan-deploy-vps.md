@@ -474,7 +474,7 @@ Script melakukan fetch dan fast-forward branch, `npm ci`, lint, tes sesuai mode,
 ### 8. Data, migrasi, backup, dan batas cutover
 
 - Jadwalkan backup harian terenkripsi seluruh `/var/lib/ams-data`, simpan salinan di luar VPS, dan uji restore. Jangan memasukkan `.env` atau Service Account ke Git/backup yang tidak dienkripsi.
-- Jika `rbac-db.json` rusak atau secret sesi tidak valid/tidak dapat dibaca, service berhenti dengan error dan tidak membuat ulang berkas tersebut. Simpan berkas bermasalah dengan aman, periksa log tanpa membagikan rahasia, dan pulihkan backup yang telah diverifikasi; jangan hapus berkas untuk memaksa setup ulang.
+- Jika `rbac-db.json`, `app-state.json` atau `media-index.json` rusak/tidak valid/tidak dapat dibaca, atau secret sesi tidak valid/tidak dapat dibaca, service berhenti dengan error dan tidak menimpa berkas tersebut. Simpan berkas bermasalah dengan aman, periksa log tanpa membagikan rahasia, dan pulihkan backup yang telah diverifikasi; jangan hapus berkas untuk memaksa setup ulang.
 - Akun dan peran disimpan pada server. Pengiriman snapshot ke Firebase bukan bukti backup lengkap atau restore yang berhasil; pastikan statusnya dan uji pemulihan secara terpisah.
 - Untuk memindahkan sistem Windows, rencanakan transfer konsisten `C:\AMS\Data` ke `/var/lib/ams-data` dan verifikasi Firebase project/database. Jangan bootstrap akun baru di atas data RBAC yang dipulihkan.
 - Data offline `localStorage` pada browser tidak ikut dipindah oleh salinan server.

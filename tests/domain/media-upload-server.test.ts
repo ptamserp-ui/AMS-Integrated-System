@@ -65,6 +65,39 @@ afterEach(() => {
 });
 
 describe('ServerMediaStore — Penyimpanan Foto Real-Time di Server', () => {
+  it.each([
+    '{invalid json',
+    'null',
+    '{"items":[]}',
+    '{"items":{"logo":null}}',
+    '{"items":{"logo":{"id":"logo","ext":"png"}}}'
+  ])('menolak indeks media rusak tanpa menimpa berkas: %s', (content) => {
+    const dataDir = createTempDir();
+    const file = path.join(dataDir, 'media-index.json');
+    fs.writeFileSync(file, content);
+    expect(() => new ServerMediaStore(dataDir)).toThrow(/(rusak|tidak valid)/);
+    expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    expect(fs.existsSync(`${file}.tmp`)).toBe(false);
+  });
+
+  it('menolak indeks yang tidak dapat dibaca tanpa menggantinya', () => {
+    const dataDir = createTempDir();
+    const file = path.join(dataDir, 'media-index.json');
+    fs.mkdirSync(file);
+    expect(() => new ServerMediaStore(dataDir)).toThrow(/Gagal membaca Indeks media/);
+    expect(fs.statSync(file).isDirectory()).toBe(true);
+  });
+
+  it('membaca indeks lama tanpa version dan mempertahankan akses media', () => {
+    const dataDir = createTempDir();
+    const store = new ServerMediaStore(dataDir);
+    const meta = store.saveFromBuffer({ id: 'legacy-logo', bytes: makeFakePng(), visibility: 'internal' });
+    fs.writeFileSync(path.join(dataDir, 'media-index.json'), JSON.stringify({ items: { [meta.id]: meta } }));
+    const loaded = new ServerMediaStore(dataDir).getMedia(meta.id);
+    expect(loaded?.meta.visibility).toBe('internal');
+    expect(loaded?.bytes.equals(makeFakePng())).toBe(true);
+  });
+
   it('menyimpan berkas PNG, JPEG, dan WebP asli ke disk uploads/ dan persisten lintas restart instance', () => {
     const dataDir = createTempDir();
     const store = new ServerMediaStore(dataDir);

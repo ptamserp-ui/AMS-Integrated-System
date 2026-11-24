@@ -3,6 +3,7 @@ import path from 'path';
 import type { KonfigurasiSitus, ProdukKatalog, RbacResourceId, RoleDefinition } from '../src/types/index';
 import { normalisasiProdukKatalog, produkKatalogUntukWebsite } from '../src/utils/productCatalog';
 import { gabungkanRfqWebsite, KUNCI_RFQ_WEBSITE } from './websiteRfq';
+import { readJsonFileIfPresent } from './readJsonFile';
 
 export interface SyncEntry {
   value: unknown;
@@ -474,23 +475,31 @@ export class ServerDataSyncStore {
   }
 
   private loadState(): AppStateDatabase {
-    if (fs.existsSync(this.dbFile)) {
-      try {
-        const raw = fs.readFileSync(this.dbFile, 'utf8');
-        const parsed = JSON.parse(raw) as Partial<AppStateDatabase>;
-        if (parsed && typeof parsed === 'object' && parsed.entries && typeof parsed.entries === 'object') {
-          return {
-            version: typeof parsed.version === 'number' ? parsed.version : 1,
-            revision: typeof parsed.revision === 'number' ? parsed.revision : 0,
-            entries: parsed.entries as Record<string, SyncEntry>
-          };
-        }
-      } catch {
-        /* fallback ke state kosong bila berkas korup */
+    const parsed = readJsonFileIfPresent(this.dbFile, 'State sinkronisasi');
+    if (parsed !== undefined) {
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`Format state sinkronisasi "${this.dbFile}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
       }
+      const state = parsed as Partial<AppStateDatabase>;
+      const isCounter = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+      if (!state.entries || typeof state.entries !== 'object' || Array.isArray(state.entries) ||
+          (state.version !== undefined && !isCounter(state.version)) ||
+          (state.revision !== undefined && !isCounter(state.revision)) ||
+          !Object.values(state.entries).every((entry) =>
+            entry && typeof entry === 'object' && !Array.isArray(entry) &&
+            Object.prototype.hasOwnProperty.call(entry, 'value') &&
+            isCounter(entry.version) && typeof entry.updatedAt === 'string' && typeof entry.updatedBy === 'string'
+          )) {
+        throw new Error(`Format state sinkronisasi "${this.dbFile}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
+      }
+      return {
+        version: state.version ?? 1,
+        revision: state.revision ?? 0,
+        entries: state.entries
+      };
     }
     const fresh: AppStateDatabase = { version: 1, revision: 0, entries: {} };
-    this.persist(fresh);
+    fs.writeFileSync(this.dbFile, JSON.stringify(fresh, null, 2), { encoding: 'utf8', flag: 'wx' });
     return fresh;
   }
 

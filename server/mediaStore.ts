@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { readJsonFileIfPresent } from './readJsonFile';
 
 export type MediaVisibility = 'public' | 'internal';
 export type SupportedImageMime = 'image/png' | 'image/jpeg' | 'image/webp';
@@ -113,22 +114,29 @@ export class ServerMediaStore {
   }
 
   private loadIndex(): MediaIndexFile {
-    if (fs.existsSync(this.indexFile)) {
-      try {
-        const raw = fs.readFileSync(this.indexFile, 'utf8');
-        const parsed = JSON.parse(raw) as Partial<MediaIndexFile>;
-        if (parsed && typeof parsed === 'object' && parsed.items && typeof parsed.items === 'object') {
-          return {
-            version: typeof parsed.version === 'number' ? parsed.version : 1,
-            items: parsed.items as Record<string, StoredMediaMeta>
-          };
-        }
-      } catch {
-        /* fallback ke indeks baru bila file indeks rusak */
+    const parsed = readJsonFileIfPresent(this.indexFile, 'Indeks media');
+    if (parsed !== undefined) {
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error(`Format indeks media "${this.indexFile}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
       }
+      const index = parsed as Partial<MediaIndexFile>;
+      if (!index.items || typeof index.items !== 'object' || Array.isArray(index.items) ||
+          (index.version !== undefined && (!Number.isSafeInteger(index.version) || index.version < 0)) ||
+          !Object.entries(index.items).every(([id, item]) =>
+            isValidMediaId(id) && item && typeof item === 'object' && !Array.isArray(item) &&
+            item.id === id && ['png', 'jpg', 'webp'].includes(item.ext) &&
+            ['image/png', 'image/jpeg', 'image/webp'].includes(item.contentType) &&
+            (item.visibility === 'public' || item.visibility === 'internal') &&
+            typeof item.scope === 'string' && typeof item.filename === 'string' &&
+            typeof item.uploadedBy === 'string' && typeof item.uploadedAt === 'string' &&
+            Number.isSafeInteger(item.size) && item.size > 0 && typeof item.sha256 === 'string'
+          )) {
+        throw new Error(`Format indeks media "${this.indexFile}" tidak valid. Berkas tidak diubah; pulihkan dari backup.`);
+      }
+      return { version: index.version ?? 1, items: index.items };
     }
     const fresh: MediaIndexFile = { version: 1, items: {} };
-    this.persistIndex(fresh);
+    fs.writeFileSync(this.indexFile, JSON.stringify(fresh, null, 2), { encoding: 'utf8', flag: 'wx' });
     return fresh;
   }
 

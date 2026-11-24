@@ -154,6 +154,46 @@ describe('website publik: penerbitan dan RFQ melalui server terisolasi', () => {
     if (tempDir && fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
   }, 10000);
 
+  it.each([
+    ['app-state.json', 'State sinkronisasi'],
+    ['media-index.json', 'Indeks media']
+  ])('menghentikan startup bila %s rusak tanpa menimpanya', async (fileName, label) => {
+    const dataDir = path.join(tempDir, `corrupt-${fileName}`);
+    fs.mkdirSync(dataDir);
+    const file = path.join(dataDir, fileName);
+    const content = '{broken';
+    fs.writeFileSync(file, content);
+    const processUji = spawn(process.execPath, [
+      '--require', path.join(tempDir, 'localhost.cjs'), path.join(tempDir, 'server.mjs')
+    ], {
+      cwd: tempDir,
+      env: {
+        NODE_ENV: 'production',
+        DEPLOYMENT_ENV: 'development',
+        PORT: '0',
+        AMS_DATA_DIR: dataDir,
+        FIREBASE_SERVICE_ACCOUNT_PATH: path.join(tempDir, 'disabled-firebase.json'),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.TEMP ? { TEMP: process.env.TEMP } : {}),
+        ...(process.env.TMP ? { TMP: process.env.TMP } : {})
+      },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let output = '';
+    processUji.stderr!.on('data', (data: Buffer) => { output += data.toString(); });
+    const timer = setTimeout(() => processUji.kill(), 5000);
+    try {
+      const [code, signal] = await once(processUji, 'close');
+      expect(signal).toBeNull();
+      expect(code).not.toBe(0);
+      expect(output).toContain(label);
+      expect(fs.readFileSync(file, 'utf8')).toBe(content);
+    } finally {
+      clearTimeout(timer);
+    }
+  }, 10000);
+
   it('menolak RFQ sebelum situs tayang, lalu menyimpan publikasi server sebagai sumber resmi', async () => {
     expect((await request('/api/website/rfq', 'POST', '', requestRfq)).status).toBe(503);
     const belumAda = await request<{ error: string }>('/api/website/published');
