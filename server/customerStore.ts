@@ -27,6 +27,8 @@ export interface CustomerIdentity {
 interface CustomerRecord extends CustomerAccount {
   firebaseUid: string;
   pelangganId?: string;
+  /** RBAC user id of a developer workspace; such records never authenticate through Firebase. */
+  developerUserId?: string;
   privacyVersion: string;
   privacyAcceptedAt: string;
 }
@@ -63,6 +65,7 @@ interface CustomerDatabase {
 }
 
 const DAY = 86400000;
+const DEVELOPER_UID_PREFIX = 'rbac-developer:';
 const tokenHash = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 const record = (v: unknown): v is Record<string, unknown> => Boolean(v && typeof v === 'object' && !Array.isArray(v));
 const dateString = (v: unknown) => typeof v === 'string' && Number.isFinite(Date.parse(v));
@@ -75,7 +78,13 @@ function validDatabase(value: unknown): value is CustomerDatabase {
   const ids = new Set<string>();
   const uids = new Set<string>();
   const emails = new Set<string>();
+  const developers = new Set<string>();
   for (const c of value.customers) {
+    if (record(c) && c.developerUserId !== undefined) {
+      if (typeof c.developerUserId !== 'string' || !c.developerUserId || developers.has(c.developerUserId) ||
+          c.firebaseUid !== `${DEVELOPER_UID_PREFIX}${c.developerUserId}` || c.aksesDeveloper !== true || c.pelangganId !== undefined) return false;
+      developers.add(c.developerUserId);
+    } else if (record(c) && (c.aksesDeveloper !== undefined || String(c.firebaseUid).startsWith(DEVELOPER_UID_PREFIX))) return false;
     if (!record(c) || customerProfileError(c) || typeof c.id !== 'string' || !c.id ||
         typeof c.firebaseUid !== 'string' || !c.firebaseUid || !validEmail(c.email) ||
         c.email !== c.email.toLowerCase() || c.teleponTerverifikasi !== false ||
@@ -182,12 +191,35 @@ export class ServerCustomerStore {
   }
 
   private publicAccount(customer: CustomerRecord): CustomerAccount {
-    const { firebaseUid: _uid, pelangganId: _pelangganId, privacyVersion: _version, privacyAcceptedAt: _accepted, ...account } = customer;
+    const { firebaseUid: _uid, pelangganId: _pelangganId, developerUserId: _developer, privacyVersion: _version, privacyAcceptedAt: _accepted, ...account } = customer;
     return structuredClone(account);
   }
 
+  /** Returns (creating once) the isolated workspace of an ERP developer. */
+  developerWorkspace(user: { id: string; username: string; fullName?: string }): CustomerAccount {
+    if (!user.id) throw new CustomerError(403, 'DEVELOPER_REQUIRED', 'Akses developer tidak valid.');
+    const existing = this.data.customers.find((c) => c.developerUserId === user.id);
+    if (existing) {
+      if (existing.status === 'ditangguhkan') throw new CustomerError(403, 'ACCOUNT_UNAVAILABLE', 'Ruang kerja developer dinonaktifkan.');
+      return this.publicAccount(existing);
+    }
+    const now = new Date(this.now()).toISOString();
+    const suffix = crypto.createHash('sha256').update(user.id).digest('hex').slice(0, 16);
+    const customer: CustomerRecord = {
+      id: crypto.randomUUID(), firebaseUid: `${DEVELOPER_UID_PREFIX}${user.id}`, developerUserId: user.id, aksesDeveloper: true,
+      email: `developer-${suffix}@akses-developer.invalid`,
+      nama: (user.fullName?.trim() || user.username).slice(0, 120), telepon: '', perusahaan: 'Akses Developer',
+      teleponTerverifikasi: false, status: 'menunggu-verifikasi',
+      privacyVersion: 'developer-access', privacyAcceptedAt: now, createdAt: now, updatedAt: now
+    };
+    const next = structuredClone(this.data);
+    next.customers.push(customer);
+    this.save(next, 'DEVELOPER_WORKSPACE_CREATED', customer.id, user.username);
+    return this.publicAccount(customer);
+  }
+
   listCustomersForStaff(): CustomerStaffSummary[] {
-    return this.data.customers.map((customer) => ({
+    return this.data.customers.filter((customer) => !customer.developerUserId).map((customer) => ({
       id: customer.id, email: customer.email, nama: customer.nama, telepon: customer.telepon,
       perusahaan: customer.perusahaan, status: customer.status, pelangganId: customer.pelangganId,
       createdAt: customer.createdAt, updatedAt: customer.updatedAt
@@ -200,7 +232,7 @@ export class ServerCustomerStore {
 
   linkCustomerToB2B(customerId: string, pelangganId: string, actor: string): CustomerStaffSummary {
     const next = structuredClone(this.data);
-    const customer = next.customers.find((entry) => entry.id === customerId);
+    const customer = next.customers.find((entry) => entry.id === customerId && !entry.developerUserId);
     if (!customer) throw new CustomerError(404, 'NOT_FOUND', 'Akun customer tidak ditemukan.');
     if (customer.status === 'ditangguhkan') throw new CustomerError(409, 'ACCOUNT_SUSPENDED', 'Akun ditangguhkan; tinjau dan aktifkan melalui alur pemulihan staf.');
     if (customer.status === 'menunggu-email') throw new CustomerError(409, 'EMAIL_UNVERIFIED', 'Verifikasi email customer sebelum mengaktifkan akun.');
@@ -215,7 +247,7 @@ export class ServerCustomerStore {
 
   suspendCustomer(customerId: string, actor: string): CustomerStaffSummary {
     const next = structuredClone(this.data);
-    const customer = next.customers.find((entry) => entry.id === customerId);
+    const customer = next.customers.find((entry) => entry.id === customerId && !entry.developerUserId);
     if (!customer) throw new CustomerError(404, 'NOT_FOUND', 'Akun customer tidak ditemukan.');
     if (customer.status === 'ditangguhkan') return this.getCustomerForStaff(customerId)!;
     customer.status = 'ditangguhkan';
@@ -228,8 +260,8 @@ export class ServerCustomerStore {
   register(identity: CustomerIdentity, input: CustomerProfileInput, privacyVersion: string): CustomerAccount {
     const error = customerProfileError(input);
     if (error) throw new CustomerError(400, 'INVALID_PROFILE', error);
-    if (!validEmail(identity.email) || !identity.uid) throw new CustomerError(401, 'INVALID_IDENTITY', 'Identitas customer tidak valid.');
-    const existing = this.data.customers.find((c) => c.firebaseUid === identity.uid);
+    if (!validEmail(identity.email) || !identity.uid || identity.uid.startsWith(DEVELOPER_UID_PREFIX)) throw new CustomerError(401, 'INVALID_IDENTITY', 'Identitas customer tidak valid.');
+    const existing = this.data.customers.find((c) => c.firebaseUid === identity.uid && !c.developerUserId);
     if (existing) {
       if (existing.status === 'ditangguhkan') throw new CustomerError(403, 'ACCOUNT_UNAVAILABLE', 'Akun tidak dapat digunakan. Hubungi tim kami.');
       return this.publicAccount(existing);
@@ -252,7 +284,7 @@ export class ServerCustomerStore {
   login(identity: CustomerIdentity): { token: string; account: CustomerAccount; expiresAt: number } {
     if (!identity.emailVerified) throw new CustomerError(403, 'EMAIL_UNVERIFIED', 'Verifikasi email Anda sebelum masuk.');
     const next = structuredClone(this.data);
-    const customer = next.customers.find((c) => c.firebaseUid === identity.uid);
+    const customer = next.customers.find((c) => c.firebaseUid === identity.uid && !c.developerUserId);
     if (!customer) throw new CustomerError(409, 'REGISTRATION_REQUIRED', 'Lengkapi pendaftaran customer terlebih dahulu.');
     if (customer.status === 'ditangguhkan') throw new CustomerError(403, 'ACCOUNT_UNAVAILABLE', 'Akun tidak dapat digunakan. Hubungi tim kami.');
     const email = identity.email.toLowerCase();

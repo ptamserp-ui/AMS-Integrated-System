@@ -9,7 +9,10 @@ import { CustomerError, ServerCustomerStore } from './customerStore';
 import type { CustomerIdentityService, CustomerIdentityState } from './customerAuth';
 
 export const CUSTOMER_COOKIE = 'ams_customer_session';
-type ResolvedCustomer = NonNullable<ReturnType<ServerCustomerStore['resolve']>>;
+type ResolvedCustomer = Omit<NonNullable<ReturnType<ServerCustomerStore['resolve']>>, 'session'> & {
+  session?: NonNullable<ReturnType<ServerCustomerStore['resolve']>>['session'];
+  developer?: true;
+};
 
 declare global {
   namespace Express {
@@ -201,6 +204,11 @@ export function createCustomerRouter(options: {
 
   const attachCustomer = async (req: Request, res: Response) => {
     const resolved = store!.resolve(sessionToken(req));
+    if (!resolved && req.auth?.user.isHiddenDeveloper === true) {
+      // The single hidden developer is not an employee; its ERP session grants an isolated portal workspace.
+      req.customerAuth = { account: store!.developerWorkspace(req.auth.user), uid: '', developer: true };
+      return;
+    }
     if (!resolved) throw new CustomerError(401, 'CUSTOMER_UNAUTHORIZED', 'Sesi customer berakhir. Silakan masuk kembali.');
     let current: CustomerIdentityState;
     try { current = await identity.read(resolved.uid); } catch (error) {
@@ -303,6 +311,7 @@ export function createCustomerRouter(options: {
   }));
   router.post('/auth/keluar-semua', handle(async (req, res) => {
     const customer = req.customerAuth!;
+    if (customer.developer) throw new CustomerError(409, 'DEVELOPER_SESSION', 'Akses developer mengikuti sesi ERP. Keluar melalui ERP.');
     store!.revokeAll(customer.account.id);
     customerCookie(req, res, '', origin);
     await identity.revoke(customer.uid);

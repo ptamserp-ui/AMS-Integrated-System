@@ -304,7 +304,9 @@ export default function CustomerPortalApp() {
             <button className={secondaryClass} onClick={() => go('keranjang')} aria-current={actualPage === 'keranjang' ? 'page' : undefined}>Keranjang <span className="ml-1 rounded-full bg-teal-100 px-2 py-0.5 text-xs">{cart.items.length}</span></button>
             <button className={secondaryClass} onClick={() => go('alamat')} aria-current={actualPage === 'alamat' ? 'page' : undefined}>Alamat pengiriman</button>
             <button className={secondaryClass} onClick={() => go('notifikasi')} aria-current={actualPage === 'notifikasi' ? 'page' : undefined}>Notifikasi</button>
-            <button disabled={busy} className={`${secondaryClass} inline-flex items-center justify-center gap-2`} onClick={() => logout()}><LogOut className="h-4 w-4" /> Keluar</button>
+            {account.aksesDeveloper
+              ? <a href="/" className={`${secondaryClass} inline-flex items-center justify-center gap-2`}><ArrowLeft className="h-4 w-4" /> Kembali ke ERP</a>
+              : <button disabled={busy} className={`${secondaryClass} inline-flex items-center justify-center gap-2`} onClick={() => logout()}><LogOut className="h-4 w-4" /> Keluar</button>}
           </nav>
         </aside>}
         <main className={`min-w-0 ${!account ? 'mx-auto max-w-lg' : ''}`}>
@@ -314,6 +316,9 @@ export default function CustomerPortalApp() {
             <h1 ref={heading} tabIndex={-1} className="text-2xl font-bold tracking-tight outline-none">{title}</h1>
             {error && <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
             {notice && <div role="status" className="mt-4 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">{notice}</div>}
+            {account?.aksesDeveloper && <div role="note" className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
+              <strong>Mode developer.</strong> Anda masuk dengan sesi ERP role developer. Data keranjang, alamat dan profil di sini adalah ruang kerja developer yang terpisah dari akun customer dan tidak dapat ditautkan ke pelanggan B2B.
+            </div>}
             {loading ? <p role="status" className="mt-4 text-sm text-slate-500">Memeriksa sesi customer...</p> : !status ? (
               <button className={`${secondaryClass} mt-5`} onClick={() => window.location.reload()}>Coba lagi</button>
             ) : !status.enabled ? (
@@ -321,10 +326,10 @@ export default function CustomerPortalApp() {
             ) : account && actualPage === 'ringkasan' ? (
               <div className="mt-6 space-y-5">
                 <p className="text-lg font-semibold">{account.nama}</p>
-                <div className="flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4">
+                {!account.aksesDeveloper && <div className="flex items-start gap-3 rounded-xl border border-teal-200 bg-teal-50 p-4">
                   <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-teal-700" />
                   <div><p className="text-sm font-semibold">Email terverifikasi</p><p className="mt-1 break-words text-sm text-slate-600">{account.email}</p></div>
-                </div>
+                </div>}
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                   {account.status === 'aktif' ? 'Akun bisnis aktif.' : 'Akun menunggu verifikasi bisnis. Tim kami perlu menautkan akun Anda ke data pelanggan B2B sebelum pemesanan dapat digunakan.'}
                 </div>
@@ -464,7 +469,7 @@ export default function CustomerPortalApp() {
                   <p className="text-xs text-slate-500">Nomor telepon belum diverifikasi. Perubahan profil tidak mengubah status verifikasi bisnis.</p>
                   <button disabled={busy} className={primaryClass}>{busy ? 'Menyimpan...' : 'Simpan profil'}</button>
                 </form>
-                <div className="space-y-3 border-t border-slate-200 pt-5">
+                {!account.aksesDeveloper && <div className="space-y-3 border-t border-slate-200 pt-5">
                   <h2 className="inline-flex items-center gap-2 font-semibold"><KeyRound className="h-4 w-4" /> Keamanan akun</h2>
                   <p className="break-words text-sm text-slate-600">Email terverifikasi: {account.email}</p>
                   <p className="text-sm text-slate-600">Pengaturan ulang kata sandi dilakukan melalui tautan Firebase ke email Anda. Perubahan email dan alamat pengiriman belum tersedia pada tahap ini.</p>
@@ -472,7 +477,7 @@ export default function CustomerPortalApp() {
                     <button disabled={busy || !status.authAvailable} className={secondaryClass} onClick={() => void run(() => sendReset(account.email))}>Kirim tautan atur ulang sandi</button>
                     <button disabled={busy} className={secondaryClass} onClick={() => logout(true)}>Keluar dari semua perangkat</button>
                   </div>
-                </div>
+                </div>}
               </div>
             ) : !status.authAvailable ? (
               <p className="mt-4 text-sm text-amber-800">Konfigurasi Firebase customer belum siap. Akses karyawan tidak terpengaruh. Hubungi tim kami atau coba lagi nanti.</p>

@@ -148,6 +148,7 @@ describe('customer HTTP authentication: isolated identity service, real disk and
   let service: CustomerIdentityService;
   let employeeToken: string;
   let salesRepToken: string;
+  let rbac: ServerRbacStore;
   let catalogPublished: boolean;
 
   beforeEach(async () => {
@@ -170,7 +171,7 @@ describe('customer HTTP authentication: isolated identity service, real disk and
       }),
       revoke: vi.fn(async () => { current.validAfter = Date.now() + 1000; })
     };
-    const rbac = new ServerRbacStore(dir);
+    rbac = new ServerRbacStore(dir);
     const developer = rbac.bootstrapFirstDeveloper({ username: 'dev.test', password: 'TestPassword123!', fullName: 'Test Developer' }, '127.0.0.1', 'Vitest');
     if (!developer.ok) throw new Error(developer.message);
     const login = rbac.authenticate('dev.test', 'TestPassword123!', '127.0.0.1', 'Vitest');
@@ -288,13 +289,47 @@ describe('customer HTTP authentication: isolated identity service, real disk and
 
   it('does not accept employee sessions as customer sessions or customer sessions as employee sessions', async () => {
     const customerCookie = await login();
-    const employeeCookie = `ams_session=${employeeToken}`;
+    const employeeCookie = `ams_session=${salesRepToken}`;
     expect((await request('/api/customer/auth/saya', undefined, employeeCookie)).status).toBe(401);
-    expect((await request('/api/customer/auth/saya', undefined, '', { Authorization: `Bearer ${employeeToken}` })).status).toBe(401);
+    expect((await request('/api/customer/auth/saya', undefined, '', { Authorization: `Bearer ${salesRepToken}` })).status).toBe(401);
+    const itSupport = rbac.createUser({
+      username: 'it.test', password: 'ItSupportPass123!', fullName: 'IT Support',
+      roleId: 'developer_it_support', employeeId: 'EMP-IT'
+    }, 'dev.test', 'developer_it_support', '127.0.0.1');
+    if (!itSupport.ok) throw new Error(itSupport.message);
+    const itLogin = rbac.authenticate('it.test', 'ItSupportPass123!', '127.0.0.1', 'Vitest');
+    if (!itLogin.ok) throw new Error(itLogin.message);
+    expect((await request('/api/customer/auth/saya', undefined, `ams_session=${itLogin.token}`)).status).toBe(401);
     for (const endpoint of ['/api/sync/state', '/api/rbac/users', '/api/media']) {
       expect((await request(endpoint, undefined, customerCookie)).status).toBe(401);
       expect((await request(endpoint, undefined, employeeCookie)).status).toBe(200);
     }
+  });
+
+  it('gives a developer ERP session an isolated portal workspace that staff cannot link', async () => {
+    const developerCookie = `ams_session=${employeeToken}`;
+    const me = await request('/api/customer/auth/saya', undefined, developerCookie);
+    expect(me.status).toBe(200);
+    expect(me.body.account).toMatchObject({ aksesDeveloper: true, nama: 'Test Developer' });
+    expect(me.body.account).not.toHaveProperty('developerUserId');
+    expect(service.read).not.toHaveBeenCalled();
+    expect((await request('/api/customer/auth/saya', undefined, developerCookie)).body.account.id).toBe(me.body.account.id);
+
+    const cart = await request('/api/customer/keranjang', { items: [{ produkId: 'produk-1', varianId: 'varian-1', jumlah: 2 }] }, developerCookie, {}, 'PUT');
+    expect(cart.status).toBe(200);
+    expect((await request('/api/customer/keranjang', { items: [] }, developerCookie, { Origin: 'https://other.invalid' }, 'PUT')).status).toBe(403);
+    expect((await request('/api/customer/auth/keluar-semua', {}, developerCookie)).body.error).toBe('DEVELOPER_SESSION');
+
+    const customerCookie = await login();
+    expect((await request('/api/customer/keranjang', undefined, customerCookie)).body.cart.items).toEqual([]);
+    expect((await request('/api/customer/auth/saya', undefined, `${customerCookie}; ${developerCookie}`)).body.account.email).toBe(identity.email);
+
+    const staff = await request('/api/erp/portal/customers', undefined, developerCookie);
+    expect(staff.body.items.map((item: { email: string }) => item.email)).toEqual([identity.email]);
+    expect((await request(`/api/erp/portal/customers/${me.body.account.id}/tautkan`, { pelangganId: 'b2b-active' }, developerCookie)).status).toBe(404);
+
+    const reloaded = new ServerCustomerStore(dir);
+    expect(reloaded.getCart(me.body.account.id).items).toHaveLength(1);
   });
 
   it('keeps profiles scoped to the session and persists changes after restart', async () => {

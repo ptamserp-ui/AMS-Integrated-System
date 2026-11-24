@@ -47,7 +47,9 @@ Pemeriksaan pada 24 November 2026 merangkum riwayat evaluasi dan commit; status 
 - [x] ✅ **Lokal — audit Tahap 1 Customer Portal:** autentikasi, sesi, RBAC, sinkronisasi dan model data penjualan/keuangan ditelaah tanpa perubahan kode; lihat [riwayat audit portal](#24-november-2026--audit-customer-portal-tahap-1-lokal).
 - [x] ✅ **Lokal — rancangan Tahap 2 Customer Portal:** keputusan pengguna, arsitektur, rencana kerja, matriks uji, dan revisi atas 9 temuan tinjauan dicatat di [customer-portal.md](./customer-portal.md). Pada tahap rancangan ini belum ada kode portal.
 - [x] ✅ **Lokal — implementasi autentikasi Customer Portal:** store/sesi terpisah, API autentikasi, pemisahan provider, pilihan login dan UI akun/profil dasar diuji. Lihat [bukti dan batasan](./customer-portal.md#24-november-2026--implementasi-autentikasi-lokal). Firebase pada browser disimulasikan; belum diaktifkan atau di-deploy.
-- [x] ✅ **Lokal — irisan pertama integrasi akun ERP:** API staf untuk daftar akun, tautan unik ke master B2B aktif, dan penangguhan dengan pencabutan sesi; tes RBAC, Origin, audit dan isolasi customer lulus. Belum ada UI staf atau deploy. Lihat [bukti dan batasan](./customer-portal.md#24-november-2026--api-awal-integrasi-akun-erp-lokal).
+- [x] ✅ **Lokal — irisan pertama integrasi akun ERP:** API staf untuk daftar akun, tautan unik ke master B2B aktif, dan penangguhan dengan pencabutan sesi; tes RBAC, Origin, audit dan isolasi customer lulus. Belum ada UI staf. Lihat [bukti dan batasan](./customer-portal.md#24-november-2026--api-awal-integrasi-akun-erp-lokal).
+- [x] ✅ **Staging Linux — Customer Portal aktif:** commit `5b273a2` ter-deploy dan flag portal menyala; status publik `enabled`/`authAvailable` bernilai true. Registrasi masih menunggu URL kebijakan. Lihat [riwayat aktivasi](#24-november-2026--deploy-dan-aktivasi-customer-portal-di-staging-linux).
+- [x] ✅ **Lokal — akses developer ke Customer Portal:** sesi ERP akun developer tersembunyi membuka ruang kerja portal terpisah; karyawan lain, termasuk role `developer_it_support`, tetap ditolak. 40 file / 484 tes, lint dan build lulus. Belum di-deploy. Lihat [rincian](./customer-portal.md#24-november-2026--akses-developer-ke-customer-portal-lokal).
 
 **Belum selesai atau ditunda:**
 
@@ -58,7 +60,7 @@ Pemeriksaan pada 24 November 2026 merangkum riwayat evaluasi dan commit; status 
 - [ ] **Website:** pengujian seluruh seksi dan peran, Firebase nyata, performa jaringan serta perubahan lokal pada Linux staging.
 - [ ] **Restore lengkap dan login dari backup:** ditunda sampai fase lain selesai, tetapi wajib sebelum keputusan GO.
 - [ ] **Produksi dan API pemerintah:** produksi tetap NO-GO; integrasi pemerintah ditunda sesuai keputusan dan persetujuan yang masih diperlukan.
-- [ ] **Customer Portal Tahap 4–6 dan aktivasi nyata:** dashboard transaksi, UI staf, pemulihan akun, workflow pesanan/invoice/pembayaran, Firebase nyata, rules terpasang dan validasi staging masih terbuka. API awal pengelolaan akun hanya tersedia lokal. Progres di [customer-portal.md](./customer-portal.md). Pembatasan provider wajib diverifikasi sebelum Email/Password diaktifkan, dan P0-02 wajib ditutup sebelum konversi Sales Order dipakai pengguna nyata.
+- [ ] **Customer Portal Tahap 4–6 dan aktivasi nyata:** dashboard transaksi, UI staf, pemulihan akun, workflow pesanan/invoice/pembayaran, Firebase nyata, rules terpasang dan validasi staging masih terbuka. API awal pengelolaan akun sudah ter-deploy di staging; registrasi menunggu URL kebijakan. Progres di [customer-portal.md](./customer-portal.md). Pembatasan provider wajib diverifikasi sebelum Email/Password diaktifkan, dan P0-02 wajib ditutup sebelum konversi Sales Order dipakai pengguna nyata.
 
 ## 1. Lingkup dan kesimpulan awal
 
@@ -373,6 +375,13 @@ Target checklist beban: **50 pengguna bersamaan, tanpa HTTP 5xx dan respons kura
 - [x] ✅ Tautan mengacu pada master B2B `sales_pelanggan` dari store server, menolak ID tidak unik/tidak aktif, email belum diverifikasi, serta pelanggan yang sudah tertaut ke akun lain. Penangguhan mencabut sesi portal; audit mencatat username pelaku tanpa email customer.
 - [x] ✅ Tes terarah customer portal lulus 25 tes; regresi penuh lulus 40 file / 483 tes, `npm run lint`, dan `npm run build`.
 - [ ] Masih lokal; tidak ada UI staf, aktivasi ulang akun, order/penawaran, Sales Order, invoice/pembayaran, perubahan Firebase atau deploy. Portal tetap nonaktif, P0-02 terbuka, dan produksi tetap **NO-GO**.
+
+### 24 November 2026 — deploy dan aktivasi Customer Portal di staging Linux
+
+- [x] ✅ **Staging Linux:** commit `5b273a2` di-deploy ke service `ams`; pengguna melaporkan `npm ci`, lint, tes staging, dan `build:staging` selesai, service `active`.
+- [x] ✅ **Flag portal staging:** `CUSTOMER_PORTAL_ENABLED="true"` di `.env.staging`. Pemeriksaan publik `https://erp.remediams.com/api/customer/status` menunjukkan `enabled: true`, `authAvailable: true`; `/akun` merespons 200 dan `GET /api/erp/portal/customers` tanpa sesi ditolak 401.
+- [ ] Registrasi customer masih `false` karena `CUSTOMER_PRIVACY_URL`, `CUSTOMER_TERMS_URL`, dan `CUSTOMER_PRIVACY_VERSION` belum diisi dengan halaman kebijakan yang sah.
+- [ ] Belum dibuktikan: login customer nyata (Email/Password Firebase), alur akun/keranjang/alamat di browser, login karyawan setelah deploy, dan rollback flag. Order/invoice/pembayaran belum tersedia; produksi tetap **NO-GO**.
 
 ### Format pembaruan berikutnya
 

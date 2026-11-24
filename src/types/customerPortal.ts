@@ -11,6 +11,8 @@ export interface CustomerAccount extends CustomerProfileInput {
   email: string;
   status: CustomerStatus;
   teleponTerverifikasi: false;
+  /** Developer workspace backed by an ERP developer session instead of a customer identity. */
+  aksesDeveloper?: true;
   createdAt: string;
   updatedAt: string;
 }
