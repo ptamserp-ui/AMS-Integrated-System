@@ -482,6 +482,7 @@ function Dasbor({
             {activeTab === 'sales-marketing' && (
               <SalesModule
                 currentRole={currentRole}
+                sesi={sesi}
                 initialTab={salesSubTab}
                 onTabChange={setSalesSubTab}
                 onBuatQuotationUntukPelanggan={(pel) => {

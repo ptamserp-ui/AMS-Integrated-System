@@ -8,9 +8,11 @@ import {
   ChartColumn,
   Mail,
   BookOpen,
-  Store
+  Store,
+  Database
 } from 'lucide-react';
 import { PelangganB2B, UserRole } from '../../../types';
+import { punyaIzin, type SesiLogin } from '../../../utils/autentikasi';
 import ErrorBoundary from '../../common/ErrorBoundary';
 
 const CrmProspekModule = lazy(() => import('./sales/CrmProspekModule'));
@@ -22,12 +24,14 @@ const AnalitikSalesModule = lazy(() => import('./sales/AnalitikSalesModule'));
 const ListmonkModule = lazy(() => import('./sales/ListmonkModule'));
 const InternalCatalogModule = lazy(() => import('./sales/InternalCatalogModule'));
 const PortalCustomerModule = lazy(() => import('./sales/PortalCustomerModule'));
+const CustomerDatabaseModule = lazy(() => import('./sales/CustomerDatabaseModule'));
 
-export type SalesTab = 'crm' | 'tender' | 'sfa' | 'order' | 'portal-customer' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
+export type SalesTab = 'crm' | 'customer-database' | 'tender' | 'sfa' | 'order' | 'portal-customer' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
 
 const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
   { id: 'analitik', label: 'Analitik & Dashboard (BI)', ikon: ChartColumn },
   { id: 'crm', label: 'CRM & Management Prospek', ikon: Users },
+  { id: 'customer-database', label: 'Customer Database', ikon: Database },
   { id: 'tender', label: 'Manajemen Tender & Kontrak (e-Katalog & LPSE)', ikon: Gavel },
   { id: 'sfa', label: 'Otomasi Sales Force (SFA)', ikon: MapPinned },
   { id: 'order', label: 'Manajemen Order & Penjualan', ikon: ShoppingCart },
@@ -39,11 +43,13 @@ const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
 
 export default function SalesModule({
   currentRole,
+  sesi,
   initialTab = 'order',
   onTabChange,
   onBuatQuotationUntukPelanggan
 }: {
   currentRole: UserRole;
+  sesi: SesiLogin;
   initialTab?: SalesTab;
   onTabChange?: (tab: SalesTab) => void;
   onBuatQuotationUntukPelanggan?: (pelanggan: PelangganB2B) => void;
@@ -76,8 +82,8 @@ export default function SalesModule({
           Distribusi alkes ke Rumah Sakit Pemerintah (LKPP), RS Swasta, dan Klinik dengan verifikasi etika promosi alkes oleh PJT (bebas dari klaim medis palsu) dan alokasi stok sistem FEFO sadar-kunci.
         </p>
         <p className="text-xs text-slate-500 mt-2 max-w-3xl leading-relaxed">
-          Cetak biru divisi komersial: 8 kelompok kerja (Analitik BI, CRM &amp; Prospek, Tender &amp; Kontrak, Otomasi Sales Force,
-          Manajemen Order, Penyusun e-Brochure PDF, Kampanye &amp; Rebate, Newsletter &amp; Mailing List). Penerbitan Quotation resmi kini terintegrasi pada menu{' '}
+          Cetak biru divisi komersial: Analitik BI, CRM &amp; Prospek, Customer Database, Tender &amp; Kontrak, Otomasi Sales Force,
+          Manajemen Order, Penyusun e-Brochure PDF, Kampanye &amp; Rebate, dan Newsletter &amp; Mailing List. Penerbitan Quotation resmi kini terintegrasi pada menu{' '}
           <strong className="text-slate-700">Internal Document</strong> bersama seluruh formulir terkendali CDAKB.
         </p>
       </div>
@@ -112,6 +118,9 @@ export default function SalesModule({
         >
           {activeTab === 'crm' && (
             <CrmProspekModule onBuatQuotation={onBuatQuotationUntukPelanggan} />
+          )}
+          {activeTab === 'customer-database' && (
+            <CustomerDatabaseModule bolehUbah={punyaIzin(sesi, 'sales-marketing', 'update')} aktor={sesi.namaLengkap} />
           )}
           {activeTab === 'tender' && <TenderKontrakModule />}
           {activeTab === 'sfa' && <SalesForceModule />}

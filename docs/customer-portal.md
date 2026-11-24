@@ -381,6 +381,11 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 
 ## 8. Riwayat
 
+### 24 November 2026 — deployment staging `d4b089e`
+
+- Kode portal dalam `d4b089e` telah di-deploy ke Linux staging. Service `ams` aktif dan health lokal/publik serta koneksi Firebase Admin diperiksa; `/akun` dan status portal merespons HTTP 200, dengan `enabled`/`authAvailable` true dan `registrationAvailable` false. Hash snapshot website cocok dengan salinan stash.
+- Ini bukan uji fungsi portal, login Google, penawaran atau pembayaran di staging. Tahap 4–6 tetap terbuka; verifikasi rules dan alur browser nyata masih diperlukan.
+
 ### 24 November 2026 — resolver popup Google lokal
 
 - Inisialisasi Firebase customer kini menetapkan `browserPopupRedirectResolver` sekaligus mempertahankan `inMemoryPersistence`; tidak ada perubahan provider, akun, atau rules Firebase.

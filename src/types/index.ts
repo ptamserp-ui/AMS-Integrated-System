@@ -1175,6 +1175,13 @@ export interface PelangganB2B {
   npwp?: string;
   kodeProvinsi?: string;
   kodeKota?: string;
+  alamat1?: string;
+  alamat2?: string;
+  wilayahCustomer?: string;
+  penanggungJawabSales?: string;
+  emailCustomer?: string;
+  nomorWhatsapp?: string;
+  afiliasiKeterangan?: string;
   /** Email pengadaan yang dipakai untuk menyarankan penautan akun Customer Portal (selalu dikonfirmasi staf). */
   emailPortal?: string;
 }

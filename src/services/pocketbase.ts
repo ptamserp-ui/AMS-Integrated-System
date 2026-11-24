@@ -2301,12 +2301,13 @@ export class AMSDatabaseManager {
     }
   }
 
-  private setCollection<T>(key: string, data: T[]): void {
+  private setCollection<T>(key: string, data: T[], throwOnFailure = false): void {
     if (this.syncHoldReason && !this.isApplyingRemote) {
       throw new Error('Perubahan offline ditahan sampai akses dipulihkan.');
     }
     try {
       if (typeof localStorage === 'undefined') {
+        if (throwOnFailure) throw new Error('Penyimpanan lokal tidak tersedia.');
         this.notify(key);
         return;
       }
@@ -2336,6 +2337,7 @@ export class AMSDatabaseManager {
       }
     } catch (e) {
       console.error(`Gagal menyimpan data ${key}:`, e);
+      if (throwOnFailure) throw e;
     }
   }
 
@@ -2847,25 +2849,40 @@ export class AMSDatabaseManager {
   public getPelangganB2B(): PelangganB2B[] {
     return this.getCollection<PelangganB2B>('sales_pelanggan', INITIAL_PELANGGAN_B2B);
   }
-  public savePelangganB2B(items: PelangganB2B[]) {
-    this.setCollection('sales_pelanggan', items);
+  public savePelangganB2B(items: PelangganB2B[], throwOnFailure = false) {
+    this.setCollection('sales_pelanggan', items, throwOnFailure);
   }
   public addPelangganB2B(item: PelangganB2B) {
     this.savePelangganB2B([item, ...this.getPelangganB2B()]);
     this.logAudit('Sales & Marketing — CRM', 'Pencatatan master pelanggan B2B baru', item.kodePelanggan, 'Manajer Penjualan', 'Sales & Marketing');
   }
-  public updatePelangganB2B(id: string, patch: Partial<PelangganB2B>) {
-    const current = this.getPelangganB2B();
+  public updatePelangganB2B(id: string, patch: Partial<PelangganB2B>, opsi?: { aktor: string; throwOnFailure: boolean }) {
+    let current: PelangganB2B[];
+    if (opsi?.throwOnFailure) {
+      if (typeof localStorage === 'undefined') throw new Error('Penyimpanan lokal tidak tersedia.');
+      const raw = localStorage.getItem(STORAGE_PREFIX + 'sales_pelanggan');
+      if (raw === null) throw new Error('Data pelanggan lokal belum tersedia. Muat ulang sebelum menyimpan.');
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed) || !parsed.every((item: unknown) =>
+        item !== null && typeof item === 'object' && 'id' in item && typeof item.id === 'string'
+      )) throw new Error('Data pelanggan lokal tidak valid. Jangan menimpa data sebelum dipulihkan.');
+      current = parsed as PelangganB2B[];
+    } else {
+      current = this.getPelangganB2B();
+    }
     const lama = current.find((p) => p.id === id);
-    if (!lama) return;
-    this.savePelangganB2B(current.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    if (!lama) {
+      if (opsi?.throwOnFailure) throw new Error('Pelanggan tidak ditemukan. Muat ulang data sebelum menyimpan.');
+      return;
+    }
+    this.savePelangganB2B(current.map((p) => (p.id === id ? { ...p, ...patch } : p)), opsi?.throwOnFailure);
     this.logAudit(
       'Sales & Marketing — CRM',
-      'Perubahan master pelanggan (batas kredit/TOP/status)',
+      opsi ? 'Perubahan data kontak customer' : 'Perubahan master pelanggan (batas kredit/TOP/status)',
       lama.kodePelanggan,
-      'Manajer Penjualan',
+      opsi?.aktor || 'Manajer Penjualan',
       'Sales & Marketing',
-      this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
+      opsi ? undefined : this.bentangPerubahan(lama as unknown as Record<string, unknown>, patch as Record<string, unknown>)
     );
   }
 
