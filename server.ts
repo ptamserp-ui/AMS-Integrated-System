@@ -45,6 +45,11 @@ import { buatIdentitasSinkronisasi, HEADER_IDENTITAS_SYNC } from './src/utils/id
 import { adalahKonfigurasiSitus } from './src/utils/websitePrimitives';
 import type { RoleDefinition } from './src/types/index';
 import { loadDeploymentEnv, resolveDeploymentEnvironment } from './server/envLoader';
+import { verifyEmployeeFirebaseToken } from './server/firebaseIdentity';
+import { createFirebaseCustomerIdentity } from './server/customerAuth';
+import { createCustomerRouter } from './server/customerRoutes';
+import { ServerCustomerStore } from './server/customerStore';
+import type { CustomerPortalStatus } from './src/types/customerPortal';
 import { buildWindowsDeploymentGuides } from './server/deploymentGuides';
 import { WebsiteTranslationError, WebsiteTranslationService } from './server/websiteTranslation';
 import { buatProspekWebsite, KUNCI_RFQ_WEBSITE, samaPermintaanWebsite } from './server/websiteRfq';
@@ -52,12 +57,14 @@ import type { ProspekAlkes } from './src/types';
 import {
   encodeImageDataUrl,
   isValidMediaId,
+  MediaStorageError,
   ServerMediaStore,
   type MediaVisibility,
   type StoredMediaMeta
 } from './server/mediaStore';
 import {
   getFirebaseAdminDb,
+  getFirebaseAdminAuth,
   getFirebaseAdminStatus,
   initializeFirebaseAdmin,
   isAiStudioPreviewRuntime,
@@ -73,6 +80,10 @@ const __dirname = path.dirname(__filename);
 loadDeploymentEnv(__dirname);
 
 const DATA_DIR = path.resolve(process.env.AMS_DATA_DIR?.trim() || path.resolve(__dirname, 'data'));
+if (process.env.CUSTOMER_PORTAL_ENABLED && !['true', 'false'].includes(process.env.CUSTOMER_PORTAL_ENABLED)) {
+  throw new Error('CUSTOMER_PORTAL_ENABLED harus bernilai true atau false.');
+}
+const customerStore = process.env.CUSTOMER_PORTAL_ENABLED === 'true' ? new ServerCustomerStore(DATA_DIR) : null;
 const BERKAS_SNAPSHOT = path.join(DATA_DIR, 'website-published.json');
 const BERKAS_SNAPSHOT_STATIS = path.resolve(__dirname, 'public', 'website-published.json');
 const BERKAS_INDEKS = path.resolve(__dirname, 'index.html');
@@ -195,56 +206,7 @@ async function verifyFirebaseIdToken(idToken: string): Promise<
   | { ok: true; uid: string; email: string; emailVerified: boolean; displayName: string }
   | { ok: false; message: string }
 > {
-  // Prioritaskan verifikasi lokal/resmi via Firebase Admin SDK jika Service Account aktif di server/VPS
-  const adminVerified = await verifyIdTokenViaAdmin(idToken);
-  if (adminVerified.ok) {
-    return adminVerified;
-  }
-  if (!adminVerified.fallbackToRest) {
-    return { ok: false, message: adminVerified.message };
-  }
-
-  const cfg = readFirebaseClientConfig();
-  if (!cfg?.apiKey) {
-    return { ok: false, message: 'Konfigurasi Firebase belum tersedia di server.' };
-  }
-  try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(cfg.apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken })
-      }
-    );
-    if (!res.ok) {
-      return { ok: false, message: 'Token Firebase tidak valid atau sudah kedaluwarsa.' };
-    }
-    const payload = (await res.json()) as {
-      users?: Array<{
-        localId?: string;
-        email?: string;
-        emailVerified?: boolean;
-        displayName?: string;
-      }>;
-    };
-    const u = payload.users?.[0];
-    if (!u?.localId || !u.email) {
-      return { ok: false, message: 'Akun Firebase tidak memiliki alamat email yang sah.' };
-    }
-    if (!u.emailVerified) {
-      return { ok: false, message: 'Email akun Google belum terverifikasi.' };
-    }
-    return {
-      ok: true,
-      uid: u.localId,
-      email: u.email.trim().toLowerCase(),
-      emailVerified: true,
-      displayName: u.displayName || u.email
-    };
-  } catch {
-    return { ok: false, message: 'Gagal memverifikasi token Firebase ke layanan identitas Google.' };
-  }
+  return verifyEmployeeFirebaseToken(idToken, verifyIdTokenViaAdmin, () => readFirebaseClientConfig()?.apiKey);
 }
 
 function bacaSnapshot(): Record<string, any> | null {
@@ -743,6 +705,35 @@ async function startServer() {
     }
     return next();
   }, pbProxy);
+
+  const customerIdentity = createFirebaseCustomerIdentity(getFirebaseAdminAuth);
+  const customerPolicyUrl = (name: string) => {
+    const value = process.env[name]?.trim();
+    if (!value) return null;
+    if (/^\/(?!\/)/.test(value) && !value.includes('\\')) return value;
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error(`${name} harus URL HTTPS atau path situs.`);
+    return url.href;
+  };
+  const privacyUrl = customerStore ? customerPolicyUrl('CUSTOMER_PRIVACY_URL') : null;
+  const termsUrl = customerStore ? customerPolicyUrl('CUSTOMER_TERMS_URL') : null;
+  const privacyVersion = process.env.CUSTOMER_PRIVACY_VERSION?.trim() || null;
+  const customerStatus = (): CustomerPortalStatus => {
+    const cfg = customerStore ? readFirebaseClientConfig() : null;
+    const authAvailable = Boolean(customerStore && cfg && customerIdentity.available() &&
+      cfg.projectId === getFirebaseAdminStatus().projectId);
+    return {
+      enabled: Boolean(customerStore), authAvailable,
+      registrationAvailable: Boolean(authAvailable && privacyUrl && termsUrl && privacyVersion && privacyVersion.length <= 80),
+      privacyUrl, termsUrl, privacyVersion,
+      firebase: authAvailable && cfg ? { apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId, appId: cfg.appId } : null
+    };
+  };
+  app.use('/api/customer', createCustomerRouter({
+    store: customerStore, identity: customerIdentity, status: customerStatus,
+    origin: customerStore ? process.env.APP_URL?.trim() : undefined,
+    catalog: bacaSnapshot
+  }));
 
   app.use(express.json({ limit: '10mb' }));
 
@@ -2266,6 +2257,10 @@ async function startServer() {
           ...(peringatan.length ? { peringatan: peringatan.join(' ') } : {})
         });
       } catch (err) {
+        if (err instanceof MediaStorageError) {
+          console.error('[media] Penyimpanan unggahan gagal:', err);
+          return res.status(500).json({ error: 'MEDIA_STORAGE_FAILED', pesan: err.message });
+        }
         const msg = err instanceof Error ? err.message : 'Gagal menyimpan file gambar di server.';
         return res.status(400).json({ error: 'INVALID_MEDIA', pesan: msg });
       }

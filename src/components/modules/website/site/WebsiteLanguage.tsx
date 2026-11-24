@@ -59,6 +59,10 @@ const translations: Record<string, string> = {
     'Request storage is unavailable. Contact the sales team by email or WhatsApp.',
   'Periksa isian permintaan dan batas panjang setiap kolom.': 'Check the request fields and their length limits.',
   'Periksa nama, satuan, dan jumlah produk yang diminta.': 'Check the requested product names, units, and quantities.',
+  'Maksimal 30 produk per permintaan. Hapus produk yang berlebih atau kirim permintaan terpisah.':
+    'A request can contain at most 30 products. Remove the extra products or send separate requests.',
+  'Jumlah setiap produk harus berupa bilangan bulat antara 1 dan 1.000.000. Ubah jumlah atau hapus dan tambahkan kembali produk.':
+    'Each product quantity must be a whole number between 1 and 1,000,000. Change the quantity or remove and add the product again.',
   'Terlalu banyak permintaan. Coba lagi beberapa menit.': 'Too many requests. Please try again in a few minutes.',
   'Buka di Surel': 'Open in Email',
   'WhatsApp Tim Sales': 'WhatsApp Sales Team',

@@ -84,7 +84,7 @@ export function getFirebaseConfigError(): string | null {
 }
 
 const existingApps = getApps();
-const app = existingApps.length > 0 ? existingApps[0] : initializeApp(firebaseConfig);
+const app = existingApps.find((candidate) => candidate.name === '[DEFAULT]') ?? initializeApp(firebaseConfig);
 
 function createFirestoreDb() {
   try {

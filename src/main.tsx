@@ -22,12 +22,15 @@ if (typeof window !== 'undefined') {
 const App = lazy(() => import('./App.tsx'));
 const MobileApp = lazy(() => import('./components/mobile/MobileApp.tsx'));
 const PublicWebsiteApp = lazy(() => import('./components/modules/website/site/PublicWebsiteApp.tsx'));
+const CustomerPortalApp = lazy(() => import('./components/customer/CustomerPortalApp.tsx'));
 
 const JALUR_SITUS_PUBLIK = /^\/web\/?/;
 const JALUR_MOBILE = /^\/mobile\/?/;
 
 const jalur = window.location.pathname;
-const Halaman = JALUR_MOBILE.test(jalur) ? (
+const Halaman = /^\/akun(?:\/|$)/.test(jalur) ? (
+  <CustomerPortalApp />
+) : JALUR_MOBILE.test(jalur) ? (
   <MobileApp />
 ) : JALUR_SITUS_PUBLIK.test(jalur) ? (
   <PublicWebsiteApp />

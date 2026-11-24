@@ -22,7 +22,42 @@ Status yang digunakan:
 - **Ditunda:** secara sadar dikecualikan dari fase ini dan memerlukan persetujuan tertulis.
 - **Terbuka / dalam pengerjaan / selesai diverifikasi:** status tindak lanjut; selesai hanya setelah kriteria penerimaan dibuktikan.
 
+Setiap pekerjaan yang rampung ditambahkan ke checklist di bawah dengan `- [x] ✅`, lingkungan dan bukti. Tanda hijau hanya berlaku untuk lingkup yang disebutkan, bukan seluruh fase atau lingkungan lain. Pekerjaan parsial, tertunda dan belum terbukti tetap `- [ ]`; perbarui riwayat saat status berubah tanpa menghapus baseline.
+
 Jangan menyimpan kata sandi, token, isi environment, service-account JSON, data pribadi, atau log berisi rahasia dalam dokumen atau bukti yang dirujuk.
+
+### Checklist pekerjaan berdasarkan bukti yang tersedia
+
+Pemeriksaan pada 24 November 2026 merangkum riwayat evaluasi dan commit; status VPS tidak diperiksa ulang pada tanggal ini.
+
+- [x] ✅ **Lokal — analitik Sales & Marketing:** metrik, simulasi terpisah, grafik dan navigasi dibuat dan diuji pada kandidat `5fd1631`; bukan bukti akurasi data operasional atau smoke test staging.
+- [x] ✅ **Staging saat pemeriksaan — Ubuntu, HTTPS dan Firebase:** service dan health diperiksa pada deployment `0a1c6d0`; bukan bukti kondisi saat ini atau migrasi data produksi. Lihat [riwayat deployment](#24-november-2026--deployment-staging-dan-ketahanan-loader-lokal).
+- [x] ✅ **Staging saat pemeriksaan — empat form Pengadaan tampil:** pengguna mengonfirmasi tampilan pada `5780a4f`; alur simpan dan persetujuan belum dinyatakan selesai.
+- [x] ✅ **Staging saat pemeriksaan — satu akun uji:** pembuatan, login dan peran setelah restart diuji pada `3de93b8`; matriks seluruh akun/peran masih terbuka.
+- [x] ✅ **Staging saat pemeriksaan — logout/login UI:** pengguna menguji ulang setelah deploy `70463e8`; pencabutan token lama di VPS belum diuji.
+- [x] ✅ **Backup parsial — salinan terenkripsi:** hash arsip data VPS dan salinannya cocok; ekstraksi empat berkas diuji lokal. Restore lengkap dan login dari backup belum diuji.
+- [x] ✅ **Lokal — pembatasan HRIS pada skenario sintetis:** HTTP/WebSocket dan aturan yang disebut pada [riwayat HRIS](#23-november-2026--push-dan-lanjutan-isolasi-hris) diuji; P0-05 tetap parsial.
+- [x] ✅ **Lokal — CMS, snapshot dan RFQ:** skenario pada [riwayat website](#23-november-2026--prioritas-cms-dan-website-publik-lokal) diuji dengan data sintetis; belum mencakup seluruh fitur dan jalur live.
+- [x] ✅ **Lokal dan push — loader state dan indeks media:** kasus berkas rusak dan startup diuji, commit `55c7982` dipush; belum dibuktikan di VPS.
+- [x] ✅ **Lokal — rollback unggah media saat indeks gagal:** skenario yang dijelaskan pada [riwayat media](#24-november-2026--ketahanan-unggah-media-lokal) diuji; belum di-commit atau di-deploy.
+- [x] ✅ **Lokal — retry cache dan penjagaan draf tertunda:** tes delta/realtime dan antrean lulus; interaksi tombol belum diuji di browser dan konflik dua editor belum selesai.
+- [x] ✅ **Lokal — validasi batas RFQ:** tes batas dan uji browser sintetis menampilkan alasan untuk 31 produk atau jumlah pecahan tanpa mengirim permintaan; belum di-commit atau di-deploy.
+- [x] ✅ **Lokal — navigasi formulir RFQ:** isian dan status pengiriman dipertahankan selama navigasi internal, diuji dengan respons sintetis; lihat [riwayat RFQ](#24-november-2026--navigasi-formulir-rfq-lokal). Belum di-deploy.
+- [x] ✅ **Lokal — regresi saat pemeriksaan sebelumnya:** 38 file / 452 tes, TypeScript dan lint rules Firestore lulus sebelum perubahan navigasi RFQ.
+- [x] ✅ **Lokal — audit Tahap 1 Customer Portal:** autentikasi, sesi, RBAC, sinkronisasi dan model data penjualan/keuangan ditelaah tanpa perubahan kode; lihat [riwayat audit portal](#24-november-2026--audit-customer-portal-tahap-1-lokal).
+- [x] ✅ **Lokal — rancangan Tahap 2 Customer Portal:** keputusan pengguna, arsitektur, rencana kerja, matriks uji, dan revisi atas 9 temuan tinjauan dicatat di [customer-portal.md](./customer-portal.md). Pada tahap rancangan ini belum ada kode portal.
+- [x] ✅ **Lokal — implementasi autentikasi Customer Portal:** store/sesi terpisah, API autentikasi, pemisahan provider, pilihan login dan UI akun/profil dasar diuji. Lihat [bukti dan batasan](./customer-portal.md#24-november-2026--implementasi-autentikasi-lokal). Firebase pada browser disimulasikan; belum diaktifkan atau di-deploy.
+
+**Belum selesai atau ditunda:**
+
+- [ ] **P0-01:** verifikasi data historis pada target, pemulihan media/backup dan kegagalan lain yang masih tercantum di riwayat.
+- [ ] **P0-02:** konflik dua editor, offline/reconnect, lintas tab dan publikasi; ditunda atas permintaan pengguna. Hindari penyuntingan bersamaan.
+- [ ] **P0-03–05:** integritas audit, backup/restore lengkap, serta seluruh jalur hak akses dan Firebase masih memerlukan bukti.
+- [ ] **P1-01–09:** dependensi, keamanan, rules, migrasi, privasi, operasional, pengujian modul dan performa; lihat daftar temuan.
+- [ ] **Website:** pengujian seluruh seksi dan peran, Firebase nyata, performa jaringan serta perubahan lokal pada Linux staging.
+- [ ] **Restore lengkap dan login dari backup:** ditunda sampai fase lain selesai, tetapi wajib sebelum keputusan GO.
+- [ ] **Produksi dan API pemerintah:** produksi tetap NO-GO; integrasi pemerintah ditunda sesuai keputusan dan persetujuan yang masih diperlukan.
+- [ ] **Customer Portal Tahap 4–6 dan aktivasi nyata:** autentikasi telah diimplementasikan lokal; dashboard transaksi, integrasi ERP, Firebase nyata, rules terpasang dan validasi staging masih terbuka. Progres di [customer-portal.md](./customer-portal.md). Pembatasan provider wajib diverifikasi sebelum Email/Password diaktifkan, dan P0-02 wajib ditutup sebelum konversi Sales Order dipakai pengguna nyata.
 
 ## 1. Lingkup dan kesimpulan awal
 
@@ -262,6 +297,61 @@ Target checklist beban: **50 pengguna bersamaan, tanpa HTTP 5xx dan respons kura
 - **Perbaikan lokal P0-01:** loader state dan indeks media menolak berkas yang tidak terbaca, JSON rusak atau struktur tidak valid tanpa menimpanya; startup gagal dengan pesan yang mengarahkan pemulihan dari backup. File baru masih dibuat jika benar-benar belum ada, dan metadata versi tingkat teratas yang tidak ada tetap didukung. Tes sintetis mencakup file tidak valid, pembacaan gagal, state baru, data lama dan kegagalan startup terisolasi.
 - **Verifikasi lokal:** 38 file / 436 tes lulus, termasuk startup server terisolasi; TypeScript dan lint rules Firestore lulus. Ini tidak membuktikan kompatibilitas semua data historis atau pemulihan pada VPS.
 - **Batasan:** perubahan loader belum di-deploy atau diuji terhadap seluruh data historis pada VPS; sebelum deploy verifikasi kompatibilitas salinan data tanpa membagikan isinya. Kehilangan file sepenuhnya, pemulihan dari file sementara, fallback media tanpa indeks, serta restore lengkap dan login dari backup masih perlu ditangani atau dibuktikan. P0-01 tetap parsial dan produksi tetap **NO-GO**.
+
+### 24 November 2026 — ketahanan unggah media (lokal)
+
+- Perbaikan loader di atas telah dipush sebagai `55c7982`; CI lulus, tetapi belum di-deploy ke VPS.
+- Jika penyimpanan indeks gagal saat unggah media, gambar dan metadata sebelumnya dipertahankan pada skenario kegagalan yang diuji; file baru dibatalkan. Jika pemulihan gagal, error dicatat dan salinan `.bak-...` dipertahankan. Kegagalan penyimpanan dikirim sebagai HTTP 500 agar unggahan baru dapat masuk antrean, bukan dianggap kesalahan format.
+- Tes lokal memeriksa unggah baru, penggantian format sama/berbeda, percobaan ulang, kegagalan pemulihan, HTTP dan antrean browser. Seluruh **38 file / 442 tes**, TypeScript dan lint rules lulus.
+- **Batasan:** perubahan unggah ini masih lokal dan belum di-deploy. Pemadaman mendadak di antara penggantian file dan penyimpanan indeks, pemulihan otomatis file `.bak-...`, akses fallback media tanpa indeks, serta kegagalan dan pemulihan Firebase nyata belum dibuktikan. Jangan menghapus file cadangan tanpa menyelidiki keadaan media.
+
+### 24 November 2026 — pemulihan cache dan draf tertunda (lokal)
+
+- Versi pembaruan server tidak lagi dicatat sebagai diterapkan sebelum cache berhasil disimpan; kegagalan realtime ditampilkan pada status sinkronisasi. Tes lokal memeriksa percobaan ulang melalui delta dan realtime setelah penyimpanan perangkat pulih.
+- Tombol pemulihan draf menolak mengganti suntingan saat draf masih dalam antrean, termasuk antrean yang terdeteksi dari tab lain atau tidak dapat dibaca.
+- **Verifikasi lokal:** 38 file / 445 tes, TypeScript dan lint rules Firestore lulus. Interaksi tombol belum diuji di browser.
+- **Batasan:** perubahan ini belum di-deploy dan tidak menyelesaikan konflik dua editor. Server masih belum memeriksa versi dasar draf; pengiriman offline, publikasi dan tab bersamaan masih berisiko tertimpa. P0-02 tetap terbuka dan produksi tetap **NO-GO**.
+- **Penjadwalan:** pada 24 November 2026 pengguna meminta konflik dua editor dicatat untuk ditangani kemudian. Hindari penyuntingan bersamaan sementara ini; perlindungan versi dasar, antrean offline, publikasi, retry dan uji dua editor tetap wajib sebelum P0-02 dapat ditutup.
+
+### 24 November 2026 — batas RFQ pengunjung (lokal)
+
+- Pengunjung menerima petunjuk sebelum mengirim lebih dari 30 produk atau jumlah di luar bilangan bulat 1–1.000.000; batas klien dan server memakai pemeriksaan bersama.
+- Tes terarah dan browser lokal dengan data sintetis memeriksa 31 produk dan jumlah pecahan tanpa mengirim POST. Seluruh 38 file / 452 tes, TypeScript dan lint rules lulus.
+- **Batasan:** perubahan masih lokal dan belum di-commit atau di-deploy; pengujian ini bukan bukti seluruh alur RFQ, Firebase, atau jaringan staging.
+
+### 24 November 2026 — navigasi formulir RFQ (lokal)
+
+- Sebelum perbaikan, isian hilang saat pengunjung membuka katalog dari formulir dan kembali. Komponen formulir kini tetap hidup namun tersembunyi pada halaman tanpa kontak, sehingga isian, permintaan aktif dan hasilnya tetap ada selama situs tidak dimuat ulang.
+- Browser lokal dengan data dan respons sintetis memeriksa navigasi, tombol dinonaktifkan saat pengiriman berlangsung, hasil sukses dan gagal setelah berpindah halaman, serta retry dengan ID yang sama. Isi mentah uji tidak ditemukan di sessionStorage atau localStorage. Tes terarah lulus: 2 file / 18 tes; TypeScript lulus.
+- **Batasan:** isian mentah hanya di memori dan tidak dipertahankan setelah refresh, menutup halaman atau komponen situs dilepas. Respons pengiriman disimulasikan, bukan bukti penyimpanan di server atau Firebase; perubahan belum di-commit atau di-deploy.
+
+### 24 November 2026 — audit Customer Portal tahap 1 (lokal)
+
+- **Kondisi:** login karyawan memakai `ServerRbacStore` (`data/rbac-db.json`), scrypt, token HMAC dan cookie `ams_session`; login Google Firebase hanya menerima email terverifikasi yang cocok dengan akun RBAC. Data ERP tersimpan sebagai kunci sinkronisasi JSON; `/api/sync/*` mewajibkan sesi karyawan dan memfilter per peran.
+- **Model yang dapat dipakai ulang:** `product_catalog` dan `stok_gudang` untuk katalog/ketersediaan, `sales_pelanggan` untuk pelanggan B2B, `penjualan` untuk Sales Order, `transaksi` untuk status faktur, serta pola RFQ (`sales_website_rfq`) sebagai kunci yang hanya ditulis server lalu ditinjau tim sales.
+- **Celah yang harus dirancang:** sales order existing hanya satu baris produk dan belum memiliki identitas akun customer; transaksi keuangan tidak menyimpan ID pelanggan; harga katalog berupa teks; belum ada layanan email, penyimpanan privat bukti bayar, atau notifikasi customer.
+- **Risiko:** menyimpan customer di store RBAC dapat mendorong keluar sesi karyawan karena batas 200 sesi, membesarkan sinkronisasi RBAC ke Firebase, dan membuka data customer kepada peran developer melalui sinkronisasi. Cookie internal HTTPS memakai `SameSite=None` tanpa pemeriksaan CSRF/Origin; ini temuan keamanan existing yang perlu ditutup terpisah.
+- **Rekomendasi awal:** store, sesi dan cookie customer terpisah; API `/api/customer/*` dengan scoping `customerId` di server; pesanan portal masuk antrean khusus server lalu dikonversi oleh tim sales menjadi Sales Order. Tidak ada kode, data, Firebase atau VPS yang diubah dalam audit ini.
+
+### 24 November 2026 — rancangan Customer Portal tahap 2 (lokal)
+
+- **Keputusan pengguna:** Firebase Email/Password untuk verifikasi dan reset, transfer manual dengan unggah bukti, checkout berbasis penawaran sales, checkout setelah akun ditautkan ke pelanggan B2B, dan URL `/akun`.
+- **Rencana kerja:** [customer-portal.md](./customer-portal.md) menjadi dokumen induk berisi status tahap, arsitektur, API, migrasi/rollback, matriks uji, risiko, dan tindakan yang masih diperlukan.
+- **Tinjauan rancangan:** 9 temuan blocking dicocokkan dengan kode, lalu dimasukkan ke rancangan. Revisinya mencakup pembatasan provider Firebase wajib, relasi faktur melalui `penjualanId` (bukan nomor faktur yang dapat bentrok), konversi Sales Order idempoten di server, validasi kredit agregat, pelunasan finance otoritatif, guard sync untuk data portal, pemeriksaan Origin pada mutasi staf, sinkron pencabutan sesi Firebase, dan batas pembatalan.
+- **Batasan:** hanya dokumentasi. Tidak ada kode, data, Firebase atau VPS yang diubah. Alur retur/refund, pelunasan sebagian, dan jurnal penerimaan otomatis belum didukung ERP dan berada di luar lingkup awal.
+
+### 24 November 2026 — implementasi autentikasi Customer Portal (lokal)
+
+- Store dan sesi customer terpisah dari RBAC, API autentikasi/profil, verifikasi provider Google untuk jalur internal, serta halaman masuk/daftar/verifikasi/lupa sandi telah diimplementasikan. Flag tetap nonaktif secara bawaan.
+- Regresi penuh 40 file / 478 tes lulus; tambahan kasus batas server diverifikasi dalam tes terarah 3 file / 40 tes. TypeScript, lint rules dan build lulus. Browser dengan identitas Firebase sintetis memeriksa alur autentikasi, profil tersimpan setelah reload, logout dan responsivitas.
+- Bukti, rincian perubahan dan daftar pekerjaan tersisa ada di [riwayat Customer Portal](./customer-portal.md#24-november-2026--implementasi-autentikasi-lokal). Tidak ada aktivasi Firebase, deploy, atau transaksi customer nyata. Dashboard transaksi/integrasi belum tersedia dan produksi tetap **NO-GO**.
+
+### 24 November 2026 — fondasi Customer Dashboard tahap 4 (lokal)
+
+- Ringkasan, navigasi, katalog terbit, pencarian/filter, keranjang server dan alamat pengiriman telah ditambahkan pada portal `/akun`.
+- Katalog berasal dari snapshot CMS yang terbit; keranjang dan alamat disimpan terpisah per customer pada store portal versi 2, dengan migrasi aman dari versi 1.
+- Validasi terarah `customer-auth.test.ts` lulus 23 tes, termasuk isolasi keranjang/alamat antar-customer. `npm run lint` dan `npm run build` lulus.
+- Pengajuan pesanan, penawaran, invoice, bukti bayar, notifikasi transaksi dan keputusan ERP masih terbuka pada Tahap 4/5. Portal tetap default-off dan belum diaktifkan.
 
 ### Format pembaruan berikutnya
 

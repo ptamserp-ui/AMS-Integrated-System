@@ -33,6 +33,8 @@ interface MediaIndexFile {
 export const MAX_MEDIA_FILE_BYTES = 8 * 1024 * 1024;
 const VALID_MEDIA_ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
 
+export class MediaStorageError extends Error {}
+
 export function isValidMediaId(id: string): boolean {
   return VALID_MEDIA_ID_PATTERN.test(id);
 }
@@ -187,24 +189,6 @@ export class ServerMediaStore {
       throw new Error('ID media hanya boleh berisi huruf, angka, tanda hubung, atau garis bawah (maks 80 karakter).');
     }
 
-    const targetFile = this.resolveSafeUploadPath(`${id}.${detected.ext}`);
-    const tmpFile = this.resolveSafeUploadPath(`${id}.${detected.ext}.tmp-${process.pid}`);
-    fs.writeFileSync(tmpFile, bytes);
-    fs.renameSync(tmpFile, targetFile);
-
-    // Bersihkan ekstensi lama jika ID sama ditimpa dengan format berbeda
-    for (const candidateExt of ['png', 'jpg', 'webp'] as const) {
-      if (candidateExt === detected.ext) continue;
-      const stalePath = this.resolveSafeUploadPath(`${id}.${candidateExt}`);
-      if (fs.existsSync(stalePath)) {
-        try {
-          fs.unlinkSync(stalePath);
-        } catch {
-          /* abaikan gagal hapus file usang */
-        }
-      }
-    }
-
     const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
     const meta: StoredMediaMeta = {
       id,
@@ -219,8 +203,69 @@ export class ServerMediaStore {
       uploadedAt: new Date().toISOString()
     };
 
-    this.index.items[id] = meta;
-    this.persistIndex();
+    const targetFile = this.resolveSafeUploadPath(`${id}.${detected.ext}`);
+    const operationId = crypto.randomUUID();
+    const tmpFile = this.resolveSafeUploadPath(`${id}.${detected.ext}.tmp-${operationId}`);
+    const backupFile = this.resolveSafeUploadPath(`${id}.${detected.ext}.bak-${operationId}`);
+    const nextIndex: MediaIndexFile = { ...this.index, items: { ...this.index.items, [id]: meta } };
+    let replaced = false;
+    let backupCreated = false;
+    let keepBackup = false;
+    try {
+      fs.writeFileSync(tmpFile, bytes, { flag: 'wx' });
+      let exists = false;
+      try {
+        fs.lstatSync(targetFile);
+        exists = true;
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+      }
+      if (exists) {
+        fs.copyFileSync(targetFile, backupFile, fs.constants.COPYFILE_EXCL);
+        backupCreated = true;
+      }
+      fs.renameSync(tmpFile, targetFile);
+      replaced = true;
+      this.persistIndex(nextIndex);
+      this.index = nextIndex;
+    } catch (error) {
+      if (replaced) {
+        try {
+          if (backupCreated) fs.renameSync(backupFile, targetFile);
+          else fs.unlinkSync(targetFile);
+        } catch (rollbackError) {
+          keepBackup = backupCreated;
+          console.error('[media] Pemulihan unggahan gagal; periksa berkas cadangan:', backupFile, rollbackError);
+          throw new MediaStorageError(
+            `Gagal menyimpan dan memulihkan media "${id}". Periksa log dan backup sebelum mencoba lagi.`,
+            { cause: new AggregateError([error, rollbackError], `Pemulihan media gagal; backup: ${backupFile}`) }
+          );
+        }
+      }
+      throw new MediaStorageError(`Gagal menyimpan media "${id}" di server.`, { cause: error });
+    } finally {
+      for (const file of [tmpFile, ...(keepBackup ? [] : [backupFile])]) {
+        try {
+          fs.unlinkSync(file);
+        } catch (error) {
+          if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+            console.warn('[media] Gagal membersihkan berkas sementara:', file, error);
+          }
+        }
+      }
+    }
+
+    for (const candidateExt of ['png', 'jpg', 'webp'] as const) {
+      if (candidateExt === detected.ext) continue;
+      const stalePath = this.resolveSafeUploadPath(`${id}.${candidateExt}`);
+      try {
+        fs.unlinkSync(stalePath);
+      } catch (error) {
+        if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+          console.warn('[media] Gagal membersihkan format media lama:', stalePath, error);
+        }
+      }
+    }
     return meta;
   }
 

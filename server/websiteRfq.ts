@@ -1,4 +1,5 @@
 import type { ProspekAlkes, TipeFasyankes } from '../src/types';
+import { jumlahRfqValid, MAKS_PRODUK_RFQ } from '../src/utils/websiteRfq';
 
 export const KUNCI_RFQ_WEBSITE = 'sales_website_rfq';
 
@@ -37,7 +38,7 @@ export function buatProspekWebsite(input: unknown, sekarang = new Date()): Hasil
     !requestId || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId) ||
     !namaInstansi || !tipeInstansi || !TIPE_INSTANSI.includes(tipeInstansi as TipeFasyankes) ||
     namaPemohon === null || !kontakPemohon || !jalur || !JALUR_PENGADAAN.includes(jalur) ||
-    subjek === null || pesan === null || !Array.isArray(data.produk) || data.produk.length > 30
+    subjek === null || pesan === null || !Array.isArray(data.produk) || data.produk.length > MAKS_PRODUK_RFQ
   ) {
     return { ok: false, pesan: 'Periksa isian permintaan dan batas panjang setiap kolom.' };
   }
@@ -54,7 +55,7 @@ export function buatProspekWebsite(input: unknown, sekarang = new Date()): Hasil
     const jumlah = baris.jumlah;
     if (
       !nama || model === null || produsen === null || !satuan ||
-      typeof jumlah !== 'number' || !Number.isSafeInteger(jumlah) || jumlah < 1 || jumlah > 1_000_000
+      !jumlahRfqValid(jumlah)
     ) {
       return { ok: false, pesan: 'Periksa nama, satuan, dan jumlah produk yang diminta.' };
     }

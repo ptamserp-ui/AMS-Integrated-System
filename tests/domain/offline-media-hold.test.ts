@@ -135,6 +135,15 @@ describe('antrean media offline saat akses berubah', () => {
     expect(JSON.parse(values.get(KUNCI_PENDING_MEDIA)!)).toContainEqual(expect.objectContaining({ id: hasil.id }));
   });
 
+  it('menyimpan unggahan baru dalam antrean ketika penyimpanan server gagal', async () => {
+    vi.mocked(kompresGambarWebsite).mockResolvedValue(item.dataUrl);
+    vi.mocked(fetch).mockResolvedValue(Response.json({ pesan: 'Gagal menyimpan media di server.' }, { status: 500 }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const hasil = await unggahFotoKeServer(new File(['x'], 'foto.png', { type: 'image/png' }));
+    expect(hasil.storedOnServer).toBe(false);
+    expect(JSON.parse(values.get(KUNCI_PENDING_MEDIA)!)).toContainEqual(expect.objectContaining({ id: hasil.id }));
+  });
+
   it('meneruskan peringatan server saat unggahan baru berhasil', async () => {
     vi.mocked(kompresGambarWebsite).mockResolvedValue(item.dataUrl);
     vi.mocked(fetch).mockImplementation(async (_url, init) => {

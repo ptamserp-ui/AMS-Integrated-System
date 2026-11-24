@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { HalamanWebsite, KonfigurasiSitus, ProdukWebsite, TautanWebsite, TipeFasyankes } from '../../../../types';
 import { cocokKategoriProduk, hrefTautan, selesaikanGambar } from '../../../../utils/websitePrimitives';
-import { siapkanPermintaanRfq, type PermintaanRfqSesi } from '../../../../utils/websiteRfq';
+import { siapkanPermintaanRfq, validasiBatasProdukRfq, type PermintaanRfqSesi } from '../../../../utils/websiteRfq';
 import { SeksiProdukPublik, type ItemRfqPublik } from './PublicCatalogSection';
 import { translateWebsiteUi, useWebsiteLanguage } from './WebsiteLanguage';
 
@@ -949,6 +949,11 @@ export function SeksiKontak({
     }
     if (daftarRfq.length === 0 && !pesan.trim()) {
       setGalatForm('Pilih minimal satu produk dari katalog atau tuliskan rincian kebutuhan alat kesehatan Anda.');
+      return;
+    }
+    const galatProduk = validasiBatasProdukRfq(isiPermintaan.produk);
+    if (galatProduk) {
+      setGalatForm(galatProduk);
       return;
     }
 

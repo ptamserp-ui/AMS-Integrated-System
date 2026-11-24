@@ -97,6 +97,20 @@ describe('sumber snapshot situs publik', () => {
     expect(beranda).not.toContain('Konten cache lama');
   });
 
+  it('mempertahankan satu formulir RFQ yang tersembunyi di halaman tanpa kontak', async () => {
+    const storage = { getItem: () => null };
+    vi.stubGlobal('sessionStorage', storage);
+    const { default: PublicWebsite } = await import('../../src/components/modules/website/site/PublicWebsite');
+    for (const halaman of ['kontak', 'layanan', 'produk', 'sumber-daya', 'beranda']) {
+      vi.stubGlobal('window', { location: { search: `?halaman=${halaman}` }, localStorage: storage });
+      const html = renderToString(createElement(PublicWebsite, { konfigurasi: snapshot() }));
+      expect(html.match(/id="formulir-rfq-publik"/g)).toHaveLength(1);
+      expect(html).toMatch(halaman === 'kontak' || halaman === 'layanan'
+        ? /<div><section[^>]*id="formulir-rfq-publik"/
+        : /<div hidden=""><section[^>]*id="formulir-rfq-publik"/);
+    }
+  });
+
   it('menghentikan permintaan snapshot yang tidak merespons', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => new Promise((_resolve, reject) => {

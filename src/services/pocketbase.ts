@@ -536,6 +536,25 @@ export class AMSDatabaseManager {
     return this.pendingSyncCorrupted || this.pendingSyncKeys.size > 0 || this.jumlahAntreanMedia() !== 0;
   }
 
+  public hasPendingWebsiteDraft(): boolean {
+    if (this.pendingSyncCorrupted || this.pendingSyncKeys.has('website_draft') || this.activeSyncKeys.has('website_draft')) {
+      return true;
+    }
+    try {
+      if (typeof localStorage === 'undefined') return true;
+      const raw = localStorage.getItem(KUNCI_ANTREAN_SYNC);
+      if (!raw) return false;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed) || parsed.some((key) => typeof key !== 'string' || !key)) {
+        throw new Error('Daftar antrean sinkronisasi tidak valid.');
+      }
+      return parsed.includes('website_draft');
+    } catch (error) {
+      console.error('Gagal memeriksa antrean draf website:', error);
+      return true;
+    }
+  }
+
   private identitasSesiMasihSama(identity: string): boolean {
     try {
       if (typeof localStorage === 'undefined') return false;
@@ -1421,17 +1440,16 @@ export class AMSDatabaseManager {
     if (!forceApply && typeof version === 'number' && (this.serverVersions[key] ?? 0) >= version) {
       return false;
     }
-    if (typeof version === 'number') {
-      this.serverVersions[key] = version;
-    }
     const serialized = JSON.stringify(value);
     const prevRaw = localStorage.getItem(STORAGE_PREFIX + key);
     if (prevRaw === serialized) {
+      if (typeof version === 'number') this.serverVersions[key] = version;
       return false;
     }
     this.isApplyingRemote = true;
     try {
       localStorage.setItem(STORAGE_PREFIX + key, serialized);
+      if (typeof version === 'number') this.serverVersions[key] = version;
       if (notifyIndividual) {
         this.notify(key);
       }
@@ -1444,12 +1462,12 @@ export class AMSDatabaseManager {
   private applyRemoteDelete(key: string, reason = 'ws'): boolean {
     if (isLegacyRbacSyncKey(key)) return false;
     if (this.pendingSyncKeys.has(key)) return false;
-    delete this.serverVersions[key];
     if (typeof localStorage === 'undefined') return false;
     const hadKey = localStorage.getItem(STORAGE_PREFIX + key) !== null;
     this.isApplyingRemote = true;
     try {
       localStorage.removeItem(STORAGE_PREFIX + key);
+      delete this.serverVersions[key];
       this.notify(key);
     } finally {
       this.isApplyingRemote = false;
@@ -1937,8 +1955,10 @@ export class AMSDatabaseManager {
               window.dispatchEvent(new CustomEvent('ams:auth-expired'));
             }
           }
-        } catch {
-          /* abaikan pesan tidak dikenal */
+        } catch (error) {
+          console.error('Gagal menerapkan pesan sinkronisasi realtime:', error);
+          this.lastSyncError = 'Pembaruan realtime gagal diterapkan. Periksa penyimpanan perangkat dan sinkronkan ulang.';
+          this.updateConnectionStatusLabel();
         }
       };
 

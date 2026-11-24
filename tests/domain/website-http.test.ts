@@ -154,6 +154,22 @@ describe('website publik: penerbitan dan RFQ melalui server terisolasi', () => {
     if (tempDir && fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
   }, 10000);
 
+  it('menjaga portal nonaktif secara bawaan dan menolak token customer di jalur Firebase internal', async () => {
+    const status = await request<{ enabled: boolean }>('/api/customer/status');
+    expect(status.status).toBe(200);
+    expect(status.body.enabled).toBe(false);
+    expect((await request('/api/customer/auth/saya', 'GET', developerToken)).status).toBe(404);
+    expect(fs.existsSync(path.join(tempDir, 'data', 'customer-portal-db.json'))).toBe(false);
+    const claims = Buffer.from(JSON.stringify({ firebase: { sign_in_provider: 'password' } })).toString('base64url');
+    const idToken = `header.${claims}.signature`;
+    expect((await request('/api/auth/firebase-login', 'POST', '', { idToken })).status).toBe(401);
+    expect((await request('/api/firebase/hydrate', 'POST', '', { idToken })).status).toBe(403);
+    expect((await request('/api/auth/me', 'GET', developerToken)).status).toBe(200);
+    for (const endpoint of ['/api/sync/state', '/api/rbac/users', '/api/media']) {
+      expect((await request(endpoint, 'GET', '', undefined, { Cookie: `ams_customer_session=${developerToken}` })).status).toBe(401);
+    }
+  });
+
   it.each([
     ['app-state.json', 'State sinkronisasi'],
     ['media-index.json', 'Indeks media']
@@ -193,6 +209,30 @@ describe('website publik: penerbitan dan RFQ melalui server terisolasi', () => {
       clearTimeout(timer);
     }
   }, 10000);
+
+  it('mengembalikan kesalahan server dan mempertahankan foto saat indeks media gagal disimpan', async () => {
+    const original = fs.readFileSync(path.resolve('public', 'pwa-192x192.png'));
+    const upload = (bytes: Buffer) => request<{ error?: string }>('/api/media/upload', 'POST', developerToken, {
+      id: 'media-gagal-indeks',
+      filename: 'foto.png',
+      dataUrl: `data:image/png;base64,${bytes.toString('base64')}`,
+      visibility: 'public',
+      scope: 'website'
+    });
+    expect((await upload(original)).status).toBe(201);
+    const blocked = path.join(tempDir, 'data', 'media-index.json.tmp');
+    fs.mkdirSync(blocked);
+    try {
+      const failed = await upload(Buffer.concat([original, Buffer.from([1])]));
+      expect(failed.status).toBe(500);
+      expect(failed.body.error).toBe('MEDIA_STORAGE_FAILED');
+      const response = await fetch(`${baseUrl}/api/website/media/media-gagal-indeks`);
+      expect(response.status).toBe(200);
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(original);
+    } finally {
+      fs.rmdirSync(blocked);
+    }
+  });
 
   it('menolak RFQ sebelum situs tayang, lalu menyimpan publikasi server sebagai sumber resmi', async () => {
     expect((await request('/api/website/rfq', 'POST', '', requestRfq)).status).toBe(503);

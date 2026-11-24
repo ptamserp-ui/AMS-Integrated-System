@@ -893,9 +893,15 @@ export default function WebsiteModule({ currentRole, sesi }: PropsWebsite) {
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm('Suntingan lokal yang belum disimpan akan diganti. Pastikan draf lokal sudah diunduh. Lanjutkan?')) {
-                    tandaiTersimpan(sinkronkanProdukKatalog(db.getWebsiteDraft()));
+                  if (!window.confirm('Suntingan lokal yang belum disimpan akan diganti. Pastikan draf lokal sudah diunduh. Lanjutkan?')) return;
+                  if (db.hasPendingWebsiteDraft()) {
+                    setPesan({
+                      nada: 'waspada',
+                      teks: 'Draf masih dalam antrean sinkronisasi. Unduh draf lokal dan hubungi administrator; versi server belum dapat dimuat dengan aman.'
+                    });
+                    return;
                   }
+                  tandaiTersimpan(sinkronkanProdukKatalog(db.getWebsiteDraft()));
                 }}
                 className="px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
               >

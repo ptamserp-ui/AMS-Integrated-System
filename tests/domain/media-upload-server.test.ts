@@ -1,9 +1,10 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   MAX_MEDIA_FILE_BYTES,
+  MediaStorageError,
   ServerMediaStore,
   detectImageMagicFormat,
   encodeImageDataUrl
@@ -157,6 +158,73 @@ describe('ServerMediaStore — Penyimpanan Foto Real-Time di Server', () => {
     expect(store.deleteMedia('foto-dinamis')).toBe(true);
     expect(fs.existsSync(path.join(dataDir, 'uploads', 'foto-dinamis.jpg'))).toBe(false);
     expect(store.getMedia('foto-dinamis')).toBeNull();
+  });
+
+  it.each([
+    ['format sama', Buffer.concat([makeFakePng(), Buffer.from([1])])],
+    ['format berbeda', makeFakeJpeg()]
+  ])('mempertahankan foto dan indeks saat penyimpanan indeks gagal: %s', (_label, replacement) => {
+    const dataDir = createTempDir();
+    const store = new ServerMediaStore(dataDir);
+    const original = store.saveFromBuffer({ id: 'logo', bytes: makeFakePng(), visibility: 'internal' });
+    const indexFile = path.join(dataDir, 'media-index.json');
+    const previousIndex = fs.readFileSync(indexFile, 'utf8');
+    const blocked = `${indexFile}.tmp`;
+    fs.mkdirSync(blocked);
+    try {
+      expect(() => store.saveFromBuffer({ id: 'logo', bytes: replacement, visibility: 'public' }))
+        .toThrow(MediaStorageError);
+      expect(store.getMedia('logo')).toEqual({ meta: original, bytes: makeFakePng() });
+      expect(fs.readFileSync(indexFile, 'utf8')).toBe(previousIndex);
+      expect(new ServerMediaStore(dataDir).getMedia('logo')).toEqual({ meta: original, bytes: makeFakePng() });
+      expect(fs.existsSync(path.join(dataDir, 'uploads', 'logo.jpg'))).toBe(false);
+    } finally {
+      fs.rmdirSync(blocked);
+    }
+    const retried = store.saveFromBuffer({ id: 'logo', bytes: replacement, visibility: 'public' });
+    expect(store.getMedia('logo')).toEqual({ meta: retried, bytes: replacement });
+    expect(new ServerMediaStore(dataDir).getMedia('logo')).toEqual({ meta: retried, bytes: replacement });
+  });
+
+  it('tidak meninggalkan foto baru saat penyimpanan indeks gagal', () => {
+    const dataDir = createTempDir();
+    const store = new ServerMediaStore(dataDir);
+    const blocked = path.join(dataDir, 'media-index.json.tmp');
+    fs.mkdirSync(blocked);
+    try {
+      expect(() => store.saveFromBuffer({ id: 'baru', bytes: makeFakePng() })).toThrow(MediaStorageError);
+      expect(store.getMeta('baru')).toBeNull();
+      expect(store.getMedia('baru')).toBeNull();
+      expect(fs.existsSync(path.join(dataDir, 'uploads', 'baru.png'))).toBe(false);
+      expect(new ServerMediaStore(dataDir).getMeta('baru')).toBeNull();
+    } finally {
+      fs.rmdirSync(blocked);
+    }
+  });
+
+  it('mempertahankan backup dan melaporkan kegagalan pemulihan foto', () => {
+    const dataDir = createTempDir();
+    const store = new ServerMediaStore(dataDir);
+    store.saveFromBuffer({ id: 'logo', bytes: makeFakePng() });
+    const blocked = path.join(dataDir, 'media-index.json.tmp');
+    fs.mkdirSync(blocked);
+    const rename = fs.renameSync.bind(fs);
+    vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (String(from).includes('.bak-')) throw new Error('pemulihan gagal');
+      return rename(from, to);
+    });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(() => store.saveFromBuffer({ id: 'logo', bytes: Buffer.concat([makeFakePng(), Buffer.from([1])]) }))
+        .toThrow(/memulihkan media/);
+      const backup = fs.readdirSync(path.join(dataDir, 'uploads')).find((file) => file.startsWith('logo.png.bak-'));
+      expect(backup).toBeDefined();
+      expect(fs.readFileSync(path.join(dataDir, 'uploads', backup!))).toEqual(makeFakePng());
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Pemulihan unggahan gagal'), expect.any(String), expect.any(Error));
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmdirSync(blocked);
+    }
   });
 
   it('menolak payload bukan gambar asli (magic bytes palsu), path traversal ID, dan berkas > 8 MB', () => {

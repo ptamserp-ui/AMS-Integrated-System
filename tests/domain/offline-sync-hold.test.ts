@@ -23,12 +23,16 @@ vi.mock('../../src/utils/mediaUpload', () => ({
 
 class MemoryStorage implements Storage {
   private values = new Map<string, string>();
+  failKey: string | null = null;
   get length() { return this.values.size; }
   clear() { this.values.clear(); }
   getItem(key: string) { return this.values.get(key) ?? null; }
   key(index: number) { return [...this.values.keys()][index] ?? null; }
   removeItem(key: string) { this.values.delete(key); }
-  setItem(key: string, value: string) { this.values.set(key, String(value)); }
+  setItem(key: string, value: string) {
+    if (key === this.failKey) throw new Error('storage full');
+    this.values.set(key, String(value));
+  }
 }
 
 class FakeSocket {
@@ -156,6 +160,64 @@ describe('perlindungan antrean offline saat akses berubah', () => {
     manager.catatWebsiteTerbit(snapshot, 'Admin Uji', 'Admin', 7);
     expect(manager.getWebsiteTerbit()).toEqual(snapshot);
     expect(manager.getConnectionStatus().pendingKeys).not.toContain('website_published');
+  });
+
+  it('mendeteksi draf tertunda dari tab lain dan gagal aman jika antrean tidak dapat dibaca', () => {
+    expect(manager.hasPendingWebsiteDraft()).toBe(false);
+    storage.setItem(QUEUE_KEY, JSON.stringify(['website_draft']));
+    expect(manager.hasPendingWebsiteDraft()).toBe(true);
+
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    storage.setItem(QUEUE_KEY, '{rusak');
+    expect(manager.hasPendingWebsiteDraft()).toBe(true);
+    expect(storage.getItem(QUEUE_KEY)).toBe('{rusak');
+  });
+
+  it('mengambil ulang draf yang gagal disimpan di cache meskipun sinkronisasi berikutnya memakai delta', async () => {
+    const fetchMock = vi.mocked(fetch);
+    const normalFetch = fetchMock.getMockImplementation()!;
+    const entries = {
+      website_content_v: { value: 1, version: 2 },
+      website_draft: { value: { judul: 'Draf server baru' }, version: 3 }
+    };
+    fetchMock.mockImplementation((input, init) => {
+      const url = String(input);
+      if (!url.startsWith('/api/sync/state')) return normalFetch(input, init);
+      const query = new URL(url, 'https://ams.test').searchParams;
+      const versions = JSON.parse(query.get('versions') || '{}') as Record<string, number>;
+      return Promise.resolve(Response.json({
+        revision: 3,
+        entries: Object.fromEntries(Object.entries(entries).filter(([key, entry]) => (versions[key] ?? 0) < entry.version)),
+        allowedKeys: Object.keys(entries),
+        writableKeys: Object.keys(entries),
+        deletableKeys: Object.keys(entries)
+      }));
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    storage.setItem('ams_alkes_website_draft', JSON.stringify({ judul: 'Draf lama' }));
+    storage.failKey = 'ams_alkes_website_draft';
+    await manager.syncFromServer(false);
+    expect(manager.getConnectionStatus().lastSyncError).toContain('Tidak dapat');
+    expect(JSON.parse(storage.getItem('ams_alkes_website_draft')!)).toEqual({ judul: 'Draf lama' });
+
+    storage.failKey = null;
+    await manager.syncFromServer(true);
+    expect(JSON.parse(storage.getItem('ams_alkes_website_draft')!)).toEqual({ judul: 'Draf server baru' });
+  });
+
+  it('melaporkan kegagalan realtime dan dapat menerapkan ulang versi yang sama setelah cache pulih', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    manager.connectRealtimeSync(session.token);
+    const socket = FakeSocket.instances.at(-1)!;
+    const update = { type: 'sync:update', key: 'website_draft', value: { judul: 'Draf server' }, version: 5 };
+    storage.failKey = 'ams_alkes_website_draft';
+    socket.message(update);
+    expect(manager.getConnectionStatus().lastSyncError).toContain('realtime gagal');
+    expect(storage.getItem('ams_alkes_website_draft')).toBeNull();
+
+    storage.failKey = null;
+    socket.message(update);
+    expect(JSON.parse(storage.getItem('ams_alkes_website_draft')!)).toEqual(update.value);
   });
 
   it.each([

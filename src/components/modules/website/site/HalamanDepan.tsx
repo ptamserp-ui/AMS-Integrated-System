@@ -14,6 +14,7 @@ import PublicWebsite from './PublicWebsite';
 import { tentukanKontenTayang, useKonfigurasiOperasionalSinkron } from './PublicWebsiteApp';
 
 const KartuMasuk = lazy(() => import('./KartuMasuk'));
+const AccessChoice = lazy(() => import('../../../customer/AccessChoice'));
 const MobilePreviewModal = lazy(() =>
   import('../../../mobile/MobilePreviewModal').then((m) => ({ default: m.MobilePreviewModal }))
 );
@@ -42,6 +43,7 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
   const [statusTayang, setStatusTayang] = useState<'tayang' | 'belum' | 'tahan'>(awal.statusTayang);
   const [status, setStatus] = useState<StatusMuat>(awal.status);
   const [formTerbuka, setFormTerbuka] = useState(() => new URLSearchParams(window.location.search).get('masuk') === '1');
+  const [pilihanTerbuka, setPilihanTerbuka] = useState(false);
   const [previewMobileTerbuka, setPreviewMobileTerbuka] = useState(
     () => new URLSearchParams(window.location.search).get('preview') === 'mobile'
   );
@@ -73,6 +75,7 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
       .then((res) => (res.ok ? res.json() : null))
       .then((stSetup: { needsSetup?: boolean; needsDeveloperReset?: boolean } | null) => {
         if (!batal && (stSetup?.needsSetup || stSetup?.needsDeveloperReset)) {
+          setPilihanTerbuka(false);
           setFormTerbuka(true);
         }
       })
@@ -229,7 +232,15 @@ export default function HalamanDepan({ onMasuk }: { onMasuk: (sesi: SesiLogin) =
 
   return (
     <div className="relative">
-      <PublicWebsite konfigurasi={konfigurasi} landasan="/" padaMasuk={() => setFormTerbuka(true)} />
+      <PublicWebsite konfigurasi={konfigurasi} landasan="/" padaMasuk={() => setPilihanTerbuka(true)} />
+      {pilihanTerbuka && (
+        <Suspense fallback={<p role="status" className="fixed top-4 right-4 z-50 rounded-xl bg-white p-4 shadow-lg">Memuat pilihan akses...</p>}>
+          <AccessChoice
+            onClose={() => setPilihanTerbuka(false)}
+            onEmployee={() => { setPilihanTerbuka(false); setFormTerbuka(true); }}
+          />
+        </Suspense>
+      )}
       <button
         type="button"
         onClick={() => setPreviewMobileTerbuka(true)}

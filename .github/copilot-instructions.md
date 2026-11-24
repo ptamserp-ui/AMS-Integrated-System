@@ -20,3 +20,9 @@ Invoke-RestMethod -Uri "http://127.0.0.1:3100/api/health" -TimeoutSec 15
 Explain that it must be run in PowerShell as Administrator on the VPS and that the deployment script updates `origin/main`. If the push was not to `origin/main`, state that the pushed branch must first be merged into `main`; do not imply it is deployable yet.
 
 The VPS is shared with other applications. Never include `-ConfigureFirewall` or `-BlockPocketBasePort` in the routine deploy command, and never stop/restart Caddy or another application's service. Do not execute a remote deployment without the user's explicit approval. State clearly that providing the script is an option, not confirmation that deployment has occurred.
+
+# Evaluation checklist
+
+When repository work is completed, update `docs/evaluasi-staging.md` with a green checked item (`- [x] ✅`) for the specific verified work, its environment and evidence. Keep unfinished, deferred, or unverified work unchecked; a local result does not imply staging deployment, production readiness, or completion of the broader phase. Preserve the historical baseline and existing entries.
+
+For Customer Portal work, also check off the completed item in `docs/customer-portal.md` using the same rule, check a stage only after all of its sub-items are done, and record design changes in that file's history section.

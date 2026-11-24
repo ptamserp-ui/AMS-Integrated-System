@@ -677,8 +677,13 @@ export default function PublicWebsite({
             </div>
           </div>
         )}
-        {seksi.map((kunci) =>
-          kunci === 'hero' && tema.templateId === 'remedi-vscode' && rute.halaman === 'beranda' ? (
+        {/* Pertahankan state dan pengiriman RFQ saat pengunjung berpindah halaman. */}
+        {(seksi.includes('kontak') ? seksi : [...seksi, 'kontak' as const]).map((kunci) =>
+          kunci === 'kontak' ? (
+            <div key={kunci} hidden={!seksi.includes(kunci)}>
+              <TampilkanSeksi kunci={kunci} propsSeksi={propsSeksi} />
+            </div>
+          ) : kunci === 'hero' && tema.templateId === 'remedi-vscode' && rute.halaman === 'beranda' ? (
             <SorotanKatalog key={kunci} cfg={konfigurasiTampil} ke={ke} />
           ) : (
             <TampilkanSeksi key={kunci} kunci={kunci} propsSeksi={propsSeksi} />

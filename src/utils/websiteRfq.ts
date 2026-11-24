@@ -1,6 +1,23 @@
 const KUNCI_PERMINTAAN_SESI = 'ams_web_rfq_request_v1';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export const MAKS_PRODUK_RFQ = 30;
+export const MAKS_JUMLAH_RFQ = 1_000_000;
+
+export function jumlahRfqValid(jumlah: unknown): jumlah is number {
+  return typeof jumlah === 'number' && Number.isSafeInteger(jumlah) && jumlah >= 1 && jumlah <= MAKS_JUMLAH_RFQ;
+}
+
+export function validasiBatasProdukRfq(produk: readonly { jumlah: unknown }[]): string | null {
+  if (produk.length > MAKS_PRODUK_RFQ) {
+    return 'Maksimal 30 produk per permintaan. Hapus produk yang berlebih atau kirim permintaan terpisah.';
+  }
+  if (produk.some((item) => !jumlahRfqValid(item.jumlah))) {
+    return 'Jumlah setiap produk harus berupa bilangan bulat antara 1 dan 1.000.000. Ubah jumlah atau hapus dan tambahkan kembali produk.';
+  }
+  return null;
+}
+
 export interface PermintaanRfqSesi {
   isi: string;
   id: string;
