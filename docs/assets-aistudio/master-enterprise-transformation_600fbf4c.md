@@ -1,3 +1,5 @@
+> **Arsip historis:** spesifikasi asli di bawah dipertahankan verbatim; ia berisi target dan instruksi fase terdahulu, bukan bukti fitur tersedia. Status terkini ada di [README](../../README.md) dan [evaluasi staging](../evaluasi-staging.md).
+
 > **Provenance dokumen ini**
 > - Sumber: spesifikasi yang diunggah pemilik produk pada 5 November 2026, disimpan **verbatim** (tidak ada satu kata pun yang diubah) agar menjadi kontrak kerja.
 > - Peran: Master System Instruction — AMS Integrated System, Existing Application Enterprise Transformation.

@@ -1,5 +1,7 @@
 # Preview AMS gratis dengan Oracle Cloud Always Free dan Firebase
 
+> **Status 25 November 2026:** panduan alternatif historis, bukan deployment staging AMS yang terakhir diverifikasi. Installer di bawah memakai PM2 dan konfigurasi berbeda dari service systemd AMS; jangan jalankan pada VPS aktif. Untuk prosedur aktif dan persyaratan backup gunakan [panduan Linux](./panduan-deploy-vps.md). Biaya, kuota dan ketersediaan layanan pihak ketiga harus diperiksa ulang.
+
 Panduan ini menjalankan Express, WebSocket sync, dan aplikasi web pada VM Ubuntu Oracle Cloud Always Free. State aplikasi dan akun RBAC disimpan di `/var/lib/ams-data` pada boot volume VM. Firebase tetap menjadi driver yang dikonfigurasi; Firestore digunakan untuk sinkronisasi cloud yang sudah didukung aplikasi, bukan satu-satunya penyimpanan state server.
 
 ## Batasan dan biaya

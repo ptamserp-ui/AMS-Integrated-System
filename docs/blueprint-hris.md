@@ -1,8 +1,9 @@
-> **Status dokumen (2026-11):** **Sebagian** — kalkulator payroll (gaji pokok/173, PPh 21, BPJS), ambang sertifikat H-90, dan tabel temporal mutasi jabatan diimplementasikan dan ada tes (`payroll.test.ts`). Tetapi data HRIS aktual tersimpan di `localStorage` browser — **tidak ada** koleksi PocketBase `hris_employees`, `payroll_records`, `attendance_logs`, `capa_records`, atau `safety_incidents`; klaim tersebut tidak akurat. Absensi geofencing/GPS adalah UI, tidak ada verifikasi lokasi nyata. Tidak ada integrasi BPJS/DJP. Biometrik/foto tidak diproses (lihat `git-external.md`).
+> **Status 25 November 2026: sebagian diimplementasikan.** Kalkulator payroll dan aturan sertifikat memiliki tes. Data memakai state server dan cache browser, bukan koleksi PocketBase yang disebut dalam rancangan lama. Geofencing adalah UI; integrasi BPJS/DJP dan biometrik belum dibuktikan. Alur lintas modul di bawah adalah target. Lihat [evaluasi staging](./evaluasi-staging.md).
 
 # Blueprint - Human Resource Information System (HRIS) & HRD Alkes (Child)
 
-Status: **SELESAI & TERINTEGRASI KE PARENT SYSTEM BLUEPRINT**  
+Status: **Blueprint historis; implementasi dan integrasi parsial**
+
 Parent Document: `/docs/system-blueprint.md` (Domain: Supporting System — HRD & Pelatihan PJT)  
 Sasaran Modul: `src/components/modules/supporting/HRDModule.tsx` (beserta 7 sub-modul HRIS di `src/components/modules/supporting/hris/`)  
 Kerangka Regulasi: Klausul 6.2 ISO 13485:2016 (Kompetensi Personel), Bab II CDAKB (Personalia), UU Ketenagakerjaan RI, UU Cipta Kerja, BPJS Kesehatan & Ketenagakerjaan, PPh 21.
@@ -35,7 +36,7 @@ Industri distribusi dan manufaktur alat kesehatan (PT Anugrahmitra Selaras / REM
 ## 2. Stack Teknologi Modul HRIS
 
 - **Frontend Stack**: React 19, TypeScript, Tailwind CSS v4, Lucide React, modal dialogs, tab navigasi reaktif, tabel multi-site.
-- **State & Data Layer**: PocketBase collections (`hris_employees`, `payroll_records`, `attendance_logs`, `capa_records`, `safety_incidents`).
+- **State & Data Layer**: koleksi aplikasi disinkronkan melalui server Express dengan cache browser; nama tabel PocketBase pada rancangan lama bukan skema aktif.
 - **Engine / Logika Khusus**: 
   - Kalkulator Upah Per Jam (`Gaji Pokok / 173`).
   - Mesin Verifikasi Masa Berlaku Sertifikat (`statusSertifikat` & `hitungSisaHari`).
@@ -43,7 +44,7 @@ Industri distribusi dan manufaktur alat kesehatan (PT Anugrahmitra Selaras / REM
 
 ---
 
-## 3. Koneksi Lintas Modul (Parent-Child Integration)
+## 3. Koneksi Lintas Modul (target)
 
 ```mermaid
 graph TD

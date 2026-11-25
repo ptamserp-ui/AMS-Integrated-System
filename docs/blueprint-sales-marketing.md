@@ -1,8 +1,9 @@
-> **Status dokumen (2026-11):** **Sebagian** — alur order → alokasi FEFO sadar-kunci → stok → piutang diimplementasikan dan diuji (`npm run cek:fefo`). CRM/order/tender/kampanye bekerja di atas data contoh (seed) di `localStorage`. **Tidak ada** koneksi nyata ke LPSE/e-Katalog LKPP, SatuSehat, atau DJP — yang ada hanya antrean sinkronisasi + pratinjau payload (lihat blueprint Gudang). Klaim "LPSE Scraper & Alert System" dan "e-Katalog Pricing Engine live" adalah deskripsi UI/seed, bukan integrasi terverifikasi.
+> **Status 25 November 2026: sebagian.** Jalur FEFO memiliki tes domain; state server, cache browser dan data contoh digunakan oleh modul. Tidak ada bukti koneksi live LPSE/e-Katalog, SatuSehat atau DJP. Skema PostgreSQL dan koneksi otomatis di bawah adalah target. Tab saat ini berjumlah 10, termasuk Customer Database, Portal Customer dan e-Brochure; lihat `SalesModule.tsx`.
 
 # Blueprint - Sales & Marketing / SDAK (Child)
 
-Status: **SELESAI & TERINTEGRASI KE PARENT SYSTEM BLUEPRINT**  
+Status: **Blueprint historis; implementasi dan integrasi parsial**
+
 Parent Document: `/docs/system-blueprint.md` (Domain: Commercial, Sales & PMS)  
 Sasaran Modul: `src/components/modules/commercial/SalesModule.tsx` (beserta 7 sub-modul komersial di `src/components/modules/commercial/sales/`)  
 Kerangka Regulasi: Permenkes Etika Promosi Alkes, CDAKB Permenkes RI 4/2014, Perpres Pengadaan Barang/Jasa Pemerintah (e-Katalog LKPP), ALCOA+ Data Integrity.
@@ -18,7 +19,7 @@ Sistem ERP komersial untuk manufaktur dan distribusi alat kesehatan (PT Anugrahm
 
 ---
 
-## 1. Peta Fitur & 7 Sub-Modul Utama Komersial
+## 1. Peta Fitur Historis & 7 Sub-Modul Komersial
 
 | # | Sub-Modul Komersial | Berkas Utama | Fitur & Aturan Bisnis Aktual di Aplikasi |
 | --- | --- | --- | --- |
@@ -32,7 +33,7 @@ Sistem ERP komersial untuk manufaktur dan distribusi alat kesehatan (PT Anugrahm
 
 ---
 
-## 2. Core Architecture & Database Strategy
+## 2. Core Architecture & Database Strategy (target)
 - **Arsitektur:** Modular Monolith siap scale-out, di mana modul Sales terintegrasi erat dengan *Inventory (WMS)* dan *Procurement*.
 - **Database Partitioning & Master-Slave:** PostgreSQL dengan partisi tabel berdasarkan wilayah distribusi dan rentang waktu transaksi.
 - **Audit Trail (ALCOA+):** Setiap perubahan harga, diskon, pagu kredit, dan status SO wajib mencatat log (User, Timestamp, Old Value, New Value).
@@ -41,12 +42,12 @@ Sistem ERP komersial untuk manufaktur dan distribusi alat kesehatan (PT Anugrahm
 
 ## 3. Stack Teknologi Modul Sales
 - **Frontend Stack**: React 19, TypeScript, Tailwind CSS v4, Lucide React, SFA interactive maps/geo-tagging UI, modal form builders.
-- **State & Data Layer**: PocketBase CRM & Sales Collections (`sales_orders`, `customers`, `tenders`, `campaigns`).
+- **State & Data Layer**: state sinkronisasi Express, cache browser dan Firebase sesuai konfigurasi; bukan koleksi PocketBase yang direncanakan semula.
 - **Engine / Logika**: e-Katalog Pricing Engine, CDAKB Compliance Validator, FEFO Order Allocation, Landed Margin Calculator.
 
 ---
 
-## 4. Koneksi Lintas Modul (Parent-Child Integration)
+## 4. Koneksi Lintas Modul (target, kecuali jalur FEFO yang diuji)
 
 ```mermaid
 graph TD

@@ -1,4 +1,4 @@
-# Deployment staging AMS di Render
+# Deployment staging AMS di Render (historis)
 
 > **Panduan legacy.** Blueprint Render sebelumnya memerlukan paket berbayar dan sudah dihapus dari repository. Jangan mengikuti langkah lama yang merujuk `render.yaml`.
 

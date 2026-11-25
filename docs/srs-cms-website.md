@@ -1,5 +1,7 @@
 # SRS — Modul CMS Visual Situs Publik (AMS Integrated System)
 
+> **Pembaruan 25 November 2026:** spesifikasi ini menyimpan baseline Fase 1 pada 9 November. CMS kini memakai state sinkronisasi server dan cache browser; warna bawaan biru. Hasil pengujian lama di bawah bukan bukti ulang semua fitur pada staging. Lihat [alur integrasi](./alur-integrasi.md) dan [evaluasi staging](./evaluasi-staging.md).
+
 | | |
 |---|---|
 | **Kode** | SRS-CMS-2026-001 |
@@ -19,7 +21,7 @@ Dokumen ini menspesifikasikan **modul CMS visual** pada aplikasi **AMS Integrate
 ### 1.2 Ruang Lingkup
 **Termasuk:** pengaturan template dasar; kustomisasi warna utama/sekunder; pilihan font; unggah logo & favicon; penyusunan urutan seksi Beranda; penerapan real-time ke pratinjau dan tayang setelah diterbitkan.
 
-**Tidak termasuk (di luar fase ini):** editor tema dari nol (tema builder drag-and-drop), susunan halaman selain Beranda, multi-bahasa (i18n), manajemen aset terpusat (Media Library), dan template tambahan di luar 3 bawaan.
+**Di luar lingkup Fase 1:** editor tema dari nol, susunan halaman selain Beranda, multi-bahasa, Media Library dan template tambahan. Sejak baseline, situs publik memiliki pilihan bahasa Indonesia/Inggris; ketersediaan terjemahan tetap bergantung pada konfigurasi dan layanan server.
 
 ### 1.3 Definisi
 | Istilah | Arti |
@@ -36,7 +38,7 @@ Dokumen ini menspesifikasikan **modul CMS visual** pada aplikasi **AMS Integrate
 
 ---
 
-## 2. Keadaan Saat Ini (As-Is) & Masalah
+## 2. Baseline Awal & Masalah (9 November 2026)
 
 CMS situs publik **sudah ada dan berjalan**: semua teks/gambar/per seksi bisa diedit dari menu **Website**; draf terpisah dari tayang; pratinjau live via iframe `/web/?pratinjau=1` + `postMessage`; snapshot tayang dilayani server; audit trail setiap aksi.
 
@@ -48,8 +50,8 @@ CMS situs publik **sudah ada dan berjalan**: semua teks/gambar/per seksi bisa di
 
 **Constraint yang harus dihormati:**
 - Snapshot lama (tanpa field `tampilan`) harus tetap tayang normal → field visual **opsional**.
-- Data situs disimpan di `localStorage` + file JSON server (bukan database server) — desain mengikuti itu, bukan database relasional.
-- Penerbitan terbatas peran: hanya **PJT** dan **IT Admin** (`PERAN_PENERBIT`).
+- Draf dan snapshot memerlukan cache serta state sinkronisasi server; desain ini bukan database relasional.
+- Penerbitan melalui sesi memerlukan izin `website:publish`; token admin valid juga diterima server.
 
 ---
 
@@ -65,17 +67,17 @@ Setiap FR ditandai dengan status implementasi per 2026-11-09.
 | FR-04 | Admin dapat memilih **tipografi**: Quicksand (bawaan), Open Sans, JetBrains Mono, Sistem — dengan contoh teks langsung di pilihan | ✅ |
 | FR-05 | Admin dapat **menyusun urutan 15 seksi Beranda** (naik/turun) dan tombol "Kembalikan Bawaan" | ✅ |
 | FR-06 | Perubahan langsung terlihat di **Live Preview** (iframe `/web`, real-time via postMessage, tanpa simpan) | ✅ |
-| FR-07 | Perubahan baru **tayang** setelah PJT/IT Admin menekan **Terbitkan**; ada peringatan "perubahan belum terbit" bila berbeda dari tayang | ✅ (mekanisme lama) |
+| FR-07 | Penerbit berizin menerbitkan perubahan; data katalog tertentu juga diselaraskan server ke snapshot | ✅ (mekanisme perlu diuji sesuai alur) |
 | FR-08 | Setiap penyimpanan/terbit tercatat di **audit trail** dengan nama pengguna, peran, nilai lama/baru | ✅ (mekanisme lama) |
 | FR-09 | Konfigurasi `tampilan` tidak valid (warna rusak, template tak dikenal, urutan korup) **dinormalkan otomatis** ke default REMEDI Klasik — tidak pernah menjatuhkan halaman | ✅ |
 | FR-10 | Favicon dari CMS tampil di tab browser halaman `/web` sesaat setelah render | ✅ |
 | FR-11 | Situs `/web` tetap berfungsi 100% tanpa paket apa pun yang baru (semua dependensi yang dipakai sudah tersedia) | ✅ |
 
 ### 3.1 Logika penerapan (FR-06 / FR-09 / FR-10)
-1. **Penyimpanan draf** — disimpan di `localStorage('website_draft')` + dicatat di audit trail (mekanisme yang sudah ada).
+1. **Penyimpanan draf** — kunci `website_draft` menggunakan cache browser dan state sinkronisasi server, dengan antrean saat offline.
 2. **Render `/web`** — `PublicWebsite` membaca konfigurasi terpilih (urutan: snapshot server → snapshot statis → localStorage), memanggil `tampilanEfektif(cfg)` yang:
    - memvalidasi `templateId` terhadap daftar 3 template; selain itu → `remedi-klasik`;
-   - memvalidasi kedua warna dengan regex `^#[0-9a-f]{6}$`; selain itu → `#0d9488` / `#0f766e`;
+   - memvalidasi kedua warna dengan regex `^#[0-9a-f]{6}$`; bawaan sekarang `#2a6199` / `#245382` dan warna bawaan lama dinormalisasi;
    - memvalidasi `fontId` terhadap 4 pilihan; selain itu → `quicksand`;
    - memvalidasi `berandaUrutan`: hanya kunci seksi yang dikenal, tanpa duplikat; seksi yang absen ditambahkan di akhir daftar bawaan.
 3. **Variabel merek** — CSS custom properties `--brand`, `--brand-aksen` disuntik **inline** pada wrapper utama halaman (`<div style={{ '--brand': …, fontFamily: … }}>`); kelas `template-<id>` mengaktifkan aturan template di `index.css`.
@@ -147,21 +149,21 @@ interface KonfigurasiSitus {
 }
 ```
 
-### 5.2 Penyimpanan (mengikuti arsitektur yang ada — **bukan** database server)
+### 5.2 Penyimpanan saat ini
 | Lapisan | Lokasi | Catatan |
 |---|---|---|
-| Draf (sedang diedit) | `localStorage` kunci `website_draft` | perubahan langsung untuk pratinjau |
-| Tayang (snapshot) | server Express `data/website-published.json` + `public/website-published.json` | dilayani `PUT/GET /api/website/published` |
-| Cadangan lokal tayang | `localStorage` kunci `website_published` | dipakai bila server tidak dijangkau |
-| Jejak audit | `localStorage` kunci `log_audit_trail` (lewat `db.logAudit`) | nama pengguna + peran + nilai lama/baru |
+| Draf | state server `website_draft` dan cache browser | antrean offline dapat memerlukan rekonsiliasi |
+| Tayang | state server `website_published` dan salinan snapshot disk | dilayani `PUT/GET /api/website/published`; kegagalan salinan dilaporkan |
+| Cadangan lokal tayang | cache browser `website_published` | fallback bila server tidak dijangkau |
+| Jejak audit | audit bisnis klien dan audit publikasi RBAC server | tidak membuktikan audit menyeluruh immutable |
 
 ### 5.3 Contoh payload `tampilan` di snapshot
 ```json
 {
   "tampilan": {
     "templateId": "remedi-gelap",
-    "warnaUtama": "#0d9488",
-    "warnaAksen": "#0f766e",
+    "warnaUtama": "#2a6199",
+    "warnaAksen": "#245382",
     "fontId": "quicksand",
     "berandaUrutan": ["hero", "slide", "kepercayaan", "solusi", "konsultasi", "statistik", "produk", "merek", "perjalanan", "institusi", "kegiatan", "promo", "artikel", "testimoni", "faq"]
   }
@@ -174,9 +176,9 @@ interface KonfigurasiSitus {
 
 | Aksi | Peran | Mekanisme |
 |---|---|---|
-| Sunting draf (semua menu) | Semua peran dashboard | `useState` + `db.simpanWebsiteDraft` |
-| **Terbitkan** / **Tahan Situs** | Hanya `pjt`, `it_admin` | `PERAN_PENERBIT` (WebsiteModule) — tombol dinonaktifkan + catatan peran |
-| Tulis snapshot ke server | Server menegakkan `AMS_ADMIN_TOKEN` | `PUT /api/website/published` header `x-ams-admin-token` (lihat README) |
+| Sunting draf | Peran dengan izin website yang sesuai | server menegakkan izin sinkronisasi; UI menggunakan `db.simpanWebsiteDraft` |
+| **Terbitkan** / **Tahan Situs** | Sesi dengan izin `website:publish` | server memeriksa RBAC; UI mengikuti izin sesi |
+| Tulis snapshot ke server | Sesi berizin **atau** token admin valid | `PUT /api/website/published`; token bukan syarat bila sesi berizin |
 | Font pihak ketiga | **Tidak dimuat dari CDN** | self-hosted `public/fonts/` (OFL) |
 
 ---
@@ -214,7 +216,7 @@ interface KonfigurasiSitus {
 4. Beranda 15 seksi; seksi yang dimatikan (`isActive: false`) tidak tampil walau ada di urutan.
 5. Font baru hanya bisa ditambah lewat kode (`public/fonts/` + `@font-face` + `FONT_SITUS` + OFL license).
 6. Belum ada pratinjau template pada perangkat (tablet/ponsel) selain lewat mode Pratinjau.
-7. Publikasi langsung ke server memerlukan `AMS_ADMIN_TOKEN` (keamanan); tanpa token, hanya unduh JSON manual.
+7. Publikasi langsung memerlukan sesi berizin atau `AMS_ADMIN_TOKEN` yang valid; kegagalan sinkronisasi dan salinan harus ditangani, bukan dianggap sukses penuh.
 
 ---
 

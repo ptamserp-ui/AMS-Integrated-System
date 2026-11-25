@@ -1,10 +1,11 @@
-> **Status dokumen (2026-11):** **Sebagian — logika asli, diuji; persistensi lokal** — 12 tab, FEFO sadar-kunci (`alokasiFEFOSadarKunci`), rantai hash pergerakan, seed 5 gudang/18 bin/19 pergerakan yang dijaga permanen oleh `npm run cek:semua` (hijau saat dokumen ini ditulis). Tetapi: data di `localStorage` (bukan "PocketBase WMS Datastore" / "Express Middleware" seperti ditulis di stack); tidak ada integrasi nyata RFID/PDA/sensor IoT/LKPP/SATUSEHAT — semuanya "antrean + pratinjau payload"; seed bertanggal 2024 vs jam berjalan 2026 (lihat catatan M3); tautan absolut `file:///C:/Users/DESKTOP/Documents/Qoder/…` di Lampiran B merujuk mesin developer lama dan tidak valid di mesin lain.
+> **Status 25 November 2026: sebagian.** FEFO dan rantai hash memiliki tes domain; state server dan cache browser menggantikan asumsi penyimpanan hanya lokal pada rancangan awal. Implementasi kini memiliki 13 tab; bagian M1–M6 di bawah mencatat 12 tab historis. Integrasi RFID/PDA, sensor, LKPP dan SATUSEHAT belum terbukti live. Rincian verifikasi dan batas produksi ada di [evaluasi staging](./evaluasi-staging.md).
 
 # Blueprint - Menu Warehouse & Logistics (Gudang & Logistik) (Child)
 
 Status: **M1–M6 SELESAI (tipe domain + seed & penjaga benih + util 12 aturan + accessor/mutasi & jalur FEFO + shell 12 tab & migrasi kepemilikan §0B + verifikasi akhir `cek:semua`, `tsc --noEmit`, `vite build`)** — Penjaga permanen aktif: `npm run cek:semua` (`cek:benih`, `cek:fefo`, `cek:gudang`)  
 **Parent Document:** `/docs/system-blueprint.md` (Domain: Operations & Technical WMS)  
-**Stack Teknologi:** React 19, TypeScript, Tailwind CSS v4, Lucide React, 12 Tab UI, Canvas/RFID Scanner, PocketBase WMS Datastore, Express Middleware, Dual-Track FEFO Engine.  
+**Stack saat ini:** React, TypeScript, Tailwind, Express, cache browser dan state sinkronisasi; logika FEFO tersedia. Referensi perangkat dan integrasi eksternal di bawah adalah rancangan/pratinjau, bukan koneksi terbukti.
+
 Sumber cetak biru: lampiran spesifikasi "Warehouse & Logistics" (Senior Software Architect / Full-Stack Developer) yang dimasukkan 4 November 2026.  
 Sasaran: menu **Operations & Technical → Gudang & Logistik** (`src/components/modules/operations/WarehouseModule.tsx`).  
 Kerangka regulasi: CDAKB Permenkes RI 4/2014 (kini CDB), ISO 13485:2016, e-Katalog LKPP, SATUSEHAT Logistik / SMILE Kemenkes.

@@ -1,3 +1,5 @@
+> **Arsip historis:** audit ini memotret commit `6812703` pada 5 November 2026, bukan runtime saat ini. Express, RBAC dan sinkronisasi telah berkembang sejak itu; PostgreSQL masih shadow. Rujukan mutakhir: [README](../../README.md) dan [evaluasi staging](../evaluasi-staging.md). Isi audit dipertahankan sebagai baseline.
+
 # PHASE 1 — EXISTING SYSTEM AUDIT
 ## AMS Integrated System · Existing Application Enterprise Transformation
 

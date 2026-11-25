@@ -2,6 +2,8 @@
 
 Dokumen ini disusun sebagai acuan resmi **Penanggung Jawab Teknis (PJT)** dalam meninjau, menyetujui, dan menyeragamkan penggunaan istilah serapan bahasa Inggris–Indonesia di seluruh modul aplikasi manajemen alat kesehatan (alkes).
 
+Glosarium menjelaskan istilah, bukan bukti bahwa fitur atau integrasi terkait aktif. Status implementasi dan deployment ada di [README](../README.md) dan [evaluasi staging](./evaluasi-staging.md).
+
 > **Contoh Acuan Cepat:** `Cold Chain` = **Rantai Dingin**; `Adverse Event` = **Kejadian Tidak Diinginkan (KTD)**; `Write-Off` = **Penghapusbukuan Persediaan**; `Blind Count` = **Hitung Buta Opname**; `Take Home Pay (THP)` = **Gaji Bersih Diterima**.
 
 ---

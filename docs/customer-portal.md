@@ -4,6 +4,8 @@ Dokumen ini adalah rencana kerja dan catatan progres pengembangan **Customer Por
 
 Produksi tetap **NO-GO** sampai temuan P0 di [evaluasi staging](./evaluasi-staging.md) ditutup. Portal tidak boleh diaktifkan di produksi hanya karena satu tahap di dokumen ini telah dicentang.
 
+**Status pembacaan 25 November 2026:** kode portal hingga commit `32aee94` termasuk dalam deployment Linux staging yang dilaporkan, tetapi fitur login Google, pengajuan, penawaran dan alur portal terautentikasi belum seluruhnya diuji di staging. Penawaran harga, faktur dan pembayaran masih terbuka. Entri bertanggal yang menyebut “lokal” atau “belum di-deploy” merekam kondisi saat pengujian tersebut, bukan status rilis terbaru. Firebase tetap digunakan; penggantian identitas tanpa Firebase belum dilakukan.
+
 ## Cara mencatat progres
 
 - Tandai pekerjaan yang selesai dan terbukti dengan `- [x] ✅`, lalu tulis tanggal, lingkungan (lokal, staging Linux, atau produksi) dan buktinya.
@@ -24,6 +26,7 @@ Produksi tetap **NO-GO** sampai temuan P0 di [evaluasi staging](./evaluasi-stagi
 - [ ] **Rilis produksi** (menunggu P0 ditutup dan persetujuan tertulis)
 - [x] ✅ **Penyelarasan aksen biru — lokal Windows, 24 November 2026:** portal mengikuti token global biru `#2a6199` dan turunannya. Pemeriksaan browser form masuk dengan status API sintetis membuktikan tombol `#245382`, hover `#1e456c`, dan fokus `#2a6199`; TypeScript dan build lulus. Ini verifikasi visual, bukan login nyata atau deployment; Tahap 4–6 tetap terbuka.
 - [x] ✅ **Paket tema biru ter-deploy — Linux staging, 24 November 2026:** `ce6174e` aktif, `/akun` HTTP 200 dan CSS publik memuat token biru `#2a6199`; health Firebase connected/ready diverifikasi. Alur portal terautentikasi dan seluruh halaman belum diuji di staging; Tahap 4–6 tetap terbuka.
+- [x] ✅ **Penyelarasan status dokumentasi — lokal, 25 November 2026:** penanda historis dan status rilis `32aee94` diperjelas dengan acuan [evaluasi staging](./evaluasi-staging.md); tidak ada perubahan desain atau verifikasi login/pesanan baru. Tahap 4–6 tetap terbuka.
 
 ## 1. Keputusan desain
 
@@ -382,6 +385,10 @@ Tidak ada resource atau aksi RBAC baru. `tautkan` hanya menerima master `sales_p
 - [ ] Tutup P0-02 (pemeriksaan versi dasar sinkronisasi) sebelum konversi Sales Order portal dipakai oleh pengguna nyata.
 
 ## 8. Riwayat
+
+### 25 November 2026 — klarifikasi status dokumentasi
+
+Status kode yang ikut dalam deployment dipisahkan dari pengujian portal terautentikasi. Tidak ada perubahan keputusan desain; Firebase masih digunakan dan integrasi transaksi belum lengkap.
 
 ### 24 November 2026 — penyelarasan palet biru lokal
 

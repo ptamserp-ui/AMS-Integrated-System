@@ -1,4 +1,4 @@
-> **Status dokumen (diperbarui 2026-11): FAKTA TERVERIFIKASI (checklist jujur / zero-skip policy)** — Fondasi persistensi server (`A1`), autentikasi & RBAC server-side (`B1`–`B2`), serta verifikasi lint/tes/build kode sumber (`D1`, verifikasi repositori lokal) **sudah terpenuhi di codebase**. Item yang memerlukan eksekusi di server staging/produksi, integrasi eksternal, migrasi data, dan tanda tangan PJT **tetap belum dicentang `[ ]`** sampai ada bukti di lingkungan target.
+> **Status 25 November 2026:** checklist kesiapan produksi; hasil dan angka pengujian di bawah adalah bukti historis, bukan hasil terbaru. Linux staging, Firebase dan rilis `32aee94` telah diperiksa dalam lingkup [evaluasi staging](./evaluasi-staging.md). PostgreSQL masih shadow; backup/restore lengkap, migrasi dan go-live tetap terbuka.
 
 ## Developer Notes
 
@@ -25,7 +25,7 @@ Dokumen ini mengikuti urutan implementasi produksi yang jujur: **pintu dikunci d
 | **B2** | **Terpenuhi `[x]`** | `requirePermission(...)`, `canWriteSyncKey`, `canDeleteSyncKey`, pencabutan sesi real-time WebSocket (`rbac:session-revoked`), & audit penolakan `DENIED` di `rbac-db.json`. |
 | **B3–B6** | Parsial (Di Repo / Proxy `[ ]`) | Kode bebas kredensial & `.env.example` bersih; rate limit login (`15x/15 mnt` per IP+user → HTTP 429) & `/api/website/published` (`30x/15 mnt/IP`) aktif, namun Secret Manager VPS, rate limit global API, security header aktif di server/Nginx produksi, dan pembatasan CORS domain belum diverifikasi di server target. |
 | **D1** | **Terpenuhi `[x]`** | `npm run lint` (`tsc --noEmit`) lulus tanpa error. |
-| **D2–D3** | Parsial (Lokal Hijau `[ ]`) | Di repositori lokal: `npm run test` (16 file, 225 tes), `npm run cek:semua` (`cek:benih`, `cek:fefo`, `cek:gudang`), & `npm run verifikasi` lulus. Belum dijalankan di server staging; `npm run build` sukses namun Vite masih memberi peringatan chunk >500 kB (`dist/assets/index-*.js` ~3,43 MB / ~757 kB gzip). |
+| **D2–D3** | Parsial `[ ]` | Lint, tes staging dan build dalam script deployment `32aee94` mencapai akhir menurut laporan operator; jumlah tes VPS tidak terlihat. `npm run verifikasi` lengkap dan penilaian bundle target belum dibuktikan. Angka build lama tidak mewakili bundle terkini. |
 
 ---
 
@@ -70,8 +70,8 @@ Dokumen ini mengikuti urutan implementasi produksi yang jujur: **pintu dikunci d
 ## Fase D — Build & Verifikasi di Staging
 
 - [x] **D1**: `npm run lint` (`tsc --noEmit`) lolos tanpa error — **Terverifikasi** pada repo (`tsc --noEmit` keluar kode 0).
-- [ ] **D2**: `npm run test` lolos; `npm run verifikasi` hijau **di server staging**. **Status**: Di repo lokal seluruh suite sudah lulus (`npm run verifikasi`: 16 file / 225 tes Vitest, `cek:benih`, `cek:fefo`, `cek:gudang`, dan `build` hijau); tinggal dijalankan ulang dan diverifikasi di server staging target.
-- [ ] **D3**: `npm run build` tanpa peringatan kritis; bundle ditinjau (code-splitting aktif; ukuran per chunk wajar). **Status**: `npm run build` menghasilkan `dist/`, PWA service worker `dist/sw.js`, dan `server.js` (89,6 KB) tanpa error fatal, tetapi Vite masih menampilkan peringatan chunk >500 kB (`dist/assets/index-*.js` ~3.427 kB / ~757 kB gzip) sehingga code-splitting lanjutan masih perlu dilakukan sebelum dicentang.
+- [ ] **D2**: `npm run test` lolos; `npm run verifikasi` hijau **di server staging**. **Status**: script deployment `32aee94` mencapai akhir sesudah tes staging, tetapi output jumlah tes tidak tersedia; rangkaian `npm run verifikasi` lengkap belum dibuktikan di target.
+- [ ] **D3**: `npm run build` tanpa peringatan kritis; bundle ditinjau (code-splitting aktif; ukuran per chunk wajar). Build staging `32aee94` mencapai akhir; ukuran dan peringatan bundle terbaru belum ditinjau untuk gerbang produksi.
 - [ ] **D4**: Load test dasar: mis. 50 pengguna bersamaan membuka dasbor + 1 transaksi — tanpa error 5xx dan respons < 2 detik.
 - [ ] **D5**: Smoke test manual semua 13 modul di staging (daftar di Fase K).
 - [ ] **D6**: Rollback rehearsal: staging dikembalikan ke versi sebelumnya dan diverifikasi pulih.
@@ -85,7 +85,7 @@ Dokumen ini mengikuti urutan implementasi produksi yang jujur: **pintu dikunci d
 
 ## Fase F — Database & Cadangan (dibuktikan, bukan diklaim)
 
-- [ ] **F1**: Basis data produksi diprovisi (Managed PocketBase / PostgreSQL), kapasitas dan kredensial terpisah dari staging.
+- [ ] **F1**: Basis data produksi yang dipilih diprovisi, kapasitas dan kredensial terpisah dari staging. PostgreSQL shadow belum terhubung ke aplikasi; cutover memerlukan integrasi dan rekonsiliasi.
 - [ ] **F2**: Migrasi skema dijalankan; skema tervalidasi terhadap aplikasi.
 - [ ] **F3**: Backup otomatis harian + *point-in-time recovery* dikonfigurasi.
 - [ ] **F4**: **Restore diuji di staging** dari backup produksi — aplikasi hidup kembali dari snapshot. (Bukan sekadar "backup berhasil dijadwalkan".)

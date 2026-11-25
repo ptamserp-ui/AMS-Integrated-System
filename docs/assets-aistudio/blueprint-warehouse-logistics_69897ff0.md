@@ -1,3 +1,5 @@
+> **Arsip historis:** rancangan 12 tab dan status M1–M6 di bawah mencatat fase terdahulu, bukan status seluruh aplikasi. Lihat [blueprint gudang aktif](../blueprint-warehouse-logistics.md) dan [evaluasi staging](../evaluasi-staging.md).
+
 # Blueprint — Menu Warehouse & Logistics (Gudang & Logistik)
 
 Status: **M1–M6 SELESAI (tipe domain + seed & penjaga benih + util 12 aturan + accessor/mutasi & jalur FEFO + shell 12 tab & migrasi kepemilikan §0B + verifikasi akhir `cek:semua`, `tsc --noEmit`, `vite build`)** — Penjaga permanen aktif: `npm run cek:semua` (`cek:benih`, `cek:fefo`, `cek:gudang`)

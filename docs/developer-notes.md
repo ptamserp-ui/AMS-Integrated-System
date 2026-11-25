@@ -1,6 +1,6 @@
 # Catatan Pengembang & Audit Kepatuhan — AMS Integrated System (Jujur, 2026-11)
 
-> **Status dokumen (2026-11): FAKTA TERVERIFIKASI (dengan koreksi menyeluruh).**
+> **Status 25 November 2026:** catatan audit dan rekomendasi; fitur individual perlu dibuktikan di lingkungan target. State server, RBAC dan WebSocket telah ditambahkan sejak audit awal. Lihat [evaluasi staging](./evaluasi-staging.md) untuk bukti terkini.
 > Dokumen ini menggantikan versi sebelumnya yang menyatakan "SESUAI & TERPENUHI" / "fully compliant" terhadap tujuh standar pemerintah. Klaim tersebut **tidak dapat dibuktikan dan dihapus**. Yang tersisa: alat bantu kepatuhan yang ada di aplikasi, dan daftar yang harus dipenuhi sebelum kata "sesuai" boleh dipakai.
 
 **Aturan baca dokumen ini:** setiap bagian dibagi menjadi (a) **Yang ada di aplikasi**, (b) **Yang BELUM ada / syarat formal kepatuhan**, dan (c) **Rekomendasi**. Tidak ada bagian (a) yang boleh dikutip sebagai bukti kepatuhan.
@@ -12,8 +12,8 @@ Coded by Langgo Bramandityo
 ## Bagian 1: Audit Kepatuhan — Versi Jujur
 
 ### 1. CDAKB (Cara Distribusi Alat Kesehatan yang Baik) — Permenkes RI No. 4/2014
-- **Yang ada di aplikasi**: 12 tab modul Gudang (rantai dingin 2°C–8°C, FEFO sadar-kunci, karantina/recall, pest control, FEFO alokasi, opname buta, jejak pergerakan ber-hash SHA-256). Logika inti FEFO dan rantai hash **diimplementasikan dan lolos tes** (`npm run cek:semua`).
-- **Yang BELUM ada**: sertifikat CDAKB/SDAK perusahaan dari Kemenkes; audit distribusi oleh auditor eksternal; catatan suhu dari sensor fisik riil (data saat ini seed/log manual); prosedur tertulis yang dieksekusi di lapangan; penyimpanan audit trail di server (saat ini `localStorage` — bisa dihapus penggunanya); telusur fisik batch dari rak ke fasyankes.
+- **Yang ada di aplikasi**: 13 tab modul Gudang, termasuk FEFO sadar-kunci, karantina/recall dan jejak pergerakan ber-hash. Logika inti FEFO dan rantai hash memiliki tes domain.
+- **Yang belum dibuktikan**: sertifikat dan audit distribusi eksternal, data sensor fisik, prosedur lapangan, audit bisnis yang immutable dan telusur fisik batch end-to-end. State server tersedia, tetapi bukan bukti penyimpanan audit WORM.
 - **Sebelum klaim "sesuai" boleh dipakai**: audit CDAKB terjadwal oleh pihak kompeten + sertifikat SDAK berlaku + 6 bulan rekam suhu & mutasi nyata dari sensor/gudang asli + backup audit trail di server.
 - **Rekomendasi**: hubungkan logger suhu IoT nyata; pindahkan `JejakPergerakan` ke penyimpanan server yang tidak bisa dihapus klien; jadwalkan audit internal CDAKB pertama sebelum go-live.
 
@@ -49,7 +49,7 @@ Coded by Langgo Bramandityo
 
 ### 7. Integritas Data — ALCOA+ & SHA-256
 - **Yang ada**: rantai hash SHA-256 **asli dan teruji** untuk jurnal (`akuntansi.ts`) dan pergerakan gudang (`gudang.ts`); 19 hash seed terverifikasi; `npm run cek:semua` mengunci bentuk kanonik; pencatatan old/new value di jejak audit.
-- **Yang BELUM ada**: penyimpanan audit trail di **server** yang tidak bisa dihapus klien (saat ini `localStorage` — `localStorage.clear()` menghapus semuanya, termasuk "immutable log"); timestamp tepercaya (NTP); tanda tangan digital (e-signature); proteksi tulis sekali (WORM/immutable storage); retensi sesuai kebijakan.
+- **Yang BELUM dibuktikan**: audit bisnis menyeluruh yang tidak bisa diubah atau dihapus, timestamp tepercaya, tanda tangan digital, WORM dan retensi sesuai kebijakan. Audit RBAC dan Customer Portal memiliki arsip server; itu tidak membuktikan seluruh audit bisnis immutable.
 - **Sebelum klaim "ALCOA+ compliant"**: audit trail dipindah ke penyimpanan server append-only + verifikasi independen oleh auditor + SOP retensi data + pengujian pemulihan.
 - **Rekomendasi**: jadikan migrasi audit trail ke server item #1 setelah persistensi backend ada.
 
@@ -77,11 +77,11 @@ Status "saat ini" di bawah **berdasarkan kode yang ada**, bukan aspirasi dokumen
 2. **RA/PJT** — status: UI + seed. Rekomendasi: reminder WA 90/60/30 hari (butuh gateway yang ada & nomor nyata); sinkronisasi OSS — butuh akses resmi.
 3. **QA & ISO 13485** — status: pencatatan CAPA. Rekomendasi: workflow bertingkat + e-sign; e-sign butuh infrastruktur sertifikat yang belum ada.
 4. **QC** — status: inbound inspection form. Rekomendasi: scan CoA via kamera; kamera tersedia, pustaka belum dipilih.
-5. **WMS** — status: 12 tab, logika FEFO teruji. Rekomendasi: IoT suhu logger nyata; smart pick path sudah ada (rute terpendek) — tinggal dipakai dengan bin asli.
+5. **WMS** — status: 13 tab, logika FEFO teruji. Rekomendasi: uji IoT suhu dan rute dengan perangkat serta bin asli.
 6. **After-Sales** — status: tiket & kalibrasi UI. Rekomendasi: PWA teknisi lapangan dengan geotag; kamera/GPS browser tersedia.
 7. **Manufacture/CPAKB** — status: BMR UI. Rekomendasi: telemetry cleanroom nyata — butuh sensor & protokol.
 8. **Purchasing** — status: PO + landed cost. Rekomendasi: supplier scorecard dari data PO nyata.
-9. **CRM/Sales** — status: CRM/SFA UI + seed. Rekomendasi: LPSE scraper — butuh penetapan legalitas scraping; customer portal B2B — butuh autentikasi server (belum ada).
+9. **CRM/Sales** — status: CRM/SFA, Customer Database dan sebagian Customer Portal tersedia; autentikasi portal terpisah sudah ada. Penawaran harga dan transaksi portal masih terbuka. LPSE scraper memerlukan kajian legal dan integrasi.
 10. **PMS** — status: formulir KTD. Rekomendasi: broadcast otomatis recall — butuh gateway WA/email nyata.
 11. **HRIS** — status: payroll calculator teruji. Rekomendasi: absensi biometrik — **ditolak** sampai UU PDP dipenuhi (lihat `git-external.md`); face recognition pihak ketiga tidak boleh diimpor apa adanya.
 12. **Finance** — status: double-entry + CoA teruji. Rekomendasi: integrasi e-Faktur Coretax DJP — butuh kredensial perusahaan nyata.
@@ -91,8 +91,8 @@ Status "saat ini" di bawah **berdasarkan kode yang ada**, bukan aspirasi dokumen
 
 ## Kesimpulan Audit & Roadmap (jujur)
 
-AMS Integrated System saat ini adalah **aplikasi front-end dengan logika domain yang serius (FEFO, jurnal berantai, payroll) di atas data contoh, tanpa persistensi server**. Ia adalah alas yang baik untuk dibangun menjadi sistem kepatuhan nyata — bukan sistem kepatuhan itu sendiri.
+AMS memiliki logika domain, persistensi state server, RBAC, cache offline dan sinkronisasi Firebase. Data contoh masih tersedia; kemampuan ini bukan bukti kesiapan operasional atau kepatuhan.
 
-Urutan yang benar: (1) persistensi backend & autentikasi server; (2) pindahkan data contoh ke data asli perusahaan (lihat `production-list.md` Fase H); (3) audit trail ke server immutable; (4) integrasi pemerintah satu per satu lewat sandbox; (5) audit & sertifikasi dengan pihak berwenang; (6) baru publikasikan klaim kepatuhan.
+Prioritas berikutnya: backup/restore teruji, integritas dan audit yang memadai, migrasi data yang disetujui dan direkonsiliasi, integrasi pemerintah lewat sandbox, serta audit dan sertifikasi oleh pihak berwenang. Jangan menghapus data contoh tanpa persetujuan.
 
 Dokumen apa pun yang menyebut aplikasi ini "fully compliant" atau "SESUAI & TERPENUHI" sebelum langkah 4–5 selesai adalah **klaim yang tidak bisa dipertanggungjawabkan** dan harus ditarik.

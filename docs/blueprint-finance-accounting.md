@@ -1,8 +1,9 @@
-> **Status dokumen (2026-11):** **Sebagian** — jurnal berantai SHA-256, CoA, posting/void, dan kalkulator landed cost benar-benar diimplementasikan dan lolos tes (`tests/domain/akuntansi-*.test.ts`, `npm run test` = 189 tes hijau). Tetapi §2 (skema PostgreSQL `accounts`/`journal_entries`) adalah **desain target yang tidak pernah dijalankan**; data aktual tersimpan di `localStorage` browser, bukan di PostgreSQL/PocketBase — tidak ada server ledger sama sekali. Klaim "Real-time / Event-Driven Architecture" adalah aspirasi, bukan keadaan.
+> **Status 25 November 2026: sebagian diimplementasikan.** Jurnal, CoA, posting/void dan kalkulator memiliki tes domain. Koleksi aplikasi memakai cache browser dan sinkronisasi state server; §2 adalah desain SQL target, bukan skema ledger runtime. Alur event-driven dan pembukuan otomatis lintas modul di bawah merupakan rancangan, bukan bukti operasional. Lihat [evaluasi staging](./evaluasi-staging.md).
 
 # Blueprint - Finance & Accounting / F&A (Child)
 
-Status: **SELESAI & TERINTEGRASI KE PARENT SYSTEM BLUEPRINT**  
+Status: **Blueprint historis; implementasi dan integrasi parsial**
+
 Parent Document: `/docs/system-blueprint.md` (Domain: Supporting System — Finance & Accounting)  
 Sasaran Modul: `src/components/modules/supporting/FinanceModule.tsx` (beserta engine ledger double-entry, CoA, landed cost, dan CDABK write-off)  
 Kerangka Regulasi: Standar Akuntansi Keuangan (SAK), CDAKB Permenkes RI 4/2014, ISO 13485:2016, Perpajakan RI (PPN 11%, PPh 22 Impor, e-Faktur), ALCOA+ Data Integrity.
@@ -10,7 +11,7 @@ Coded by Langgo Bramandityo
 
 ---
 
-## 1. High-Level Enterprise Architecture & Integrasi Modul
+## 1. High-Level Enterprise Architecture & Integrasi Modul (target)
 Modul Finance & Accounting (F&A) REMEDI dirancang sebagai pusat pencatatan keuangan enterprise dengan pendekatan *Event-Driven Architecture* (EDA) untuk menjaga konsistensi data real-time lintas modul:
 - **Modul Produksi / Manufaktur (ISO 13485)** ──> *(COGM / HPP Engine)* ──┐
 - **Modul Gudang / WMS (CDAKB Karantina)**    ──> *(Inventory Valuation)* ┼─> **[Modul Finance & Accounting]**
@@ -104,7 +105,7 @@ Menurut CDAKB, produk alkes kedaluwarsa atau rusak harus masuk karantina. Di apl
 
 ---
 
-## 5. Koneksi Lintas Modul (Parent-Child Integration)
+## 5. Koneksi Lintas Modul (target, belum dibuktikan end-to-end)
 
 ```mermaid
 graph TD

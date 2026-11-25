@@ -1,4 +1,6 @@
-> **Status dokumen (2026-11): RENCANA — BELUM DIEKSEKUSI, JANGAN DIIMPOR APA ADANYA.** Repositori pihak ketiga yang disebut di sini (`driptobhattacharyya/Smart-Attendance-App`) adalah proyek individu tanpa riwayat audit keamanan, lisensi yang jelas, atau review untuk alur penggajian. **Biometrik wajah adalah data pribadi sensitif** (UU PDP No. 27/2022) — memproses citra wajah karyawan tanpa DPIA, dasar pemrosesan, dan pengamanan adalah pelanggaran langsung. Rekomendasi: bangun modul absensi sendiri di atas stack yang sudah ada; jika terpaksa memakai kode luar, fork + audit menyeluruh + pin versi + hapus fitur biometrik sampai ada izin tertulis dan DPIA. Mengimpor APK/repo asing apa adanya = risiko supply-chain ke sistem payroll & data pribadi.
+> **Status dokumen (2026-11): RENCANA — BELUM DIEKSEKUSI, JANGAN DIIMPOR APA ADANYA.** Repositori pihak ketiga yang disebut di sini belum ditinjau untuk alur penggajian AMS. Biometrik wajah merupakan data sensitif dan memerlukan penilaian dasar pemrosesan, privasi dan keamanan oleh pihak yang berwenang. Kode pihak ketiga memerlukan pemeriksaan lisensi, audit keamanan dan persetujuan sebelum digunakan.
+
+> **Klarifikasi 25 November 2026:** uraian integrasi Android di bawah adalah usulan, bukan fitur AMS yang terpasang atau koneksi terverifikasi. Penilaian hukum dan keamanan harus ditinjau oleh pihak berwenang sebelum keputusan.
 
 # Integrasi Git Eksternal: Smart-Attendance-App
 

@@ -1,107 +1,58 @@
 # AMS Integrated System — PT Anugrahmitra Selaras
 
-Sistem Informasi Manajemen Terintegrasi Perusahaan Alat Kesehatan Indonesia berbasis standar **CDAKB** (Cara Distribusi Alat Kesehatan yang Baik), **CPAKB** (Cara Pembuatan Alat Kesehatan yang Baik), **SDAK**, dan **ISO 13485:2016** Kementerian Kesehatan Republik Indonesia.
+AMS adalah aplikasi ERP dan alat bantu manajemen mutu untuk operasional perusahaan alat kesehatan. Fitur aplikasi tidak dengan sendirinya membuktikan kepatuhan CDAKB, CPAKB, SDAK, ISO 13485, atau kesiapan produksi.
 
----
+## Status saat ini
 
-## 🌟 Tentang Aplikasi
+- **Aplikasi:** React 19, TypeScript, Vite, Tailwind CSS v4 dan Express; tersedia ERP, situs publik `/web`, Customer Portal `/akun`, dan tampilan `/mobile`.
+- **Data dan sinkronisasi:** Express menyimpan state dan akun server pada `AMS_DATA_DIR`; klien memiliki cache dan antrean offline. WebSocket `/api/sync/ws` dan Firebase Firestore mendukung sinkronisasi. Firebase bukan satu-satunya sumber data atau pengganti backup lengkap.
+- **Database:** Firebase merupakan driver aktif pada staging yang terakhir diverifikasi. PostgreSQL di Linux baru skema shadow/prototipe yang diuji; aplikasi belum memakai PostgreSQL sebagai database utama. Migrasi data aktual, identitas, backup/restore lengkap dan cutover masih terbuka.
+- **Autentikasi:** sesi ERP dan RBAC ditegakkan server; login Google masih memakai Firebase. Customer Portal menggunakan autentikasi dan sesi terpisah; pengajuan penawaran sudah tersedia pada kode, sedangkan penetapan harga, faktur dan pembayaran portal masih dalam pengembangan.
+- **Deployment:** Linux staging terakhir yang diverifikasi menjalankan `32aee94`; bukti dan batasnya ada di [evaluasi staging](docs/evaluasi-staging.md). Push tidak otomatis berarti deployment.
+- **Data dan integrasi:** data contoh masih tersedia. Antrean atau pratinjau integrasi pemerintah dan perangkat bukan bukti koneksi live. Jangan hapus data dummy atau migrasikan data aktual tanpa persetujuan, backup dan rekonsiliasi.
 
-**AMS Integrated System** adalah platform Enterprise Resource Planning (ERP) dan Manajemen Kepatuhan spesifik industri alat kesehatan (Alkes) yang dikembangkan untuk **PT Anugrahmitra Selaras (AMS)**. Sistem ini menghubungkan seluruh divisi operasional perusahaan dari hulu (manufaktur dan regulasi) hingga hilir (distribusi, e-Katalog LKPP, purna jual, dan post-market surveillance).
+## Modul
 
----
+ERP mencakup Executive Overview, Regulatory/PJT, QA, QC, Warehouse & Logistics, layanan teknis, manufaktur, purchasing, Sales & Marketing, PMS, HRIS, Finance, IT & Traceability, serta CMS situs publik. Sales mencakup **Customer Database** untuk melihat dan mengubah detail pelanggan existing, serta tab Portal Customer. Penambahan pelanggan, draf server dan impor Excel pada Customer Database belum tersedia.
 
-## 🏛️ Divisi & Modul Utama Terintegrasi
+Kemampuan tiap modul, data contoh, dan batas integrasi dijelaskan dalam [catatan pengembang](docs/developer-notes.md), [checklist produksi](docs/production-list.md), serta dokumen blueprint terkait. Blueprint berisi target desain dan tidak seluruhnya menggambarkan fitur yang sudah berjalan.
 
-Aplikasi ini mencakup **13 Modul Fungsional Utama**:
+## Memulai lokal
 
-1. **Dashboard Dewan Direksi (Executive Overview)**
-   - Cockpit real-time bagi Direksi untuk memantau performa perusahaan secara langsung.
-   - Grafik analitik interaktif (Line Chart) untuk tren pendapatan, fluktuasi suhu *cold chain*, dan skor kepatuhan mutu.
-   - Laporan ringkasan kinerja 7 divisi utama.
-2. **Regulatory Affairs (RA) & Penanggung Jawab Teknis (PJT)**
-   - Manajemen Nomor Izin Edar (NIE), pemantauan masa berlaku perpanjangan, dan lisensi PJT sesuai Permenkes.
-3. **Quality Assurance (QA) & ISO 13485:2016**
-   - Manajemen Catatan Perbaikan & Pencegahan (CAPA), dokumen mutu, dan audit internal terakreditasi KAN.
-4. **Quality Control (QC)**
-   - Inspeksi kedatangan barang (*inbound inspection*) dan keputusan rilis batch alkes.
-5. **Warehouse & Logistics (WMS / CDAKB)**
-   - Manajemen gudang CDAKB 12 tab (penyimpanan suhu 2–8°C *cold chain*, alokasi FEFO sadar-kunci, *cycle count*, *recall*, dan integrasi SatuSehat/LKPP).
-6. **After-Sales Service**
-   - Layanan pemeliharaan alat elektromedik, perbaikan garansi, dan kalibrasi berkala ber-BA.
-7. **Manufacture (CPAKB)**
-   - Batch Manufacturing Record (BMR), pemantauan *cleanroom*, dan kontrol *yield* produksi.
-8. **Purchasing & Procurement**
-   - Pengadaan Purchase Order (PO) prinsipal alkes dan kalkulator *Landed Cost*.
-9. **CRM Marketing & Sales (e-Katalog LKPP)**
-   - Manajemen CRM & Prospek, Tender LPSE / e-Katalog LKPP, Otomasi Sales Force (SFA), Manajemen Order Penjualan, Kampanye & Promo, serta integrasi Newsletter/Mailing List (*listmonk*).
-10. **Post-Market Surveillance (PMS) / Vigilance**
-    - Pelaporan Kasus KTD (Kecelakaan Yang Tidak Diharapkan) ke e-Watch Alkes Kemenkes dan eksekusi penarikan produk (*recall*).
-11. **Human Resources (HRD / HRIS)**
-    - Manajemen data karyawan multi-site, jadwal shift, absensi, slip gaji, rekrutmen ATS, matriks kompetensi, KPI, dan HSE/K3.
-12. **Finance & Accounting**
-    - Buku besar ganda (*double-entry ledger*), Chart of Accounts, kalkulasi PPN 11%, dan transaksi keuangan.
-13. **IT & Traceability Hub**
-    - Jejak audit ALCOA+ SHA-256 untuk ketelusuran penuh dan API Gateway.
+Prasyarat: Node.js **22 atau lebih baru** dan npm. Gunakan konfigurasi lingkungan yang sesuai dari `.env.example` atau template staging; jangan commit rahasia.
 
----
+```bash
+npm ci
+npm run dev
+```
 
-## 🛠️ Tech Stack
+Buka `http://localhost:3000`. Setup akun awal dan Firebase memerlukan konfigurasi yang sesuai; lihat [panduan Linux](docs/panduan-deploy-vps.md). Jangan memakai project atau data produksi untuk pengujian tanpa persetujuan.
 
-- **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide React Icons.
-- **Backend**: Express.js (`server.ts`), PocketBase (Offline-First LocalStorage Caching & Real-Time Sync).
-- **Build Tools**: Esbuild, TypeScript Compiler (`tsc`), Vite.
+## Perintah utama
 
----
+| Perintah | Kegunaan |
+|---|---|
+| `npm run dev` | Express dengan middleware Vite |
+| `npm run lint` | Pemeriksaan TypeScript |
+| `npm run lint:rules` | Pemeriksaan Firestore Rules |
+| `npm test` | Tes Vitest |
+| `npm run cek:semua` | Penjaga benih, FEFO, gudang dan e-Report |
+| `npm run build:staging` / `npm run build:production` | Build frontend dan server untuk mode terkait |
+| `npm start` | Menjalankan `server.js` hasil build |
+| `npm run deploy:check` | Memeriksa artefak rilis; bukan pengganti uji login atau database |
+| `npm run verifikasi` | Lint, rules, tes, penjaga domain dan build |
 
-## 🚀 Memulai (Getting Started)
+## Website dan keamanan
 
-### Prasyarat
-- Node.js versi 18 atau 22 (disarankan Node 22).
-- npm (Node Package Manager).
+`GET /api/website/published` menyediakan snapshot terbit. `PUT /api/website/published` menerima sesi ERP dengan izin `website:publish` **atau** `AMS_ADMIN_TOKEN` yang valid; tanpa keduanya permintaan ditolak. Server menyimpan snapshot pada state sinkronisasi dan mencoba menulis salinan; kegagalan salinan atau siaran dapat menghasilkan peringatan. Form RFQ publik memakai `/api/website/rfq`; pemrosesan lanjutan tetap memerlukan tim sales.
 
-### Instalasi & Menjalankan Development Server
+## Dokumentasi
 
-1. Install dependensi:
-   ```bash
-   npm install
-   ```
+- [Evaluasi staging dan tindak lanjut](docs/evaluasi-staging.md) — bukti per lingkungan dan baseline historis.
+- [Panduan deployment VPS Linux](docs/panduan-deploy-vps.md) dan [checklist deployment](docs/deployment.md).
+- [Customer Portal](docs/customer-portal.md) — fitur, keputusan dan tahap yang masih terbuka.
+- [Alur website dan ERP](docs/alur-integrasi.md), [SRS CMS](docs/srs-cms-website.md).
+- [System blueprint](docs/system-blueprint.md), blueprint per modul, [glosarium](docs/glosarium.md), dan [catatan pengembang](docs/developer-notes.md).
+- `docs/assets-aistudio/` menyimpan spesifikasi dan audit historis, bukan gambaran runtime terkini.
 
-2. Jalankan server pengembangan (Development Server di port 3000):
-   ```bash
-   npm run dev
-   ```
-
-3. Buka browser dan akses: `http://localhost:3000`
-
----
-
-## 📜 Perintah Script Tersedia (`package.json`)
-
-- `npm run dev` — Menjalankan server pengembangan (Vite + Express).
-- `npm run build` — Melakukan build produksi (frontend bundler + backend server bundle).
-- `npm run start` — Menjalankan server pada mode produksi (`node server.js`).
-- `npm run lint` — Memeriksa tipe TypeScript secara ketat (`tsc --noEmit`).
-- `npm run lint:rules` — Memeriksa aturan keamanan Firestore.
-- `npm run deploy:check` — Memeriksa berkas dan artefak build deployment; tambahkan `-- --url=https://<domain>` untuk pemeriksaan HTTP opsional. Hasilnya bukan pengganti pengujian login atau koneksi database.
-
----
-
-## 🔒 Keamanan & Konfigurasi Publikasi Situs
-
-- `PUT /api/website/published` (terbitkan snapshot situs dari CMS) **ditolak secara bawaan** sampai `AMS_ADMIN_TOKEN` diset di environment server. Tanpa token: `503` dan UI menampilkan fallback unduh `website-published.json`. Dengan token: kirim header `x-ams-admin-token: <AMS_ADMIN_TOKEN>` (30 percobaan / 15 menit per IP, selebihnya `429`). Contoh publikasi manual:
-
-  ```powershell
-  curl.exe -X PUT -H "Content-Type: application/json" -H "x-ams-admin-token: $env:AMS_ADMIN_TOKEN" -d "@website-published.json" http://127.0.0.1:3001/api/website/published
-  ```
-
-- Proxy `/api/ams-pb/*` hanya meneruskan `GET /api/health`, `GET /api/realtime` (SSE), dan `GET /api/collections/<nama>/records`. Admin UI, superuser, pengaturan, serta tulis/hapus PocketBase dijawab `403`.
-- Konfigurasi runtime dapat dimuat dari berkas `.env`; variabel yang sudah ditetapkan pada environment proses tetap diprioritaskan.
-
-## Developer Notes
-
-Setiap modul aplikasi memuat catatan **Developer Notes** (ikon Info di bagian atas modul, kuning) — pernyataan jujur tentang apa yang nyata di modul itu (diuji/terpasang/tersimpan) dan apa yang masih benih contoh, antrean, atau pratinjau tanpa koneksi nyata. Frontend tidak mengklaim kepatuhan/ketersediaan yang belum diukur. Rujukan lengkap: [`docs/developer-notes.md`](docs/developer-notes.md) dan [`docs/production-list.md`](docs/production-list.md).
-
----
-
-## 📄 Lisensi & Kepatuhan
-Hak Cipta © 2026 PT Anugrahmitra Selaras (AMS). Seluruh sistem dikembangkan sesuai regulasi dan standar Kementerian Kesehatan Republik Indonesia. Coded by Langgo Bramandityo
+Hak cipta © 2026 PT Anugrahmitra Selaras.
