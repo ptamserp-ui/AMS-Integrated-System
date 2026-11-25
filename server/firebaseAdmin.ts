@@ -369,7 +369,7 @@ export function resolveFirebaseAdminConfig(opts?: {
     }
   }
 
-  // 2. File JSON terpisah di disk (rekomendasi Windows VPS: C:\AMS\Secrets\firebase-service-account.json)
+  // 2. File JSON terpisah di disk di luar direktori aplikasi.
   const rawFilePath =
     env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim() ||
     env.GOOGLE_APPLICATION_CREDENTIALS?.trim() ||

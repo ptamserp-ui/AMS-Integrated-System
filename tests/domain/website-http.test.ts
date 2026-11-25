@@ -33,6 +33,16 @@ describe('website publik: penerbitan dan RFQ melalui server terisolasi', () => {
   let payrollToken = '';
   let nomorProspek = '';
 
+  it('tidak lagi menyajikan panduan deployment lama kepada pengguna berizin', async () => {
+    const response = await request<{ error: string; pesan: string }>(
+      '/api/system/deployment-guides', 'GET', developerToken
+    );
+    expect(response.status).toBe(410);
+    expect(response.body.error).toBe('GUIDE_RETIRED');
+    expect(response.body.pesan).toContain('Linux');
+    expect((await request('/api/system/deployment-guides')).status).toBe(401);
+  });
+
   async function request<T>(endpoint: string, method = 'GET', token = '', body?: unknown, headers: Record<string, string> = {}) {
     let requestBody = body;
     const requestHeaders = { ...headers };

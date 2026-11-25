@@ -53,7 +53,6 @@ import { createCustomerRouter } from './server/customerRoutes';
 import { createCustomerErpRouter, type B2BCustomerReference } from './server/customerErpRoutes';
 import { ServerCustomerStore } from './server/customerStore';
 import type { CustomerPortalStatus } from './src/types/customerPortal';
-import { buildWindowsDeploymentGuides } from './server/deploymentGuides';
 import { WebsiteTranslationError, WebsiteTranslationService } from './server/websiteTranslation';
 import { buatProspekWebsite, KUNCI_RFQ_WEBSITE, samaPermintaanWebsite } from './server/websiteRfq';
 import type { ProspekAlkes } from './src/types';
@@ -2143,28 +2142,11 @@ async function startServer() {
     res.json({ ok: true, revision });
   });
 
-  // IT & DevOps Deployment Guide & Config for Caddy + NSSM Windows Server
   app.get('/api/system/deployment-guides', requirePermission('it-traceability', 'view'), (_req, res) => {
-    const envInfo = resolveDeploymentEnvironment();
-    let domainFromEnv = '';
-    try {
-      domainFromEnv = envInfo.appUrl.startsWith('http') ? new URL(envInfo.appUrl).hostname : '';
-    } catch {
-      domainFromEnv = '';
-    }
-    const domain =
-      domainFromEnv && domainFromEnv !== 'localhost' && domainFromEnv !== '127.0.0.1'
-        ? domainFromEnv
-        : 'ams.bejodigitalprint.com';
-
-    res.json(
-      buildWindowsDeploymentGuides({
-        domain,
-        deploymentEnv: envInfo.deploymentEnv === 'production' ? 'production' : 'staging',
-        activeDriver: dbDriverManager.getActiveDriver(),
-        port: PORT
-      })
-    );
+    res.status(410).json({
+      error: 'GUIDE_RETIRED',
+      pesan: 'Panduan lama tidak tersedia. Gunakan panduan deployment Linux.'
+    });
   });
 
   // Kemenkes NIE format verification helper

@@ -23,9 +23,7 @@ function checkFile(relPath: string, label: string) {
   });
 }
 
-checkFile('deploy.ps1', 'Skrip deploy Windows VPS');
-checkFile('scripts/backup-windows-vps.ps1', 'Skrip backup Windows VPS');
-checkFile('scripts/verify-windows-vps.ps1', 'Skrip verifikasi Windows VPS');
+checkFile('deploy-linux.ps1', 'Skrip deploy Linux VPS');
 checkFile('scripts/setup-vps.sh', 'Skrip provisioning Linux VPS');
 checkFile('ecosystem.config.cjs', 'Konfigurasi PM2 Single-Instance');
 checkFile('firestore.rules', 'Aturan keamanan Firestore');

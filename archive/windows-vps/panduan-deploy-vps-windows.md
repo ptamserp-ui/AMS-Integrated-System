@@ -1,4 +1,6 @@
-# Panduan Deployment Firebase Staging di Windows Server VPS — AMS Integrated System
+# Arsip historis — Panduan Deployment Firebase Staging di Windows Server VPS
+
+> **Arsip saja.** Target dan domain dalam dokumen ini tidak aktif; jangan gunakan untuk deployment.
 Dibuat oleh Langgo Bramandityo.
 Dokumen ini memandu langkah lengkap untuk menjalankan **AMS Integrated System** dengan mode **Firebase Staging** (`DEPLOYMENT_ENV=staging` + `AMS_DB_DRIVER=firebase`) di **Windows Server VPS (2019 / 2022 / 2025)**.
 

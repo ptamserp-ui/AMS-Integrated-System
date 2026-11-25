@@ -2,7 +2,7 @@
  * SITUS PUBLIK AMS — dibaca di route /web tanpa chrome ERP.
  *
  * Urutan sumber konten (paling baru lebih diutamakan):
- * 1. GET /api/website/published  → snapshot di server Express (dev & VPS/Caddy)
+ * 1. GET /api/website/published  → snapshot di server Express (dev & VPS)
  * 2. GET /website-published.json → snapshot statis ikut build untuk hosting statis
  * 3. localStorage 'website_published' → hasil terbit pada perangkat ini
  * Bentuk JSON divalidasi sebelum dipakai karena hosting statis dapat mengembalikan

@@ -28,7 +28,7 @@ function peekEnvFileValue(filePath: string, key: string): string | undefined {
 }
 
 /**
- * Memuat file .env* di runtime Node/Windows Service (NSSM/PM2) tanpa menimpa
+ * Memuat file .env* di runtime Node tanpa menimpa
  * variabel lingkungan yang sudah ditetapkan oleh OS/Process Manager.
  * Prioritas (tertinggi ke terendah):
  *  process.env > .env.<mode>.local > .env.<mode> > .env.local > .env

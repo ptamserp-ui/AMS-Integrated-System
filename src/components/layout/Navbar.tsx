@@ -110,7 +110,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'finance-akuntansi', label: 'Finance & Accounting', short: 'Finance', icon: Coins, group: 'finance', badge: 'PPN 11%' },
 
   { id: 'hrd-pelatihan', label: 'HRD & General Affairs (GA)', short: 'HRD & GA', icon: Users, group: 'support' },
-  { id: 'it-traceability', label: 'Information Technology (IT)', short: 'IT Hub', icon: Cpu, group: 'support', badge: 'CADDY' },
+  { id: 'it-traceability', label: 'Information Technology (IT)', short: 'IT Hub', icon: Cpu, group: 'support', badge: 'IT' },
 
   { id: 'dokumen-internal', label: 'Internal Document', short: 'Internal Doc', icon: FileCheck2, badge: 'CDAKB' },
   { id: 'overview', label: 'Executive Overview', short: 'Overview', icon: LayoutDashboard, badge: 'Cockpit' },

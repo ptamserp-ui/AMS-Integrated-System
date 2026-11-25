@@ -155,7 +155,7 @@ function buildDefaultRoles(now: string): RoleDefinition[] {
     {
       id: 'it_admin',
       name: 'IT Administrator & Security',
-      description: 'Administrator infrastruktur server, Caddy/PocketBase, manajemen akun, matriks peran RBAC, dan penerbitan teknis.',
+      description: 'Administrator infrastruktur server, database, manajemen akun, matriks peran RBAC, dan penerbitan teknis.',
       isSystem: true,
       updatedAt: now,
       permissions: {

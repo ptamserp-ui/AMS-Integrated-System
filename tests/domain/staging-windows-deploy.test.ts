@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadDeploymentEnv, resolveDeploymentEnvironment } from '../../server/envLoader';
-import { buildWindowsDeploymentGuides } from '../../server/deploymentGuides';
+import { buildWindowsDeploymentGuides } from '../../archive/windows-vps/deploymentGuides';
 import { ServerRbacStore } from '../../server/rbacStore';
 
 const TRACKED_KEYS = [
@@ -89,9 +89,9 @@ describe('Staging Firebase & Deployment Windows Server VPS', () => {
     expect(guides.envProductionTemplate).toContain('FIREBASE_PROJECT_ID=ams-integrated-system');
     expect(guides.powershellQuickDeploy.join('\n')).toContain('.\\deploy.ps1');
     expect(guides.powershellQuickDeploy.join('\n')).not.toContain('-ConfigureFirewall');
-    expect(fs.existsSync(path.join(process.cwd(), 'deploy.ps1'))).toBe(true);
+    expect(fs.existsSync(path.join(process.cwd(), 'archive', 'windows-vps', 'deploy.ps1'))).toBe(true);
     expect(fs.existsSync(path.join(process.cwd(), 'scripts', 'deploy-windows-vps.ps1'))).toBe(false);
-    const deployScript = fs.readFileSync(path.join(process.cwd(), 'deploy.ps1'), 'utf8');
+    const deployScript = fs.readFileSync(path.join(process.cwd(), 'archive', 'windows-vps', 'deploy.ps1'), 'utf8');
     expect(deployScript).toContain('"pull"');
     expect(deployScript).toContain('"--ff-only"');
     expect(deployScript).toContain('"build:$DeploymentEnv"');
