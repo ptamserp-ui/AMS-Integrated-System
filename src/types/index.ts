@@ -1182,6 +1182,21 @@ export interface PelangganB2B {
   emailCustomer?: string;
   nomorWhatsapp?: string;
   afiliasiKeterangan?: string;
+  namaPajak?: string;
+  kodeFakturPajak?: string;
+  bl?: boolean;
+  alamatPengiriman?: { alamat1: string; alamat2: string; kota: string }[];
+  alamatPajak?: { alamat1: string; alamat2: string; kota: string };
+  kotaSurat?: string;
+  nomorTelepon?: string;
+  nomorFax?: string;
+  maxCnPersen?: number;
+  noCn?: boolean;
+  maxSkiPersen?: number;
+  setHarga?: string;
+  kontakPerson?: string;
+  jabatanKontak?: string;
+  izinCustomer?: string;
   /** Email pengadaan yang dipakai untuk menyarankan penautan akun Customer Portal (selalu dikonfirmasi staf). */
   emailPortal?: string;
 }

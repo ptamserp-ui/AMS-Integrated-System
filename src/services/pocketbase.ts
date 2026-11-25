@@ -2878,7 +2878,7 @@ export class AMSDatabaseManager {
     this.savePelangganB2B(current.map((p) => (p.id === id ? { ...p, ...patch } : p)), opsi?.throwOnFailure);
     this.logAudit(
       'Sales & Marketing — CRM',
-      opsi ? 'Perubahan data kontak customer' : 'Perubahan master pelanggan (batas kredit/TOP/status)',
+      opsi ? 'Perubahan detail master customer' : 'Perubahan master pelanggan (batas kredit/TOP/status)',
       lama.kodePelanggan,
       opsi?.aktor || 'Manajer Penjualan',
       'Sales & Marketing',

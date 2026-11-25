@@ -84,4 +84,41 @@ describe('Customer Database', () => {
     expect(detailCustomerBerubah(awal, { ...awal, afiliasiKeterangan: 'Afiliasi lain' })).toBe(true);
     expect(detailCustomerBerubah(awal, { ...awal })).toBe(false);
   });
+
+  it('menyimpan alamat terpisah dan ketentuan kredit tanpa mengubah piutang atau email portal', () => {
+    const sebelum = manager.getPelangganB2B()[0];
+    const detail = detailCustomerDatabase(sebelum);
+    const alamatPengiriman = [...(detail.alamatPengiriman || [])];
+    alamatPengiriman[1] = { alamat1: 'Kirim 2', alamat2: 'Gedung B', kota: 'Bandung' };
+    const draf = {
+      ...detail, namaPajak: 'Nama Pajak', npwp: '03.264.193.8-911.000', kodeFakturPajak: '010',
+      alamatPengiriman, alamatPajak: { alamat1: 'Pajak', alamat2: '', kota: 'Jakarta' },
+      batasKredit: 5000000, termsOfPaymentHari: 30, maxCnPersen: 10, maxSkiPersen: 5, bl: true
+    };
+    expect(validasiDetailCustomer(draf)).toBeNull();
+    expect(detailCustomerBerubah(detail, draf)).toBe(true);
+    manager.updatePelangganB2B('TEST-1', rapikanDetailCustomer(draf), { aktor: 'Uji', throwOnFailure: true });
+    expect(manager.getPelangganB2B()[0]).toMatchObject({
+      namaPajak: 'Nama Pajak', kodeFakturPajak: '010', batasKredit: 5000000, termsOfPaymentHari: 30,
+      alamatPengiriman, alamatPajak: { alamat1: 'Pajak', alamat2: '', kota: 'Jakarta' },
+      piutangBerjalan: sebelum.piutangBerjalan, emailPortal: sebelum.emailPortal
+    });
+  });
+
+  it('menolak identitas kosong, nilai kredit tidak sah, dan persentase di luar rentang', () => {
+    const detail = detailCustomerDatabase(manager.getPelangganB2B()[0]);
+    expect(validasiDetailCustomer({ ...detail, kodePelanggan: ' ' })).toMatch(/Kode/);
+    expect(validasiDetailCustomer({ ...detail, batasKredit: -1 })).toMatch(/kredit/i);
+    expect(validasiDetailCustomer({ ...detail, termsOfPaymentHari: 1.5 })).toMatch(/Jatuh tempo/);
+    expect(validasiDetailCustomer({ ...detail, maxCnPersen: 101 })).toMatch(/persen/);
+  });
+
+  it('mempertahankan properti alamat tambahan saat merapikan detail', () => {
+    const pelanggan = manager.getPelangganB2B()[0];
+    const alamat = { alamat1: ' Alamat ', alamat2: '', kota: '', catatan: 'Pertahankan' };
+    const detail = detailCustomerDatabase({ ...pelanggan, alamatPengiriman: [alamat], alamatPajak: alamat });
+    const hasil = rapikanDetailCustomer(detail);
+    expect(hasil.alamatPengiriman?.[0]).toMatchObject({ alamat1: 'Alamat', catatan: 'Pertahankan' });
+    expect(hasil.alamatPajak).toMatchObject({ alamat1: 'Alamat', catatan: 'Pertahankan' });
+  });
 });

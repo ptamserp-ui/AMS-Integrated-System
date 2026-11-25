@@ -7,13 +7,27 @@ import { detailCustomerBerubah, detailCustomerDatabase, rapikanDetailCustomer, v
 import { Modal, Panel, inputClass, labelClass, tombolPrimer, tombolSekunder } from '../../../ui';
 
 const UKURAN_HALAMAN = 50;
-const KOLOM: { key: keyof DetailCustomerDatabase; label: string; type?: string }[] = [
-  { key: 'alamat1', label: 'Alamat 1' },
-  { key: 'alamat2', label: 'Alamat 2' },
+type FieldTeks = 'kodePelanggan' | 'namaInstalasi' | 'namaPajak' | 'npwp' | 'kodeFakturPajak' |
+  'alamat1' | 'alamat2' | 'kotaSurat' | 'wilayahCustomer' | 'penanggungJawabSales' |
+  'nomorTelepon' | 'nomorFax' | 'nomorWhatsapp' | 'emailCustomer' | 'afiliasiKeterangan' |
+  'setHarga' | 'kontakPerson' | 'jabatanKontak' | 'izinCustomer';
+const IDENTITAS: { key: FieldTeks; label: string; type?: string }[] = [
+  { key: 'kodePelanggan', label: 'Kode Customer' },
+  { key: 'namaInstalasi', label: 'Nama Customer' },
+  { key: 'namaPajak', label: 'Nama Pajak (jika berbeda)' },
   { key: 'wilayahCustomer', label: 'Wilayah' },
   { key: 'penanggungJawabSales', label: 'Sales / penanggung jawab' },
-  { key: 'nomorWhatsapp', label: 'No. Telp (WA)', type: 'tel' },
+  { key: 'npwp', label: 'NPWP' },
+  { key: 'kodeFakturPajak', label: 'Kode Faktur Pajak' }
+];
+const KONTAK: { key: FieldTeks; label: string; type?: string }[] = [
+  { key: 'nomorTelepon', label: 'Telepon', type: 'tel' },
+  { key: 'nomorFax', label: 'Fax', type: 'tel' },
+  { key: 'nomorWhatsapp', label: 'No. WhatsApp', type: 'tel' },
+  { key: 'kontakPerson', label: 'Kontak Person' },
+  { key: 'jabatanKontak', label: 'Jabatan' },
   { key: 'emailCustomer', label: 'Email', type: 'email' },
+  { key: 'izinCustomer', label: 'Izin' },
   { key: 'afiliasiKeterangan', label: 'Afiliasi / Keterangan' }
 ];
 
@@ -30,11 +44,12 @@ export default function CustomerDatabaseModule({ bolehUbah, aktor }: { bolehUbah
   const [draf, setDraf] = useState<DetailCustomerDatabase | null>(null);
   const [pesan, setPesan] = useState('');
   const [hasil, setHasil] = useState('');
+  const [alamatAktif, setAlamatAktif] = useState(0);
   const daftar = useMemo(() => {
     const kata = pencarian.trim().toLocaleLowerCase();
     return pelanggan.filter((p) => !kata || [
       p.kodePelanggan, p.namaInstalasi, p.alamat1, p.alamat2, p.wilayahCustomer, p.provinsi,
-      p.penanggungJawabSales, p.emailCustomer, p.nomorWhatsapp, p.afiliasiKeterangan
+      p.penanggungJawabSales, p.emailCustomer, p.nomorTelepon, p.nomorWhatsapp, p.afiliasiKeterangan
     ].some((nilai) => (nilai || '').toLocaleLowerCase().includes(kata)));
   }, [pelanggan, pencarian]);
   const jumlahHalaman = Math.max(1, Math.ceil(daftar.length / UKURAN_HALAMAN));
@@ -46,6 +61,7 @@ export default function CustomerDatabaseModule({ bolehUbah, aktor }: { bolehUbah
     setPilihan(p);
     setAwal(detail);
     setDraf(detail);
+    setAlamatAktif(0);
     setPesan('');
     setHasil('');
   };
@@ -61,6 +77,10 @@ export default function CustomerDatabaseModule({ bolehUbah, aktor }: { bolehUbah
       return;
     }
     const bersih = rapikanDetailCustomer(draf);
+    if (db.getPelangganB2B().some((p) => p.id !== pilihan.id && p.kodePelanggan.trim().toLocaleLowerCase() === bersih.kodePelanggan.toLocaleLowerCase())) {
+      setPesan('Kode customer sudah digunakan oleh pelanggan lain.');
+      return;
+    }
     try {
       db.updatePelangganB2B(pilihan.id, bersih, { aktor, throwOnFailure: true });
       setPilihan(null);
@@ -103,7 +123,7 @@ export default function CustomerDatabaseModule({ bolehUbah, aktor }: { bolehUbah
                   <td className="py-3 px-4 text-slate-700">
                     {[p.alamat1, p.alamat2, p.wilayahCustomer || p.provinsi].filter(Boolean).join(', ') || '—'}
                   </td>
-                  <td className="py-3 px-4 text-slate-700 whitespace-nowrap">{p.nomorWhatsapp || '—'}</td>
+                  <td className="py-3 px-4 text-slate-700 whitespace-nowrap">{p.nomorTelepon || p.nomorWhatsapp || '—'}</td>
                   <td className="py-3 px-4 text-slate-700">{p.emailCustomer || '—'}</td>
                   <td className="py-3 px-4 text-slate-700">{p.afiliasiKeterangan || '—'}</td>
                 </tr>
@@ -124,14 +144,80 @@ export default function CustomerDatabaseModule({ bolehUbah, aktor }: { bolehUbah
       </div>
       {pilihan && draf && (
         <Modal judul={pilihan.namaInstalasi} keterangan={`Kode: ${pilihan.kodePelanggan}`} onClose={() => setPilihan(null)}>
-          <form onSubmit={simpan} className="space-y-3">
-            {KOLOM.map(({ key, label, type }) => (
-              <div key={key}>
-                <label htmlFor={`customer-db-${key}`} className={labelClass}>{label}</label>
-                <input id={`customer-db-${key}`} type={type || 'text'} className={inputClass} disabled={!bolehUbah}
-                  value={draf[key] || ''} onChange={(event) => { setDraf({ ...draf, [key]: event.target.value }); setPesan(''); }} />
-              </div>
-            ))}
+          <form onSubmit={simpan} className="space-y-5">
+            <div className="space-y-5">
+              <section>
+                <h4 className="text-sm font-bold text-slate-900 mb-3">Identitas Customer</h4>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {IDENTITAS.map(({ key, label, type }) => (
+                    <div key={key}>
+                      <label htmlFor={`customer-db-${key}`} className={labelClass}>{label}</label>
+                      <input id={`customer-db-${key}`} type={type || 'text'} className={inputClass} disabled={!bolehUbah}
+                        value={draf[key] || ''} onChange={(event) => { setDraf({ ...draf, [key]: event.target.value }); setPesan(''); }} />
+                    </div>
+                  ))}
+                  <label className="flex items-center gap-2 text-xs text-slate-700">
+                    <input type="checkbox" disabled={!bolehUbah} checked={draf.bl ?? false} onChange={(event) => setDraf({ ...draf, bl: event.target.checked })} /> BL
+                  </label>
+                </div>
+              </section>
+              <section>
+                <h4 className="text-sm font-bold text-slate-900 mb-3">Alamat</h4>
+                <div className="flex gap-1 overflow-x-auto mb-3">
+                  {['Alamat Surat', 'Alamat Pengiriman', 'Alamat Pengiriman 2', 'Alamat Pengiriman 3', 'Alamat Pajak'].map((nama, index) => (
+                    <button key={nama} type="button" onClick={() => setAlamatAktif(index)}
+                      aria-pressed={alamatAktif === index} className={`${tombolSekunder} whitespace-nowrap ${alamatAktif === index ? 'bg-blue-50 text-blue-800 border-blue-300' : ''}`}>{nama}</button>
+                  ))}
+                </div>
+                {alamatAktif === 0 ? (
+                  <div className="grid gap-3">
+                    {([{ key: 'alamat1', label: 'Alamat 1' }, { key: 'alamat2', label: 'Alamat 2' }, { key: 'kotaSurat', label: 'Kota' }] as const).map(({ key, label }) => (
+                      <div key={key}><label htmlFor={`customer-db-${key}`} className={labelClass}>{label}</label>
+                        <input id={`customer-db-${key}`} className={inputClass} disabled={!bolehUbah} value={draf[key] || ''} onChange={(event) => setDraf({ ...draf, [key]: event.target.value })} /></div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid gap-3">
+                    {(['alamat1', 'alamat2', 'kota'] as const).map((key, i) => {
+                      const alamat = alamatAktif === 4 ? draf.alamatPajak : draf.alamatPengiriman?.[alamatAktif - 1];
+                      return <div key={key}><label htmlFor={`customer-db-address-${key}`} className={labelClass}>{['Alamat 1', 'Alamat 2', 'Kota'][i]}</label>
+                        <input id={`customer-db-address-${key}`} className={inputClass} disabled={!bolehUbah} value={alamat?.[key] || ''} onChange={(event) => {
+                          const baru = { alamat1: '', alamat2: '', kota: '', ...alamat, [key]: event.target.value };
+                          if (alamatAktif === 4) setDraf({ ...draf, alamatPajak: baru });
+                          else {
+                            const pengiriman = [...(draf.alamatPengiriman || [])];
+                            pengiriman[alamatAktif - 1] = baru;
+                            setDraf({ ...draf, alamatPengiriman: pengiriman });
+                          }
+                        }} /></div>;
+                    })}
+                  </div>
+                )}
+              </section>
+              <section>
+                <h4 className="text-sm font-bold text-slate-900 mb-3">Ketentuan dan Kontak</h4>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {([
+                    { key: 'termsOfPaymentHari', label: 'Jatuh Tempo (hari)', step: '1' },
+                    { key: 'batasKredit', label: 'Batas Kredit', step: 'any' },
+                    { key: 'maxCnPersen', label: 'Max. CN (%)', step: 'any' },
+                    { key: 'maxSkiPersen', label: 'Max. SKI (%)', step: 'any' }
+                  ] as const).map(({ key, label, step }) => (
+                    <div key={key}><label htmlFor={`customer-db-${key}`} className={labelClass}>{label}</label>
+                      <input id={`customer-db-${key}`} type="number" min="0" step={step} className={inputClass} disabled={!bolehUbah} value={draf[key] ?? ''}
+                        onChange={(event) => setDraf({ ...draf, [key]: event.target.value === '' ? undefined : event.target.valueAsNumber })} /></div>
+                  ))}
+                  <label className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" disabled={!bolehUbah} checked={draf.noCn ?? false} onChange={(event) => setDraf({ ...draf, noCn: event.target.checked })} /> No.CN</label>
+                  {([{ key: 'setHarga', label: 'Set Harga' }, ...KONTAK] as { key: FieldTeks; label: string; type?: string }[]).map(({ key, label, type }) => (
+                    <div key={key}><label htmlFor={`customer-db-${key}`} className={labelClass}>{label}</label>
+                      <input id={`customer-db-${key}`} type={type || 'text'} className={inputClass} disabled={!bolehUbah} value={draf[key] || ''}
+                        onChange={(event) => setDraf({ ...draf, [key]: event.target.value })} /></div>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-3">Batas kredit 0 mengikuti aturan ERP saat ini: perlu persetujuan manajemen, bukan unlimited. BL, No.CN, Max. CN/SKI dan set harga hanya disimpan sebagai referensi.</p>
+                <p className="text-xs text-slate-500 mt-1">Mengubah nama customer tidak mengubah nama pada transaksi atau dokumen yang sudah tercatat.</p>
+              </section>
+            </div>
             {pesan && <p role="alert" className="text-xs text-rose-700">{pesan}</p>}
             {!bolehUbah && <p className="text-xs text-slate-500">Akun ini hanya memiliki akses baca.</p>}
             {bolehUbah && <button type="submit" className={tombolPrimer}>Simpan perubahan</button>}
