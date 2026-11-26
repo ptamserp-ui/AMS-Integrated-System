@@ -69,6 +69,7 @@ import {
   INITIAL_KIRIMAN_SATU_SEHAT,
   INITIAL_RIWAYAT_EKSPOR_EREPOR
 } from '../data/initialData';
+import { INITIAL_PROMOSI_FOC } from '../data/seedPromosiFoc';
 import {
   INITIAL_JURNAL_KEUANGAN,
   INITIAL_VALUASI_BATCH
@@ -178,6 +179,7 @@ export const KATALOG_KOLEKSI_DATA: readonly DefinisiKoleksiData[] = [
   { key: 'sales_garansi', label: 'Garansi & Basis Instalasi', modul: 'Sales & Marketing', kategori: 'operasional' },
   { key: 'sales_kampanye', label: 'Kampanye & Event Simposium', modul: 'Sales & Marketing', kategori: 'operasional' },
   { key: 'sales_unit_demo', label: 'Pelacakan Unit Demo', modul: 'Sales & Marketing', kategori: 'operasional' },
+  { key: 'sales_promosi_foc', label: 'Konfigurasi Promosi FOC & Sales Kit', modul: 'Sales & Marketing', kategori: 'operasional' },
   { key: 'sales_rebate', label: 'Program Loyalitas & Rebate', modul: 'Sales & Marketing', kategori: 'operasional' },
   { key: 'sales_riwayat_bulanan', label: 'Riwayat Penjualan Bulanan', modul: 'Sales & Marketing', kategori: 'operasional' },
   { key: 'surat_daftar', label: 'Daftar Milis Newsletter', modul: 'Newsletter & Mailing', kategori: 'operasional' },
@@ -298,6 +300,7 @@ const INITIAL_SEEDS_MAP: Record<string, unknown[]> = {
   sales_garansi: INITIAL_GARANSI_INSTALASI,
   sales_kampanye: INITIAL_KAMPANYE_ALKES,
   sales_unit_demo: INITIAL_UNIT_DEMO_ALKES,
+  sales_promosi_foc: INITIAL_PROMOSI_FOC,
   sales_rebate: INITIAL_PROGRAM_REBATE,
   sales_riwayat_bulanan: INITIAL_RIWAYAT_PENJUALAN_BULANAN,
   surat_daftar: INITIAL_DAFTAR_SURAT,

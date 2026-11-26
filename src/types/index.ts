@@ -389,6 +389,42 @@ export interface LangkahPicking {
   jarakMeter: number;
 }
 
+export interface KomponenPaketFOC {
+  kodeSKU: string;
+  namaAlkes: string;
+  qtyPerKit: number;
+  satuan: string;
+}
+
+export interface PromosiFOC {
+  id: string;
+  nama: string;
+  aktif: boolean;
+  skuPemicu: string;
+  minimumPembelian: number;
+  maksimumKitPerPesanan: number;
+  berlakuMulai: string;
+  berlakuSampai: string;
+  /** Daftar kosong berarti semua kanal/pelanggan; bila diisi, aturan berlaku sebagai whitelist. */
+  jalurPenjualan: PenjualanAlkes['jalurPenjualan'][];
+  pelangganIds: string[];
+  paket: { id: string; nama: string; komponen: KomponenPaketFOC[] }[];
+}
+
+export interface PromosiFOCPesanan {
+  promosiId: string;
+  namaPromosi: string;
+  paketId: string;
+  namaPaket: string;
+  jumlahKit: number;
+  komponen: KomponenPaketFOC[];
+}
+
+export interface AlokasiKomponenFOC extends KomponenPaketFOC {
+  qtyTotal: number;
+  alokasi: { nomorBatch: string; qty: number; binId: string }[];
+}
+
 export type StatusSuratJalan =
   | 'Antre Picking'
   | 'Rute Tersusun'
@@ -425,6 +461,12 @@ export interface SuratJalan {
   namaPenerimaPod?: string;
   tanggalPod?: string;
   sudahEksporEReport?: boolean;
+  promosiFoc?: {
+    namaPromosi: string;
+    namaPaket: string;
+    jumlahKit: number;
+    komponen: AlokasiKomponenFOC[];
+  };
 }
 
 /** 5. Stock opname — satu baris hitung fisik. */
@@ -694,6 +736,7 @@ export interface PenjualanAlkes {
   metodePembayaran?: 'Tunai' | 'TOP 30 Hari' | 'TOP 45 Hari' | 'TOP 60 Hari' | 'Termin Bertahap';
   tanggalJatuhTempo?: string;
   hasilValidasiRegulasi?: HasilValidasiSO;
+  promosiFoc?: PromosiFOCPesanan;
 }
 
 export interface HasilValidasiRegulasiItem {
@@ -775,6 +818,17 @@ export interface TransaksiKeuangan {
   jumlah: number;
   statusPembayaran: 'Lunas' | 'Menunggu Jatuh Tempo' | 'Lewat Jatuh Tempo';
   ppnStatus: 'PPN 11% Terbit Faktur Pajak' | 'Bebas PPN';
+  barisFaktur?: {
+    deskripsi: string;
+    kodeSKU?: string;
+    jumlah: number;
+    satuan: string;
+    hargaSatuan: number;
+    subtotal: number;
+    tarifPpnPersen: number;
+    nilaiPpn: number;
+    jenis: 'Produk' | 'FOC';
+  }[];
 }
 
 /** ---- Pembukuan dua-entry (F&A). Kontrak tipe ini adalah cerminan skema PostgreSQL
@@ -819,6 +873,7 @@ export type SumberRujukanJurnal =
   | 'BIAYA_RETUR_MUTU'
   | 'WRITE_OFF_BATCH'
   | 'HPP_PENGIRIMAN'
+  | 'PROMOSI_FOC'
   | 'CADANGAN_PENURUNAN_NILAI'
   | 'LANDED_COST_IMPOR'
   | 'PENYETAN_PAJAK'

@@ -61,6 +61,7 @@ export const KODE_AKUN = {
   BEBAN_KALIBRASI: '5210',
   BEBAN_AUDIT_MUTU: '5220',
   BEBAN_RETUR_MUTU: '5230',
+  BEBAN_PROMOSI_FOC: '5240',
   BEBAN_UMUM: '5310'
 } as const;
 
@@ -544,6 +545,86 @@ export function hitungRataRataTertimbangSku(params: {
     return { nilaiPerUnit: null, qtyTanpaDasar };
   }
   return { nilaiPerUnit: Math.round(nilaiTotal / qtyTotal), qtyTanpaDasar: 0 };
+}
+
+export function rancangJurnalPromosiFOC(params: {
+  nomorSuratJalan: string;
+  tanggal: string;
+  fasyankesTujuan: string;
+  alokasi: { kodeSKU: string; namaAlkes: string; nomorBatch: string; qty: number }[];
+  daftarValuasi: ValuasiBatch[];
+  petugas: string;
+  peran: string;
+  nomorJournal: string;
+}): { rancangan: RancanganJurnal | null; penolakan: string[]; totalBiaya: number } {
+  const penolakan: string[] = [];
+  if (!params.alokasi.length) penolakan.push('Surat jalan tidak memiliki alokasi komponen FOC.');
+
+  const dasar = new Map(params.daftarValuasi.map((v) => [`${v.kodeSKU.toLowerCase()}|${v.nomorBatch}`, v]));
+  const barisBiaya: JurnalBaris[] = [];
+  let totalBiaya = 0;
+  for (const item of params.alokasi) {
+    if (!Number.isInteger(item.qty) || item.qty <= 0) {
+      penolakan.push(`${item.namaAlkes} batch ${item.nomorBatch}: kuantitas alokasi tidak valid.`);
+      continue;
+    }
+    const valuasi = dasar.get(`${item.kodeSKU.toLowerCase()}|${item.nomorBatch}`);
+    if (!valuasi) {
+      penolakan.push(`${item.kodeSKU}/${item.nomorBatch} belum memiliki dasar valuasi.`);
+      continue;
+    }
+    if (valuasi.asal !== 'ASLI') {
+      penolakan.push(`${item.kodeSKU}/${item.nomorBatch} memakai valuasi ${valuasi.asal}; hanya valuasi ASLI dapat dijurnal.`);
+      continue;
+    }
+    if (!Number.isFinite(valuasi.nilaiPerUnit) || valuasi.nilaiPerUnit <= 0) {
+      penolakan.push(`${item.kodeSKU}/${item.nomorBatch} tidak memiliki nilai biaya per unit yang valid.`);
+      continue;
+    }
+    const nilai = bulat(valuasi.nilaiPerUnit * item.qty);
+    if (nilai <= 0) {
+      penolakan.push(`${item.kodeSKU}/${item.nomorBatch} menghasilkan nilai biaya nol setelah pembulatan.`);
+      continue;
+    }
+    totalBiaya += nilai;
+    barisBiaya.push({
+      akunKode: KODE_AKUN.PERSEDIAAN_ALKES,
+      debit: 0,
+      kredit: nilai,
+      nomorBatch: item.nomorBatch,
+      pusatBiayaId: 'PB-SALES',
+      keterangan: `Persediaan komponen promosi ${item.qty} unit ${item.namaAlkes} (${item.kodeSKU})`
+    });
+  }
+  if (penolakan.length) return { rancangan: null, penolakan, totalBiaya: 0 };
+
+  const baris: JurnalBaris[] = [
+    {
+      akunKode: KODE_AKUN.BEBAN_PROMOSI_FOC,
+      debit: totalBiaya,
+      kredit: 0,
+      pusatBiayaId: 'PB-SALES',
+      keterangan: `Beban promosi FOC ${params.nomorSuratJalan}`
+    },
+    ...barisBiaya
+  ];
+  return {
+    rancangan: {
+      nomorJournal: params.nomorJournal,
+      tanggalTransaksi: params.tanggal,
+      tanggalPosting: null,
+      sumberRujukan: 'PROMOSI_FOC',
+      idRujukan: params.nomorSuratJalan,
+      uraian: `Beban promosi FOC — ${params.fasyankesTujuan}`,
+      status: 'Draft',
+      dibuatOleh: params.petugas,
+      peranPembuat: params.peran,
+      baris,
+      periode: periodeDari(params.tanggal)
+    },
+    penolakan: [],
+    totalBiaya
+  };
 }
 
 export function rancangJurnalWriteOff(params: {

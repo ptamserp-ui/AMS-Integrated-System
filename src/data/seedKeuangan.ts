@@ -139,6 +139,7 @@ export const INITIAL_COA: AkunCoA[] = [
   { kode: KODE_AKUN.BEBAN_KALIBRASI, nama: 'Beban Uji Kalibrasi & BPFK', tipe: 'Beban', kelompokLaporan: 'Beban Operasional', saldoNormal: 'Debet', aktif: true, catatanRegulasi: 'Biaya mutu — ke HPP bila terkait BMR, selain itu ke Beban Operasional' },
   { kode: KODE_AKUN.BEBAN_AUDIT_MUTU, nama: 'Beban Audit ISO 13485 & CDAKB', tipe: 'Beban', kelompokLaporan: 'Beban Operasional', saldoNormal: 'Debet', aktif: true },
   { kode: KODE_AKUN.BEBAN_RETUR_MUTU, nama: 'Beban Retur Mutu & Produk Kembalian', tipe: 'Beban', kelompokLaporan: 'Beban Operasional', saldoNormal: 'Debet', aktif: true },
+  { kode: KODE_AKUN.BEBAN_PROMOSI_FOC, nama: 'Beban Promosi Free of Charge (FOC)', tipe: 'Beban', kelompokLaporan: 'Beban Operasional', saldoNormal: 'Debet', aktif: true, catatanRegulasi: 'Nilai barang promosi berdasarkan valuasi ASLI dari batch FEFO yang dialokasikan; tidak menambah omzet.' },
   { kode: KODE_AKUN.BEBAN_UMUM, nama: 'Beban Umum & Administrasi', tipe: 'Beban', kelompokLaporan: 'Beban Operasional', saldoNormal: 'Debet', aktif: true }
 ];
 

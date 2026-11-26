@@ -74,6 +74,7 @@ export const SEARCH_COLLECTION_META: readonly SearchCollectionMeta[] = [
   { key: 'sales_garansi', label: 'Garansi & Instalasi', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'order' },
   { key: 'sales_kampanye', label: 'Kampanye & Simposium', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'kampanye' },
   { key: 'sales_unit_demo', label: 'Pelacakan Unit Demo', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'kampanye' },
+  { key: 'sales_promosi_foc', label: 'Konfigurasi Promosi FOC', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'promosi-foc' },
   { key: 'sales_rebate', label: 'Program Rebate', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'kampanye' },
   { key: 'sales_riwayat_bulanan', label: 'Riwayat Penjualan Bulanan', moduleId: 'sales-marketing', moduleLabel: 'Sales & Marketing', salesSubTab: 'analitik' },
   { key: 'quotation_riwayat_v1', label: 'Riwayat Quotation (Arsip Penawaran)', moduleId: 'dokumen-internal', moduleLabel: 'Internal Document' },

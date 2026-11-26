@@ -4,8 +4,10 @@ import { useDbTick } from '../../../../hooks/useDbSync';
 import type { PusatBiayaId, ValuasiBatch } from '../../../../types';
 import {
   NAMA_PUSAT_BIAYA,
+  KODE_AKUN,
   nilaiPersediaanPerBets,
   rancangJurnalHppPengiriman,
+  rancangJurnalPromosiFOC,
   rancangJurnalWriteOff,
   rekonsiliasiPersediaan,
   type SebabWriteOff
@@ -169,6 +171,57 @@ export default function PersediaanTab({
       return;
     }
     setPesan({ tipe: 'sukses', teks: `Draf HPP ${simpan.jurnal.nomorJournal} untuk ${sj.nomorSuratJalan} tersusun; posting di tab Jurnal supaya pendapatan dan HPP seperiode.` });
+    onPerubahanData();
+  };
+
+  const susunJurnalFoc = (nomorSuratJalan: string) => {
+    const sj = suratJalan.find((item) => item.nomorSuratJalan === nomorSuratJalan);
+    if (!sj?.promosiFoc) return;
+    if (sj.status !== 'Terkirim' && sj.status !== 'Diterima Penerima') {
+      setPesan({ tipe: 'galat', teks: `${sj.nomorSuratJalan}: biaya FOC baru dapat dijurnal setelah status penyerahan tercatat.` });
+      return;
+    }
+    if (jurnal.some((item) => item.sumberRujukan === 'PROMOSI_FOC' && item.idRujukan === sj.nomorSuratJalan)) {
+      setPesan({ tipe: 'galat', teks: `Jurnal FOC untuk ${sj.nomorSuratJalan} sudah tercatat; proses dibatalkan untuk mencegah duplikasi.` });
+      return;
+    }
+    const akunBeban = akunCoA.find((item) => item.kode === KODE_AKUN.BEBAN_PROMOSI_FOC);
+    if (!akunBeban || akunBeban.nama !== 'Beban Promosi Free of Charge (FOC)' || !akunBeban.aktif ||
+        akunBeban.tipe !== 'Beban' || akunBeban.kelompokLaporan !== 'Beban Operasional') {
+      setPesan({ tipe: 'galat', teks: `Akun ${KODE_AKUN.BEBAN_PROMOSI_FOC} harus tersedia dan aktif sebagai Beban Operasional sebelum menjurnal FOC.` });
+      return;
+    }
+    const tanggal = sj.tanggalTerbit.slice(0, 10);
+    const rancangan = rancangJurnalPromosiFOC({
+      nomorSuratJalan: sj.nomorSuratJalan,
+      tanggal,
+      fasyankesTujuan: sj.fasyankesTujuan,
+      alokasi: sj.promosiFoc.komponen.flatMap((komponen) =>
+        komponen.alokasi.map((alokasi) => ({
+          kodeSKU: komponen.kodeSKU,
+          namaAlkes: komponen.namaAlkes,
+          nomorBatch: alokasi.nomorBatch,
+          qty: alokasi.qty
+        }))
+      ),
+      daftarValuasi: valuasi,
+      petugas: identitas.pengguna,
+      peran: identitas.peran,
+      nomorJournal: nomorJurnalBerikutnya(jurnal, tanggal)
+    });
+    if (!rancangan.rancangan) {
+      setPesan({ tipe: 'galat', teks: `${sj.nomorSuratJalan}: ${rancangan.penolakan.join(' · ')}` });
+      return;
+    }
+    const simpan = db.tambahJurnalKeuangan(rancangan.rancangan);
+    if (!simpan.jurnal) {
+      setPesan({ tipe: 'galat', teks: simpan.penyimpangan.map((penyimpangan) => penyimpangan.keterangan).join(' · ') });
+      return;
+    }
+    setPesan({
+      tipe: 'sukses',
+      teks: `Draf beban promosi ${simpan.jurnal.nomorJournal} tersusun sebesar ${formatRupiah(rancangan.totalBiaya)} dari valuasi batch ASLI. Posting dilakukan di tab Jurnal.`
+    });
     onPerubahanData();
   };
 
@@ -432,6 +485,63 @@ export default function PersediaanTab({
                     Belum ada surat jalan dari modul Warehouse.
                   </td>
                 </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
+      <Panel
+        judul="Beban Promosi Free of Charge (FOC)"
+        keterangan="Draft jurnal mendebit akun beban promosi 5240 dan mengkredit persediaan berdasarkan valuasi ASLI batch yang benar-benar dialokasikan. Jurnal tidak dibuat jika valuasi tidak lengkap atau belum ASLI."
+      >
+        <div className="overflow-x-auto">
+          <table className={tabelKelas}>
+            <thead>
+              <tr className={kepalaTabelKelas}>
+                <th className={selKelas}>Surat Jalan &amp; Paket</th>
+                <th className={selKelas}>Fasyankes</th>
+                <th className={selKelas}>Status</th>
+                <th className={`${selKelas} text-right`}>Kit</th>
+                <th className={selKelas}>Batch Komponen</th>
+                <th className={selKelas}>Jurnal</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {suratJalan.filter((item) => item.promosiFoc).map((sj) => {
+                const promosi = sj.promosiFoc;
+                if (!promosi) return null;
+                const sudahDijurnal = jurnal.some((item) => item.sumberRujukan === 'PROMOSI_FOC' && item.idRujukan === sj.nomorSuratJalan);
+                const batches = [...new Set(promosi.komponen.flatMap((item) => item.alokasi.map((alokasi) => alokasi.nomorBatch)))];
+                return (
+                  <tr key={`foc-${sj.nomorSuratJalan}`} className="hover:bg-slate-50">
+                    <td className={`${selKelas} font-mono font-bold text-emerald-800 whitespace-nowrap`}>
+                      <div>{sj.nomorSuratJalan}</div>
+                      <div className="font-sans font-medium text-slate-600">{promosi.namaPaket} · {promosi.namaPromosi}</div>
+                    </td>
+                    <td className={`${selKelas} font-semibold text-slate-900`}>{sj.fasyankesTujuan}</td>
+                    <td className={selKelas}><Badge tone={sj.status === 'Terkirim' || sj.status === 'Diterima Penerima' ? 'emerald' : 'amber'}>{sj.status}</Badge></td>
+                    <td className={`${selKelas} text-right`}>{promosi.jumlahKit}</td>
+                    <td className={`${selKelas} font-mono text-2xs text-slate-500`}>{batches.join(', ') || '-'}</td>
+                    <td className={selKelas}>
+                      {sudahDijurnal ? (
+                        <Badge tone="blue">FOC Terbukukan</Badge>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => susunJurnalFoc(sj.nomorSuratJalan)}
+                          className={`${tombolSekunder} !px-2.5 !py-1 !text-emerald-800 !border-emerald-300`}
+                        >
+                          <ReceiptText className="w-3.5 h-3.5" />
+                          Susun Draf FOC
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!suratJalan.some((item) => item.promosiFoc) && (
+                <tr><td colSpan={6} className={`${selKelas} text-center text-slate-500`}>Belum ada pengiriman dengan promosi FOC.</td></tr>
               )}
             </tbody>
           </table>

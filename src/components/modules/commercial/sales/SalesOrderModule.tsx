@@ -11,6 +11,7 @@ import {
   validasiSalesOrder
 } from '../../../../utils/sales';
 import { produkKatalogUntukPenjualan } from '../../../../utils/productCatalog';
+import { hitungKelayakanPromosiFOC, validasiPromosiFOC } from '../../../../utils/promosiFoc';
 import { TANGGAL_ACUAN_BENIH, buatTanggalAcuan, waktuMutasiMonoton } from '../../operations/gudang/ui';
 import {
   AlertTriangle,
@@ -85,6 +86,7 @@ export default function SalesOrderModule() {
     'izin_edar',
     'stok_gudang',
     'product_catalog',
+    'sales_promosi_foc',
     'sales_pengetahuan_produk',
     'gudang_surat_jalan'
   ]);
@@ -115,6 +117,10 @@ export default function SalesOrderModule() {
   const suratJalan = useMemo<SuratJalan[]>(() => {
     void dbTick;
     return db.getSuratJalan();
+  }, [dbTick]);
+  const promosiFOC = useMemo(() => {
+    void dbTick;
+    return db.getPromosiFOC();
   }, [dbTick]);
   const produk = useMemo<OpsiProdukSO[]>(() => {
     void dbTick;
@@ -155,10 +161,13 @@ export default function SalesOrderModule() {
     jumlah: 1,
     satuan: 'Unit',
     totalHarga: 0,
+    promosiId: '',
+    paketId: '',
     metodePembayaran: 'TOP 30 Hari' as NonNullable<PenjualanAlkes['metodePembayaran']>,
     tanggalPesanan: new Date().toISOString().split('T')[0]
   });
   const [tolakanValidasi, setTolakanValidasi] = useState<HasilValidasiSO | null>(null);
+  const [tolakanFoc, setTolakanFoc] = useState('');
   const [penolakanKirim, setPenolakanKirim] = useState<{ id: string; sebab: string } | null>(null);
 
   const [revisiTarget, setRevisiTarget] = useState<PenjualanAlkes | null>(null);
@@ -174,6 +183,21 @@ export default function SalesOrderModule() {
 
   const produkTerpilih = produk.find((p) => p.id === form.produkId);
   const pelangganTerpilih = pelanggan.find((c) => c.id === form.pelangganId);
+  const kelayakanPesananFoc = {
+    kodeSKU: form.kodeSKU,
+    jumlah: form.jumlah,
+    jalurPenjualan: form.jalurPenjualan,
+    pelangganId: form.pelangganId || undefined,
+    tanggalPesanan: form.tanggalPesanan
+  };
+  const promosiFOCTersedia = promosiFOC.filter(
+    (item) => validasiPromosiFOC(item).length === 0 && hitungKelayakanPromosiFOC(item, kelayakanPesananFoc).memenuhi
+  );
+  const promosiTerpilih = promosiFOCTersedia.find((item) => item.id === form.promosiId);
+  const paketFOCTerpilih = promosiTerpilih?.paket.find((item) => item.id === form.paketId);
+  const jumlahKitFOC = promosiTerpilih
+    ? hitungKelayakanPromosiFOC(promosiTerpilih, kelayakanPesananFoc).jumlahKit
+    : 0;
 
   const usulanFefo = useMemo(
     () => alokasikanFEFO(stok, form.namaAlkes, form.jumlah, acuanFefo, form.kodeSKU),
@@ -252,10 +276,13 @@ export default function SalesOrderModule() {
       nomorBatch: '',
       jumlah: 1,
       totalHarga: 0,
+      promosiId: '',
+      paketId: '',
       fasyankes: '',
       pelangganId: ''
     }));
     setTolakanValidasi(null);
+    setTolakanFoc('');
     setFormTerbuka(true);
   };
 
@@ -267,6 +294,10 @@ export default function SalesOrderModule() {
   const isiUlangForm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.fasyankes || !form.namaAlkes) return;
+    if (form.promosiId && (!promosiTerpilih || !paketFOCTerpilih || jumlahKitFOC < 1)) {
+      setTolakanFoc('Promosi atau pilihan kit tidak lagi memenuhi syarat pesanan. Periksa SKU, jumlah, pelanggan, kanal, dan periode promosi.');
+      return;
+    }
 
     const hasil = validasiSalesOrder({
       pelanggan: pelangganTerpilih,
@@ -310,11 +341,24 @@ export default function SalesOrderModule() {
       tanggalJatuhTempo: new Date(
         new Date(form.tanggalPesanan).getTime() + Number(form.metodePembayaran.replace(/\D/g, '')) * 86400000
       ).toISOString().split('T')[0],
-      hasilValidasiRegulasi: hasil
+      hasilValidasiRegulasi: hasil,
+      ...(promosiTerpilih && paketFOCTerpilih
+        ? {
+            promosiFoc: {
+              promosiId: promosiTerpilih.id,
+              namaPromosi: promosiTerpilih.nama,
+              paketId: paketFOCTerpilih.id,
+              namaPaket: paketFOCTerpilih.nama,
+              jumlahKit: jumlahKitFOC,
+              komponen: paketFOCTerpilih.komponen.map((item) => ({ ...item }))
+            }
+          }
+        : {})
     };
 
     db.addPenjualan(item);
     setTolakanValidasi(null);
+    setTolakanFoc('');
     setFormTerbuka(false);
   };
 
@@ -758,6 +802,7 @@ export default function SalesOrderModule() {
                   ['Produk Alkes', detail.namaAlkes],
                   ['Nomor Batch FEFO', detail.nomorBatch],
                   ['Jumlah', `${detail.jumlah} ${detail.satuan}`],
+                  ['Promosi FOC', detail.promosiFoc ? `${detail.promosiFoc.namaPaket} · ${detail.promosiFoc.jumlahKit} kit · Rp0` : 'Tidak ada'],
                   ['Nomor Izin Edar', detail.nomorIzinEdar ?? 'Belum tercatat dari modul RA'],
                   ['Harga Satuan', detail.hargaSatuan ? formatRupiah(detail.hargaSatuan) : '-'],
                   ['Total Nilai', formatRupiah(detail.totalHarga)],
@@ -1065,6 +1110,56 @@ export default function SalesOrderModule() {
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
+              <div>
+                <label className={labelClass}>Promosi Free of Charge (opsional)</label>
+                <select
+                  className={inputClass}
+                  value={promosiTerpilih?.id ?? ''}
+                  onChange={(e) => {
+                    const pilihan = promosiFOCTersedia.find((item) => item.id === e.target.value);
+                    setForm({ ...form, promosiId: pilihan?.id ?? '', paketId: pilihan?.paket[0]?.id ?? '' });
+                    setTolakanFoc('');
+                  }}
+                >
+                  <option value="">Tanpa promosi FOC</option>
+                  {promosiFOCTersedia.map((item) => (
+                    <option key={item.id} value={item.id}>{item.nama} · hingga {Math.min(Math.floor(form.jumlah / item.minimumPembelian), item.maksimumKitPerPesanan)} kit</option>
+                  ))}
+                </select>
+                <p className="text-2xs text-slate-600 mt-1">
+                  Promosi hanya tersedia jika SKU pemicu, minimum pembelian, tanggal, kanal, dan pelanggan memenuhi konfigurasi Sales.
+                </p>
+              </div>
+              {promosiTerpilih && (
+                <div className="space-y-2">
+                  <div>
+                    <label className={labelClass}>Pilihan Sales Kit</label>
+                    <select
+                      className={inputClass}
+                      value={paketFOCTerpilih?.id ?? ''}
+                      onChange={(e) => setForm({ ...form, paketId: e.target.value })}
+                    >
+                      {promosiTerpilih.paket.map((paket) => (
+                        <option key={paket.id} value={paket.id}>{paket.nama}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-xs font-semibold text-emerald-900">
+                    {jumlahKitFOC} kit · Faktur: baris Rp0 tanpa PPN · tidak menambah omzet. Pengiriman ditolak bila stok komponen tidak lengkap.
+                  </p>
+                  <ul className="list-disc pl-4 text-2xs text-slate-700">
+                    {paketFOCTerpilih?.komponen.map((item) => (
+                      <li key={`${item.kodeSKU}-${item.namaAlkes}`}>
+                        {item.namaAlkes} ({item.kodeSKU}) — {item.qtyPerKit * jumlahKitFOC} {item.satuan}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {tolakanFoc && <p className="text-xs text-rose-800">{tolakanFoc}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

@@ -56,6 +56,7 @@ import {
   KampanyeAlkes,
   UnitDemoAlkes,
   ProgramRebate,
+  PromosiFOC,
   RiwayatPenjualanBulanan,
   DaftarSurat,
   PelangganSurat,
@@ -71,6 +72,7 @@ import {
   AturanSimpan,
   TerimaBarang,
   SuratJalan,
+  AlokasiKomponenFOC,
   OpnameStok,
   JejakPergerakan,
   AmbangStok,
@@ -111,6 +113,7 @@ import {
 } from '../utils/gudang';
 import {
   hitungRataRataTertimbangSku,
+  KODE_AKUN,
   type PenyimpanganJurnal,
   type RancanganJurnal,
   susunJurnalBerantai,
@@ -226,6 +229,7 @@ import {
   KONFIGURASI_GUDANG_AWAL,
   INITIAL_RIWAYAT_EKSPOR_EREPOR
 } from '../data/initialData';
+import { INITIAL_PROMOSI_FOC } from '../data/seedPromosiFoc';
 import {
   INITIAL_COA,
   INITIAL_JURNAL_KEUANGAN,
@@ -3077,6 +3081,14 @@ export class AMSDatabaseManager {
     this.logAudit('Sales & Marketing — Kampanye', 'Serah terima unit demo/sampel ke fasyankes', item.nomorBeritaAcara, 'Manajer Pemasaran', 'Sales & Marketing');
   }
 
+  public getPromosiFOC(): PromosiFOC[] {
+    return this.getCollection<PromosiFOC>('sales_promosi_foc', INITIAL_PROMOSI_FOC);
+  }
+  public savePromosiFOC(items: PromosiFOC[]) {
+    this.setCollection('sales_promosi_foc', items);
+    this.logAudit('Sales & Marketing — Promosi FOC', 'Pembaruan konfigurasi promosi FOC', items[0]?.id ?? '-');
+  }
+
   // 6.3 Loyalty & Rebate Program
   public getProgramRebate(): ProgramRebate[] {
     return this.getCollection<ProgramRebate>('sales_rebate', INITIAL_PROGRAM_REBATE);
@@ -3256,8 +3268,9 @@ export class AMSDatabaseManager {
       return { boleh: false, keterangan: `Pesanan ${pesananLama.nomorPesanan} sudah ${pesananLama.statusKirim}`, nomorFaktur: '', nomorSuratJalan: '', batch: [] };
 
     const konfigurasi = this.getKonfigurasiGudang();
+    const stokAwal = this.getStokGudang();
     const alokasi = alokasiFEFOSadarKunci({
-      daftarStok: this.getStokGudang(),
+      daftarStok: stokAwal,
       jumlahDiminta: pesananLama.jumlah,
       namaAlkes: pesananLama.namaAlkes,
       kodeSKU: pesananLama.kodeSKU,
@@ -3276,6 +3289,60 @@ export class AMSDatabaseManager {
         { kolom: 'alasan', nilaiLama: '-', nilaiBaru: sebab }
       ]);
       return { boleh: false, keterangan: sebab, nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+    }
+
+    const stokSimulasi = stokAwal.map((stok) => ({ ...stok }));
+    const alokasiSemua: (typeof alokasi.usulan[number] & { satuan: string })[] = [];
+    const terapkanKeSimulasi = (items: typeof alokasi.usulan, satuan: string) => {
+      for (const item of items) {
+        const stok = stokSimulasi.find((baris) => baris.id === item.stokId);
+        if (!stok) continue;
+        stok.jumlahStok = Math.max(stok.jumlahStok - item.diambil, 0);
+        stok.qtyDipesan = Math.max((stok.qtyDipesan ?? 0) - item.diambil, 0);
+        alokasiSemua.push({ ...item, satuan });
+      }
+    };
+    terapkanKeSimulasi(alokasi.usulan, pesananLama.satuan);
+
+    const komponenFocTerkirim: AlokasiKomponenFOC[] = [];
+    const snapshotFoc = pesananLama.promosiFoc;
+    if (snapshotFoc) {
+      if (!Number.isSafeInteger(snapshotFoc.jumlahKit) || snapshotFoc.jumlahKit < 1 ||
+          snapshotFoc.komponen.length === 0 ||
+          snapshotFoc.komponen.some((item) =>
+            !item.kodeSKU.trim() || !item.namaAlkes.trim() || !item.satuan.trim() ||
+            !Number.isSafeInteger(item.qtyPerKit) || item.qtyPerKit < 1 ||
+            !Number.isSafeInteger(item.qtyPerKit * snapshotFoc.jumlahKit)
+          )) {
+        return { boleh: false, keterangan: 'Snapshot promosi FOC pesanan tidak valid; minta Sales memperbaiki pesanan sebelum pengiriman.', nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+      }
+      for (const komponen of snapshotFoc.komponen) {
+        const qtyDiminta = komponen.qtyPerKit * snapshotFoc.jumlahKit;
+        const hasil = alokasiFEFOSadarKunci({
+          daftarStok: stokSimulasi,
+          jumlahDiminta: qtyDiminta,
+          kodeSKU: komponen.kodeSKU,
+          dari,
+          daftarIzinEdar: this.getIzinEdar(),
+          minimalUmurEdBulan: minimalUmurEdBulanEfektif(konfigurasi),
+          daftarBin: this.getLokasiBin(),
+          daftarGudang: this.getGudangFisik()
+        });
+        if (hasil.sisaKekurangan > 0) {
+          const sebab = `Komponen FOC ${komponen.namaAlkes} (${komponen.kodeSKU}) tersedia ${hasil.totalDiambil} dari ${qtyDiminta}; pengiriman ditolak tanpa mutasi stok.${hasil.dilewati.length ? ` ${hasil.dilewati.map((d) => `${d.nomorBatch}: ${d.sebab}`).join('; ')}` : ''}`;
+          this.updatePenjualan(id, { statusKirim: 'Menunggu Alokasi FEFO' }, 'Kepala Gudang');
+          this.auditGudang('Pengiriman Outbound', `Pengiriman ${pesananLama.nomorPesanan} ditahan: komponen FOC tidak lengkap`, pesananLama.nomorPesanan, [
+            { kolom: 'alasan', nilaiLama: '-', nilaiBaru: sebab }
+          ]);
+          return { boleh: false, keterangan: sebab, nomorFaktur: '', nomorSuratJalan: '', batch: [] };
+        }
+        terapkanKeSimulasi(hasil.usulan, komponen.satuan);
+        komponenFocTerkirim.push({
+          ...komponen,
+          qtyTotal: qtyDiminta,
+          alokasi: hasil.usulan.map((u) => ({ nomorBatch: u.nomorBatch, qty: u.diambil, binId: u.binId }))
+        });
+      }
     }
 
     const rute = susunRutePicking({
@@ -3304,8 +3371,8 @@ export class AMSDatabaseManager {
     const nomorSuratJalan = sjSebelum?.nomorSuratJalan || gerbang.nomorSuratJalan;
     const waktuKirim = dari;
     const nomorFaktur = `FTR/${waktuKirim.getFullYear()}/${String(waktuKirim.getMonth() + 1).padStart(2, '0')}/${pesananLama.nomorPesanan.slice(-3)}`;
-    const daftarStok = this.getStokGudang().map((s) => ({ ...s }));
-    alokasi.usulan.forEach((u) => {
+    const daftarStok = stokAwal.map((s) => ({ ...s }));
+    alokasiSemua.forEach((u) => {
       const baris = daftarStok.find((s) => s.id === u.stokId);
       if (!baris) return;
       baris.jumlahStok = Math.max(baris.jumlahStok - u.diambil, 0);
@@ -3316,7 +3383,7 @@ export class AMSDatabaseManager {
     this.saveStokGudang(daftarStok);
 
     const labelWaktu = this.labelWaktu(waktuKirim);
-    alokasi.usulan.forEach((u) => {
+    alokasiSemua.forEach((u) => {
       const baris = daftarStok.find((s) => s.id === u.stokId);
       this.catatPergerakan({
         waktu: labelWaktu,
@@ -3326,7 +3393,7 @@ export class AMSDatabaseManager {
         dariBin: u.binId,
         keBin: 'OUT-FASYANKES',
         jumlah: u.diambil,
-        satuan: baris?.satuan ?? pesananLama.satuan,
+        satuan: baris?.satuan ?? u.satuan,
         tipe: 'Pengiriman',
         pengguna: 'Kepala Gudang',
         peran: 'Operations & Technical',
@@ -3345,7 +3412,17 @@ export class AMSDatabaseManager {
       jarakTotalMeter: rute.jarakTotalMeter,
       qtyTotal: alokasi.totalDiambil,
       satuan: pesananLama.satuan,
-      nomorFaktur
+      nomorFaktur,
+      ...(pesananLama.promosiFoc
+        ? {
+            promosiFoc: {
+              namaPromosi: pesananLama.promosiFoc.namaPromosi,
+              namaPaket: pesananLama.promosiFoc.namaPaket,
+              jumlahKit: pesananLama.promosiFoc.jumlahKit,
+              komponen: komponenFocTerkirim
+            }
+          }
+        : {})
     });
 
     this.addTransaksi({
@@ -3356,7 +3433,21 @@ export class AMSDatabaseManager {
       tanggal: labelWaktu.split(' ')[0],
       jumlah: pesananLama.totalHarga,
       statusPembayaran: 'Menunggu Jatuh Tempo',
-      ppnStatus: 'PPN 11% Terbit Faktur Pajak'
+      ppnStatus: 'PPN 11% Terbit Faktur Pajak',
+      ...(pesananLama.promosiFoc
+        ? {
+            barisFaktur: [{
+              deskripsi: `${pesananLama.promosiFoc.namaPaket} — Free of Charge`,
+              jumlah: pesananLama.promosiFoc.jumlahKit,
+              satuan: 'Kit',
+              hargaSatuan: 0,
+              subtotal: 0,
+              tarifPpnPersen: 0,
+              nilaiPpn: 0,
+              jenis: 'FOC' as const
+            }]
+          }
+        : {})
     });
 
     this.updatePenjualan(id, { statusKirim: 'Terkirim', nomorFaktur }, 'Kepala Gudang & Manajer Penjualan');
@@ -3372,7 +3463,7 @@ export class AMSDatabaseManager {
       });
     this.sinkronkanIsiBin();
 
-    const ringkasanBatch = alokasi.usulan.map((u) => `${u.nomorBatch} (${u.diambil})`).join(', ');
+    const ringkasanBatch = alokasiSemua.map((u) => `${u.nomorBatch} (${u.diambil})`).join(', ');
     this.logAudit(
       'Sales & Marketing — Order',
       'Pengiriman tereksekusi: stok FEFO berkurang & piutang terbit',
@@ -3398,7 +3489,7 @@ export class AMSDatabaseManager {
         { kolom: 'rute picking', nilaiLama: `${sjSebelum?.rute.length ?? 0} langkah`, nilaiBaru: `${rute.langkah.length} langkah / ${rute.jarakTotalMeter} m${rute.hematMeter ? ` (hemat ${rute.hematMeter} m)` : ''}` }
       ]
     );
-    return { boleh: true, keterangan: alokasi.keterangan, nomorFaktur, nomorSuratJalan: suratJalan.nomorSuratJalan, batch: alokasi.usulan };
+    return { boleh: true, keterangan: alokasi.keterangan, nomorFaktur, nomorSuratJalan: suratJalan.nomorSuratJalan, batch: alokasiSemua };
   }
 
   // ============================ GUDANG & LOGISTIK ============================
@@ -4091,6 +4182,7 @@ export class AMSDatabaseManager {
     qtyTotal: number;
     satuan: string;
     nomorFaktur: string;
+    promosiFoc?: SuratJalan['promosiFoc'];
   }): SuratJalan {
     const current = this.getSuratJalan().map((s) => ({ ...s }));
     const patch: Partial<SuratJalan> = {
@@ -4099,7 +4191,8 @@ export class AMSDatabaseManager {
       jarakTotalMeter: params.jarakTotalMeter,
       qtyTotal: params.qtyTotal,
       nomorFaktur: params.nomorFaktur,
-      statusEFaktur: 'Terbit'
+      statusEFaktur: 'Terbit',
+      ...(params.promosiFoc ? { promosiFoc: params.promosiFoc } : {})
     };
     const lama = current.find((s) => s.penjualanId === params.penjualanId || s.nomorPesanan === params.nomorPesanan);
     if (lama) {
@@ -4127,7 +4220,8 @@ export class AMSDatabaseManager {
       nomorPaketLkpp: '',
       statusSyncLkpp: 'Tidak Berlaku',
       penanggungJawab: 'Kepala Gudang',
-      catatan: 'Terbit otomatis dari eksekusi FEFO modul Gudang.'
+      catatan: 'Terbit otomatis dari eksekusi FEFO modul Gudang.',
+      ...(params.promosiFoc ? { promosiFoc: params.promosiFoc } : {})
     };
     this.saveSuratJalan([baru, ...current]);
     return baru;
@@ -4521,7 +4615,15 @@ export class AMSDatabaseManager {
   // disisipkan di depan seperti koleksi lain. Tampilan yang mengurutkan sendiri.
 
   public getCoA(): AkunCoA[] {
-    return this.getCollection<AkunCoA>('keuangan_coa', INITIAL_COA);
+    const current = this.getCollection<AkunCoA>('keuangan_coa', INITIAL_COA);
+    const akunPromosiFoc = INITIAL_COA.find((akun) => akun.kode === KODE_AKUN.BEBAN_PROMOSI_FOC);
+    if (akunPromosiFoc && !current.some((akun) => akun.kode === akunPromosiFoc.kode)) {
+      const migrated = [...current, akunPromosiFoc];
+      this.setCollection('keuangan_coa', migrated);
+      this.logAudit('Finance & Accounting', 'Menambahkan akun Beban Promosi FOC ke CoA tersimpan', akunPromosiFoc.kode);
+      return migrated;
+    }
+    return current;
   }
   public saveCoA(items: AkunCoA[]) {
     this.setCollection('keuangan_coa', items);
@@ -4612,6 +4714,19 @@ export class AMSDatabaseManager {
     opsi?: { langsungPosting?: boolean; tanggalPosting?: string; petugas?: string; peran?: string }
   ): { jurnal: JurnalKeuangan | null; penyimpangan: PenyimpanganJurnal[] } {
     const daftar = this.getJurnalKeuangan();
+    if (
+      rancangan.sumberRujukan === 'PROMOSI_FOC' &&
+      daftar.some((jurnal) => jurnal.sumberRujukan === 'PROMOSI_FOC' && jurnal.idRujukan === rancangan.idRujukan)
+    ) {
+      return {
+        jurnal: null,
+        penyimpangan: [{
+          kode: rancangan.idRujukan,
+          jenis: 'Keseimbangan',
+          keterangan: `Jurnal promosi FOC untuk ${rancangan.idRujukan} sudah pernah dibuat; rujukan yang sama tidak dapat dijurnal dua kali.`
+        }]
+      };
+    }
     const hasil = susunJurnalBerantai(daftar, rancangan, {
       daftarAkun: this.getCoA(),
       daftarPeriode: this.getPeriodeBuku(),
@@ -5072,6 +5187,7 @@ export class AMSDatabaseManager {
       case 'sales_garansi': return this.getGaransiInstalasi();
       case 'sales_kampanye': return this.getKampanye();
       case 'sales_unit_demo': return this.getUnitDemo();
+      case 'sales_promosi_foc': return this.getPromosiFOC();
       case 'sales_rebate': return this.getProgramRebate();
       case 'sales_riwayat_bulanan': return this.getRiwayatPenjualanBulanan();
       case 'surat_daftar': return this.getDaftarSurat();

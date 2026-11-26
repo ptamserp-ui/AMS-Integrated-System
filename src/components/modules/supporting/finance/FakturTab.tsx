@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { db } from '../../../../services/pocketbase';
 import { useDbTick } from '../../../../hooks/useDbSync';
 import type { TransaksiKeuangan } from '../../../../types';
@@ -215,7 +215,8 @@ export default function FakturTab({
               {filtered.map((item) => {
                 const j = jurnalFaktur(item.nomorFaktur);
                 return (
-                  <tr key={item.id} className="hover:bg-slate-50">
+                  <Fragment key={item.id}>
+                  <tr className="hover:bg-slate-50">
                     <td className={`${selKelas} font-mono font-bold text-blue-800`}>
                       <div>{item.nomorFaktur}</div>
                       <div className="text-2xs text-slate-500 font-normal">{item.tanggal}</div>
@@ -245,6 +246,17 @@ export default function FakturTab({
                       )}
                     </td>
                   </tr>
+                  {item.barisFaktur?.filter((baris) => baris.jenis === 'FOC').map((baris, indeks) => (
+                    <tr key={`${item.id}-foc-${indeks}`} className="bg-emerald-50/70">
+                      <td colSpan={3} className={`${selKelas} text-emerald-900`}>
+                        <span className="font-semibold">Free of Charge:</span> {baris.deskripsi} · {baris.jumlah} {baris.satuan}
+                      </td>
+                      <td className={`${selKelas} text-right font-bold text-emerald-800`}>{formatRupiah(baris.subtotal)}</td>
+                      <td className={`${selKelas} text-emerald-800`}>0% (tanpa PPN)</td>
+                      <td colSpan={2} className={`${selKelas} text-emerald-800`}>Baris promo · tidak menambah omzet</td>
+                    </tr>
+                  ))}
+                  </Fragment>
                 );
               })}
             </tbody>

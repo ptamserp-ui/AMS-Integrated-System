@@ -9,7 +9,8 @@ import {
   Mail,
   BookOpen,
   Store,
-  Database
+  Database,
+  Gift
 } from 'lucide-react';
 import { PelangganB2B, UserRole } from '../../../types';
 import { punyaIzin, type SesiLogin } from '../../../utils/autentikasi';
@@ -25,8 +26,9 @@ const ListmonkModule = lazy(() => import('./sales/ListmonkModule'));
 const InternalCatalogModule = lazy(() => import('./sales/InternalCatalogModule'));
 const PortalCustomerModule = lazy(() => import('./sales/PortalCustomerModule'));
 const CustomerDatabaseModule = lazy(() => import('./sales/CustomerDatabaseModule'));
+const PromosiFocModule = lazy(() => import('./sales/PromosiFocModule'));
 
-export type SalesTab = 'crm' | 'customer-database' | 'tender' | 'sfa' | 'order' | 'portal-customer' | 'kampanye' | 'listmonk' | 'analitik' | 'katalog-internal';
+export type SalesTab = 'crm' | 'customer-database' | 'tender' | 'sfa' | 'order' | 'portal-customer' | 'kampanye' | 'promosi-foc' | 'listmonk' | 'analitik' | 'katalog-internal';
 
 const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
   { id: 'analitik', label: 'Analitik & Dashboard (BI)', ikon: ChartColumn },
@@ -38,6 +40,7 @@ const TABS: { id: SalesTab; label: string; ikon: typeof Users }[] = [
   { id: 'portal-customer', label: 'Portal Customer', ikon: Store },
   { id: 'katalog-internal', label: 'e-Brochure (PDF)', ikon: BookOpen },
   { id: 'kampanye', label: 'Marketing, Promo & Campaign Management', ikon: Megaphone },
+  { id: 'promosi-foc', label: 'Promosi FOC & Sales Kit', ikon: Gift },
   { id: 'listmonk', label: 'Newsletter & Mailing List (listmonk)', ikon: Mail }
 ];
 
@@ -128,6 +131,7 @@ export default function SalesModule({
           {activeTab === 'portal-customer' && <PortalCustomerModule />}
           {activeTab === 'katalog-internal' && <InternalCatalogModule />}
           {activeTab === 'kampanye' && <KampanyeMarketingModule />}
+          {activeTab === 'promosi-foc' && <PromosiFocModule bolehUbah={punyaIzin(sesi, 'sales-marketing', 'update')} />}
           {activeTab === 'listmonk' && <ListmonkModule currentRole={currentRole} />}
           {activeTab === 'analitik' && <AnalitikSalesModule />}
         </Suspense>

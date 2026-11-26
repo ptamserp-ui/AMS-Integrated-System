@@ -114,6 +114,11 @@ Gunakan tiga prinsip berikut saat PJT meninjau SOP, formulir mutu, dokumen tende
 | **Visit Planner & Geo-Tagging** | Rencana Kunjungan & Penandaan Lokasi GPS | Validasi kehadiran kunjungan di dalam radius geofence RS | Gunakan **Rencana Kunjungan & Geotag GPS** |
 | **Geofencing** | Pagar Geografis (`Geofence`) | Batas radius koordinat GPS lokasi fasyankes/pabrik | Gunakan **Batas Radius GPS (Geofencing)** |
 | **Multi-Level Pricing & Tiered Discount** | Skema Harga Bertingkat & Diskon Kuantitas | Perbedaan harga Eceran, Institusi, Distributor & potongan volume | Gunakan **Skema Harga Bertingkat** |
+| **Free of Charge (FOC) Item** | Barang Promosi Gratis (`FOC`) | Barang yang tetap dicatat kuantitas dan batch-nya; baris kit bernilai Rp0, tanpa PPN, dan tidak menambah omzet | Gunakan **Barang FOC** dan pastikan stok serta batch komponen tercatat |
+| **Gift with Purchase (GWP)** | Hadiah dengan Pembelian | Promosi yang memberi kit setelah SKU pemicu mencapai minimum pembelian | Gunakan **Hadiah dengan Pembelian (GWP)** |
+| **Sales Kit / Promotional Bundle** | Paket Penjualan / Paket Promosi | Paket virtual pada faktur; komponen fisik dialokasikan FEFO dan dirinci pada Surat Jalan | Gunakan **Sales Kit**; kit bukan stok fisik tersendiri |
+| **Zero-Value Line Item** | Baris Faktur Bernilai Nol | Baris FOC pada faktur untuk keterlacakan jumlah tanpa mengubah total tagihan atau omzet | Tampilkan sebagai **Rp0** dan tanpa PPN |
+| **Promotional Expense** | Beban Promosi | Biaya persediaan FOC dicatat sebagai debit akun beban promosi dan kredit persediaan dari valuasi batch aktual | Jangan jurnal dari valuasi dummy; perlu valuasi batch `ASLI` |
 | **Price Lock Contract** | Kontrak Penguncian Harga | Kesepakatan harga tetap hasil tender dalam periode tertentu | Gunakan **Kontrak Penguncian Harga** |
 | **Return on Investment (ROI)** | Imbal Hasil Investasi (**ROI**) | Perbandingan nilai konversi vs biaya kampanye/pameran | Gunakan **ROI (Imbal Hasil)** |
 | **Sample & Demo Unit** | Unit Contoh & Unit Demo Pinjaman | Pemantauan alat yang dipinjamkan ke RS beserta Berita Acara | Gunakan **Unit Demo** |

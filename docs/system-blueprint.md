@@ -94,7 +94,7 @@ graph TD
 10. **Sales & Marketing / SDAK (`sales-marketing`):**
     - Manajemen Pelanggan B2B / Fasyankes.
     - Analitik Sales & SFA (Sales Force Automation).
-    - Tender LPSE, e-Katalog LKPP, Sales Order, dan Skema Harga.
+    - Tender LPSE, e-Katalog LKPP, Sales Order, Skema Harga, dan konfigurasi Promosi FOC / Sales Kit.
 11. **Post-Market Surveillance & Vigilance (`pms-vigilance`):**
     - Pelaporan KTD (Kejadian Tidak Diharapkan).
     - Penarikan Produk (*Product Recall*) dan integrasi instan ke Karantina Gudang (Tab 11 WMS).
@@ -106,6 +106,7 @@ graph TD
     - *Double-Entry General Ledger* (`journal_entries`, `journal_items`).
     - *Chart of Accounts* (CoA) dengan segmentasi *cost center*.
     - Automasi *Inventory Write-off* untuk batch karantina/expired (CDAKB).
+    - Draf beban promosi FOC (akun 5240) terhadap persediaan, dihitung dari valuasi `ASLI` batch yang benar-benar dialokasikan; memerlukan peninjauan dan posting Finance.
     - Kalkulator *Landed Cost* Impor (Bea Masuk, PPN, PPh 22).
     - Laporan Laba Rugi Komparatif & Analisis Segmen Bisnis.
 14. **IT & Traceability Hub (`it-traceability`):**
@@ -202,7 +203,7 @@ graph TD
 1. **Procurement ke WMS Inbound:** PO yang disetujui di modul *Procurement* mengalir langsung ke antrean penerimaan *WMS Inbound* (Tab 6).
 2. **WMS Inbound ke Quality Control (QC):** Barang datang wajib diuji oleh *QC* sebelum dapat dirilis (`RELEASED`) ke stok utama *WMS FEFO* (Tab 3).
 3. **WMS FEFO ke Sales & Marketing:** Pesanan penjualan (*Sales Order*) di modul *Sales* memicu mesin alokasi FEFO sadar-kunci di gudang.
-4. **Sales & Procurement ke Finance & Accounting:** Setiap eksekusi pengiriman barang atau pembelian PO otomatis menghasilkan jurnal akuntansi ganda (*Double-Entry Ledger*) di modul *Finance*.
+4. **Sales & Procurement ke Finance & Accounting:** Pengiriman menghasilkan transaksi faktur/piutang; draf jurnal HPP dan beban FOC disusun melalui alur Finance dan harus ditinjau sebelum posting. Untuk FOC, biaya ditolak bila valuasi batch bukan `ASLI` atau tidak lengkap.
 5. **PMS Vigilance ke WMS Karantina:** Instruksi penarikan produk (*Recall*) di modul *PMS* secara instan mengunci batch terkait di *WMS Karantina* (Tab 11).
 6. **Seluruh Modul ke IT Traceability Hub:** Setiap mutasi data di ke-14 modul child merekam log aktivitas terenkripsi SHA-256 (ALCOA+) di *IT Traceability Hub*.
 

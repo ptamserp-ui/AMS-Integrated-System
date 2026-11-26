@@ -501,6 +501,26 @@ export default function PengirimanOutboundTab({
                   </div>
                 </div>
 
+                {sj.promosiFoc && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
+                    <div className="text-xs font-bold text-emerald-900">
+                      Free of Charge · {sj.promosiFoc.namaPaket} · {sj.promosiFoc.jumlahKit} kit
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {sj.promosiFoc.komponen.map((komponen) => (
+                        <div key={`${sj.id}-${komponen.kodeSKU}`} className="rounded-lg border border-emerald-100 bg-white p-2 text-2xs">
+                          <div className="font-semibold text-slate-900">
+                            {komponen.namaAlkes} ({komponen.kodeSKU}) · {komponen.qtyTotal} {komponen.satuan}
+                          </div>
+                          <div className="mt-1 text-slate-600">
+                            {komponen.alokasi.map((alokasi) => `${alokasi.nomorBatch} × ${alokasi.qty} · ${alokasi.binId}`).join(' | ')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* NIE, batch & ED wajib tercetak pada surat jalan (Tahap 3); POD menutup alur DELIVERED */}
                 {sj.rute.length > 0 && (
                   <div className="flex flex-wrap gap-2 text-2xs">
