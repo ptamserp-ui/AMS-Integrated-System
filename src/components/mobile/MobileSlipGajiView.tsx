@@ -28,29 +28,30 @@ export const MobileSlipGajiView: React.FC<MobileSlipGajiViewProps> = ({
   return (
     <div className="space-y-4">
       {slipTerbaru && (
-        <section className="rounded-3xl bg-gradient-to-br from-blue-800 to-blue-600 text-white p-5 space-y-3 shadow-lg shadow-blue-900/10">
+        <section className="mobile-card space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-2xs font-bold uppercase tracking-wider text-blue-100">
-              Take Home Pay Terakhir · {slipTerbaru.periode}
+            <span className="text-xs font-bold text-blue-950">
+              Slip Gaji · {slipTerbaru.periode}
             </span>
-            <span className="text-2xs font-bold uppercase tracking-wider text-emerald-300">
+            <span className="text-2xs font-bold rounded-full bg-blue-50 px-2 py-1 text-blue-700">
               {slipTerbaru.status}
             </span>
           </div>
           <p className="text-3xl font-bold tracking-tight tabular-nums">
             {formatRupiah(slipTerbaru.takeHomePay)}
           </p>
-          <p className="text-xs text-blue-100">
+          <p className="text-xs text-slate-600">
             {slipTerbaru.nama} · PPh 21 ({slipTerbaru.metodePph21})
           </p>
           <button
             type="button"
             onClick={() => setSlipDipilih(slipTerbaru)}
-            className="min-h-[44px] w-full rounded-xl bg-white hover:bg-blue-50 text-xs font-bold text-blue-800 inline-flex items-center justify-center gap-1.5 cursor-pointer transition"
+            className="mobile-outline w-full"
           >
             <ReceiptText className="w-4 h-4" />
             Lihat Rincian Komponen Gaji
           </button>
+          <button type="button" disabled className="mobile-outline w-full">Download PDF · Belum aktif</button>
         </section>
       )}
 
@@ -206,8 +207,8 @@ export const MobileSlipGajiView: React.FC<MobileSlipGajiViewProps> = ({
                 </div>
               </div>
 
-              <div className="rounded-xl bg-slate-900 text-white p-4 flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+              <div className="rounded-xl bg-blue-50 text-blue-950 p-4 flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider">
                   Take Home Pay
                 </span>
                 <span className="text-lg font-bold tabular-nums">

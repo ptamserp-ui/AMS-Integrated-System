@@ -3,6 +3,9 @@ import { createElement, type ComponentProps } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MobileHomeView } from '../../src/components/mobile/MobileHomeView';
 import { MobileAbsensiView } from '../../src/components/mobile/MobileAbsensiView';
+import { MobileShiftCutiView } from '../../src/components/mobile/MobileShiftCutiView';
+import MobileUnavailableView from '../../src/components/mobile/MobileUnavailableView';
+import { buatManifestDefault, saringHanyaDataUser } from '../../src/utils/dataOrigin';
 import {
   findKaryawanForSession,
   getMobileCapabilities,
@@ -137,48 +140,43 @@ describe('Mobile App — Utilitas HRIS, Cuti & Server Self-Service Sync', () => 
     const karyawan = INITIAL_KARYAWAN_HRIS[0];
     const props: ComponentProps<typeof MobileHomeView> = {
       namaPengguna: 'Pegawai Uji',
-      capabilities: getMobileCapabilities(buatSesiUji('karyawan', {})),
+      namaPeran: 'Karyawan',
       karyawan,
       absensiList: [],
-      shiftList: [],
-      cutiList: [],
-      slipList: [],
-      prospekList: [],
-      kunjunganList: [],
-      praOrderList: [],
-      tenderList: [],
-      statusKoneksiLabel: 'Offline',
-      pocketbaseOnline: false,
       onNavigate: () => {}
     };
 
-    it('menampilkan modul yang tersedia tanpa slip terbatas atau fitur referensi yang belum ada', () => {
+    it('menampilkan enam menu referensi tanpa pintasan CRM/Sales atau angka absensi contoh', () => {
       const html = renderToStaticMarkup(createElement(MobileHomeView, props));
       expect(html).toContain('Menu Modul');
-      expect(html).toContain('Profil Saya');
       expect(html).toContain('Jadwal Kerja');
-      expect(html).not.toContain('Slip Gaji');
-      expect(html).not.toContain('Reimburse');
-      expect(html).not.toContain('Tugas &amp; KPI');
+      expect(html).toContain('Slip Gaji');
+      expect(html).toContain('Reimburse');
+      expect(html).toContain('Tugas &amp; KPI');
       expect(html).not.toContain('Pre-Order');
       expect(html).toContain('--:--');
       expect(html).toContain('Belum ada catatan absensi hari ini');
-      expect(html).toMatch(/disabled=""[^>]*>.*?Absen Pulang/s);
+      expect(html).toMatch(/disabled=""[^>]*>.*?Clock Out/s);
+      expect(html).not.toContain('Kunjungan');
     });
 
-    it('mempertahankan pintasan CRM/Sales dan slip berdasarkan capability yang sudah ada', () => {
-      const html = renderToStaticMarkup(createElement(MobileHomeView, {
-        ...props,
-        capabilities: { ...props.capabilities, isSales: true, canViewAllEmployees: true }
-      }));
-      expect(html).toContain('Kunjungan');
-      expect(html).toContain('Pre-Order');
-      expect(html).toContain('Slip Gaji');
+    it('fitur belum tersedia dinyatakan belum aktif tanpa klaim pembayaran atau KPI contoh', () => {
+      for (const fitur of ['tugas', 'pesan', 'performa', 'reimburse'] as const) {
+        const html = renderToStaticMarkup(createElement(MobileUnavailableView, { fitur }));
+        expect(html).toContain('Belum aktif');
+        expect(html).not.toContain('85%');
+        expect(html).not.toContain('Sudah Dibayar');
+      }
     });
 
-    it('tidak menampilkan shift milik orang lain sebagai shift aktif pengguna', () => {
-      const html = renderToStaticMarkup(createElement(MobileHomeView, {
-        ...props,
+    it('jadwal hanya menampilkan tim pengguna tanpa fallback jadwal orang lain', () => {
+      const html = renderToStaticMarkup(createElement(MobileShiftCutiView, {
+        karyawan,
+        mode: 'jadwal',
+        cutiList: [],
+        canApproveLeave: false,
+        approverName: karyawan.nama,
+        onRefresh: () => {},
         shiftList: [{
           id: 'SHIFT-ORANG-LAIN',
           namaShift: 'Shift 1 (07.00-15.00)',
@@ -190,7 +188,29 @@ describe('Mobile App — Utilitas HRIS, Cuti & Server Self-Service Sync', () => 
         }]
       }));
       expect(html).not.toContain('Area Orang Lain');
-      expect(html).toContain('Lihat jadwal shift');
+      expect(html).toContain('Belum ada jadwal shift');
+    });
+
+    it('menyaring data contoh tanpa menghapus master baru atau seed yang diedit pengguna', () => {
+      const edited = { ...karyawan, nama: 'Nama Diperbarui Pengguna' };
+      const added = { ...karyawan, id: 'EMP-NEW', nama: 'Karyawan Baru' };
+      const input = [INITIAL_KARYAWAN_HRIS[1], edited, added];
+      localStorage.setItem('ams_alkes_hris_karyawan', JSON.stringify(input));
+      const stored = localStorage.getItem('ams_alkes_hris_karyawan');
+      expect(saringHanyaDataUser('hris_karyawan', input, buatManifestDefault())).toEqual([edited, added]);
+      expect(localStorage.getItem('ams_alkes_hris_karyawan')).toBe(stored);
+      expect(input).toHaveLength(3);
+    });
+
+    it('formulir cuti inline tidak menampilkan kuota 12 hari sebagai saldo nyata', () => {
+      const html = renderToStaticMarkup(createElement(MobileShiftCutiView, {
+        karyawan, mode: 'cuti', shiftList: [], cutiList: [], canApproveLeave: false,
+        approverName: karyawan.nama, onRefresh: () => {}
+      }));
+      expect(html).toContain('Tanggal Mulai');
+      expect(html).toContain('Ajukan Permohonan');
+      expect(html).toContain('Saldo belum dikonfigurasi');
+      expect(html).not.toContain('12 hari');
     });
 
     it('ringkasan absensi hanya menghitung catatan pengguna pada bulan berjalan', () => {
@@ -232,6 +252,25 @@ describe('Mobile App — Utilitas HRIS, Cuti & Server Self-Service Sync', () => 
     expect(hitungJumlahHariCuti('2026-11-16', '2026-11-18')).toBe(3);
     expect(hitungJumlahHariCuti('2026-11-18', '2026-11-16')).toBe(0);
     expect(hitungJumlahHariCuti('', '2026-11-16')).toBe(0);
+  });
+
+  it('penyimpanan HRIS strict untuk UI mobile tidak melaporkan sukses saat storage gagal', () => {
+    const asli = localStorage.setItem.bind(localStorage);
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      if (key.endsWith('hris_absensi') || key.endsWith('hris_cuti')) throw new Error('Storage penuh');
+      asli(key, value);
+    });
+    try {
+      expect(() => db.saveAbsensi([], true)).toThrow('Storage penuh');
+      expect(() => db.saveCuti([], true)).toThrow('Storage penuh');
+      expect(() => db.checkOutAbsensi('ABS-TIDAK-ADA', '17:00', undefined, true)).toThrow('Catatan absensi tidak ditemukan');
+      expect(() => db.ubahStatusCuti('CUTI-TIDAK-ADA', 'Disetujui', 'HRD', true)).toThrow('Pengajuan cuti tidak ditemukan');
+      expect(errorLog).toHaveBeenCalled();
+    } finally {
+      storage.mockRestore();
+      errorLog.mockRestore();
+    }
   });
 
   it('findKaryawanForSession hanya memilih ID karyawan yang ditautkan secara eksplisit', () => {

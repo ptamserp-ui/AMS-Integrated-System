@@ -30,10 +30,10 @@ export const MobilePreviewModal: React.FC<MobilePreviewModalProps> = ({
           </div>
           <div className="min-w-0">
             <p className="text-xs font-bold leading-tight truncate">
-              Preview AMS Mobile App (HRIS &amp; CRM)
+              Preview Employee ERP · Dashboard Karyawan
             </p>
             <p className="text-2xs text-slate-400 font-mono truncate">
-              /mobile · Terhubung PocketBase AMS &amp; Real-Time Sync
+              /mobile · Data HRIS &amp; Sinkronisasi Server AMS
             </p>
           </div>
         </div>
@@ -106,7 +106,7 @@ export const MobilePreviewModal: React.FC<MobilePreviewModalProps> = ({
         <iframe
           key={reloadKey}
           src="/mobile"
-          title="Preview AMS Mobile App (HRIS & CRM)"
+          title="Preview Employee ERP Dashboard Karyawan"
           allow="geolocation *"
           className="w-full flex-1 bg-slate-50 border-0"
         />

@@ -11,6 +11,16 @@
 };
 
 .ams-mobile {
+  font-family: 'Open Sans', system-ui, sans-serif;
+  --brand: #0065dc;
+  --brand-aksen: #0055bb;
+  --color-blue-50: #f0f5ff;
+  --color-blue-100: #e0ecff;
+  --color-blue-500: #168bff;
+  --color-blue-600: #0065dc;
+  --color-blue-700: #0055bb;
+  --color-blue-800: #08417c;
+  --color-blue-950: #0b2247;
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 14px;
@@ -20,6 +30,62 @@
   --text-2xl: 24px;
   --text-3xl: 28px;
   --text-4xl: 34px;
+}
+
+.ams-mobile .mobile-card {
+  border: 1px solid var(--color-blue-100);
+  border-radius: 16px;
+  background: white;
+  padding: 16px;
+  box-shadow: 0 3px 12px rgb(11 34 71 / 4%);
+}
+
+.ams-mobile .mobile-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid var(--color-blue-100);
+  border-radius: 10px;
+  background: white;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.ams-mobile .mobile-primary,
+.ams-mobile .mobile-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ams-mobile .mobile-primary {
+  background: var(--brand);
+  color: white;
+}
+
+.ams-mobile .mobile-primary:hover:not(:disabled) {
+  background: var(--brand-aksen);
+}
+
+.ams-mobile .mobile-outline {
+  border: 1px solid var(--color-blue-100);
+  background: white;
+  color: var(--color-blue-700);
+}
+
+.ams-mobile .mobile-primary:disabled,
+.ams-mobile .mobile-outline:disabled {
+  opacity: .5;
+  cursor: not-allowed;
 }
 
 .ams-mobile button:focus-visible,

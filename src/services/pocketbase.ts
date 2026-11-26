@@ -2681,15 +2681,16 @@ export class AMSDatabaseManager {
   public getAbsensi(): LogAbsensi[] {
     return this.getCollection<LogAbsensi>('hris_absensi', INITIAL_ABSENSI);
   }
-  public saveAbsensi(items: LogAbsensi[]) {
-    this.setCollection('hris_absensi', items);
+  public saveAbsensi(items: LogAbsensi[], throwOnFailure = false) {
+    this.setCollection('hris_absensi', items, throwOnFailure);
   }
-  public addAbsensi(item: LogAbsensi) {
+  public addAbsensi(item: LogAbsensi, throwOnFailure = false) {
     const current = this.getAbsensi();
-    this.saveAbsensi([item, ...current]);
+    this.saveAbsensi([item, ...current], throwOnFailure);
   }
-  public checkOutAbsensi(id: string, jamKeluar: string, lokasiKeluar?: string) {
+  public checkOutAbsensi(id: string, jamKeluar: string, lokasiKeluar?: string, throwOnFailure = false) {
     const current = this.getAbsensi();
+    if (throwOnFailure && !current.some((a) => a.id === id)) throw new Error('Catatan absensi tidak ditemukan. Muat ulang data sebelum mencoba lagi.');
     const updated = current.map((a) =>
       a.id === id
         ? {
@@ -2699,23 +2700,24 @@ export class AMSDatabaseManager {
           }
         : a
     );
-    this.saveAbsensi(updated);
+    this.saveAbsensi(updated, throwOnFailure);
   }
 
   public getCuti(): PengajuanCuti[] {
     return this.getCollection<PengajuanCuti>('hris_cuti', INITIAL_CUTI);
   }
-  public saveCuti(items: PengajuanCuti[]) {
-    this.setCollection('hris_cuti', items);
+  public saveCuti(items: PengajuanCuti[], throwOnFailure = false) {
+    this.setCollection('hris_cuti', items, throwOnFailure);
   }
-  public addCuti(item: PengajuanCuti) {
+  public addCuti(item: PengajuanCuti, throwOnFailure = false) {
     const current = this.getCuti();
-    this.saveCuti([item, ...current]);
+    this.saveCuti([item, ...current], throwOnFailure);
     this.logAudit('HRIS — Cuti & Izin', `Pengajuan ${item.jenis} (${item.jumlahHari} hari)`, item.id, item.namaKaryawan, 'Karyawan');
   }
-  public ubahStatusCuti(id: string, status: PengajuanCuti['status'], penyetuju: string) {
+  public ubahStatusCuti(id: string, status: PengajuanCuti['status'], penyetuju: string, throwOnFailure = false) {
     const current = this.getCuti();
     const lama = current.find((c) => c.id === id);
+    if (throwOnFailure && !lama) throw new Error('Pengajuan cuti tidak ditemukan. Muat ulang data sebelum mencoba lagi.');
     if (!lama || lama.status === status) return;
     this.saveCuti(
       current.map((c) =>
@@ -2726,7 +2728,8 @@ export class AMSDatabaseManager {
               disetujuiOleh: status === 'Disetujui' || status === 'Ditolak' ? penyetuju : c.disetujuiOleh
             }
           : c
-      )
+      ),
+      throwOnFailure
     );
     this.logAudit('HRIS — Cuti & Izin', `Keputusan cuti ${status} oleh ${penyetuju}`, id, penyetuju, 'Manajemen HRIS', [
       { kolom: 'status', nilaiLama: lama.status, nilaiBaru: status }

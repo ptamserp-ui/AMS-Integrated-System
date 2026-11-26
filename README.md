@@ -65,7 +65,7 @@ Menu ERP mencakup modul dan ruang kerja berikut:
 
 - **Customer Portal (`/akun`)** memiliki autentikasi dan sesi terpisah dari ERP. Akun customer dapat mengakses katalog, keranjang dan profil; akun yang ditautkan dapat mengajukan permintaan penawaran.
 - Penetapan dan persetujuan harga, faktur, serta pembayaran portal masih dalam pengembangan. Aktivasi dan pengujian staging harus mengikuti [status Customer Portal](docs/customer-portal.md).
-- **Mobile (`/mobile`)** menyediakan tampilan aplikasi untuk perangkat bergerak. Cakupan fungsi dan penggunaan operasional tetap perlu diuji di lingkungan target.
+- **Mobile (`/mobile`)** memakai dashboard Employee ERP: Absensi, Cuti & Izin, Slip Gaji, Reimburse, Tugas & KPI, Jadwal Kerja; navigasi Beranda/Tugas/Pesan/Performa/Profil. CRM/Sales mobile lama dihapus, data/modul desktop dipertahankan. Data contoh disaring hanya dari tampilan tanpa purge; fitur belum terhubung diberi status belum aktif, termasuk slip reguler, selfie, peta, PDF, reimbursement, tugas/KPI dan pesan. Detail serta batas pengujian ada di [Blueprint Employee Dashboard](docs/blueprint-employee-dashboard.md#riwayat-adaptasi-mobile); penggunaan operasional tetap perlu UAT.
 
 ---
 
