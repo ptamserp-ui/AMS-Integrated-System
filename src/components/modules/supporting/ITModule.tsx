@@ -4,7 +4,6 @@ import { db } from '../../../services/pocketbase';
 import type { LogAuditTrail, UserRole } from '../../../types';
 import { 
   Cpu, 
-  Terminal, 
   Database, 
   ShieldCheck, 
   Check, 
@@ -91,7 +90,7 @@ interface DbConfigResponse {
   };
 }
 
-export type ITSubTabId = 'traceability' | 'audit' | 'user-roles' | 'deployment';
+export type ITSubTabId = 'traceability' | 'audit' | 'user-roles';
 
 export interface ITModuleProps {
   currentRole?: UserRole;
@@ -457,8 +456,7 @@ export default function ITModule({
         items={[
           'Jejak audit dan rantai hash jurnal/pergerakan dihitung & disimpan di perangkat (localStorage). Menghapus data situs menghapus catatannya — ini bukan immutable storage di server.',
           'Kecepatan langganan PocketBase yang ditampilkan modul ini adalah hasil pengecekan lokal (health.check), bukan pengukuran SLA server; tanpa server aktif tampil "Mode Cache Lokal".',
-          'Ekspor CSV ALCOA+ yang dihasilkan di sini adalah berkas lokal dari data perangkat ini, bukan keluaran sistem teraudit pihak ketiga.',
-          'Panduan deployment bersifat informasi; backup, kondisi checkout dan verifikasi target tetap memerlukan pemeriksaan operator.'
+          'Ekspor CSV ALCOA+ yang dihasilkan di sini adalah berkas lokal dari data perangkat ini, bukan keluaran sistem teraudit pihak ketiga.'
         ]}
       />
       {/* Toast Notifikasi Ekspor Berhasil */}
@@ -494,7 +492,7 @@ export default function ITModule({
             Information Technology (IT) & Traceability Hub
           </h2>
           <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-            Informasi penyimpanan dan sinkronisasi, ekspor audit CSV, serta panduan deployment Linux.
+            Informasi penyimpanan dan sinkronisasi, jejak audit digital, serta pengelolaan pengguna dan peran.
           </p>
         </div>
 
@@ -606,18 +604,6 @@ export default function ITModule({
         </button>
         )}
 
-        <button
-          type="button"
-          onClick={() => setActiveTab('deployment')}
-          className={`pb-3 px-3 font-semibold transition-colors border-b-2 flex items-center gap-2 whitespace-nowrap shrink-0 cursor-pointer ${
-            activeTab === 'deployment'
-              ? 'border-blue-600 text-blue-700'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Terminal className="w-4 h-4" />
-          Panduan Deployment Linux
-        </button>
       </div>
 
       {/* Tab 0: Manajemen RBAC Server / User Account & Roles */}
@@ -1272,14 +1258,6 @@ export default function ITModule({
               </table>
             </div>
           </div>
-        </div>
-      )}
-
-      {activeTab === 'deployment' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-3 text-xs text-slate-700">
-          <h3 className="font-bold text-sm text-slate-900">Panduan Deployment Linux</h3>
-          <p>Gunakan panduan deployment Linux dan script deploy-linux.ps1 di repository. Deployment memerlukan persetujuan operator dan pemeriksaan checkout serta backup terlebih dahulu.</p>
-          <p>Perubahan source tidak otomatis mengubah database aplikasi. Migrasi PostgreSQL dan cutover masih memerlukan integrasi dan verifikasi terpisah.</p>
         </div>
       )}
 

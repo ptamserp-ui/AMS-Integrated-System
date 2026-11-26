@@ -53,7 +53,7 @@ Menu ERP mencakup modul dan ruang kerja berikut:
     - **Daftar Kode Akun**: 180 akun referensi awal, dokumen acuan lengkap, pencarian serta tambah/edit dengan izin update Finance. Perubahan diantrekan ke server; daftar ini tidak mengganti CoA/jurnal aktif. Panduan: [daftar-kode-akun.md](docs/daftar-kode-akun.md).
     - Tarif dan hasil perhitungan perlu ditinjau terhadap ketentuan serta data perusahaan; integrasi live e-Faktur/DJP belum dibuktikan.
 14. **IT & Traceability Hub**
-    - Informasi penyimpanan dan sinkronisasi, pengelolaan pengguna dan peran, ekspor audit, serta panduan deployment.
+    - Informasi penyimpanan dan sinkronisasi, pengelolaan pengguna dan peran, serta ekspor audit. Panduan deployment ditujukan bagi operator melalui dokumentasi repository, bukan submenu aplikasi.
     - Rantai hash untuk sebagian data tersedia; penyimpanan audit menyeluruh yang immutable belum dibuktikan.
 15. **Internal Document**
     - Ruang kerja dokumen internal dan formulir terkendali, termasuk penerbitan quotation.
