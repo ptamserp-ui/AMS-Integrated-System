@@ -28,9 +28,9 @@ export const MobileSlipGajiView: React.FC<MobileSlipGajiViewProps> = ({
   return (
     <div className="space-y-4">
       {slipTerbaru && (
-        <section className="rounded-2xl bg-slate-900 text-white p-5 space-y-3 shadow-sm">
+        <section className="rounded-3xl bg-gradient-to-br from-blue-800 to-blue-600 text-white p-5 space-y-3 shadow-lg shadow-blue-900/10">
           <div className="flex items-center justify-between">
-            <span className="text-2xs font-bold uppercase tracking-wider text-slate-400">
+            <span className="text-2xs font-bold uppercase tracking-wider text-blue-100">
               Take Home Pay Terakhir · {slipTerbaru.periode}
             </span>
             <span className="text-2xs font-bold uppercase tracking-wider text-emerald-300">
@@ -40,13 +40,13 @@ export const MobileSlipGajiView: React.FC<MobileSlipGajiViewProps> = ({
           <p className="text-3xl font-bold tracking-tight tabular-nums">
             {formatRupiah(slipTerbaru.takeHomePay)}
           </p>
-          <p className="text-xs text-slate-300">
+          <p className="text-xs text-blue-100">
             {slipTerbaru.nama} · PPh 21 ({slipTerbaru.metodePph21})
           </p>
           <button
             type="button"
             onClick={() => setSlipDipilih(slipTerbaru)}
-            className="min-h-[44px] w-full rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold text-white inline-flex items-center justify-center gap-1.5 cursor-pointer transition"
+            className="min-h-[44px] w-full rounded-xl bg-white hover:bg-blue-50 text-xs font-bold text-blue-800 inline-flex items-center justify-center gap-1.5 cursor-pointer transition"
           >
             <ReceiptText className="w-4 h-4" />
             Lihat Rincian Komponen Gaji

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BriefcaseBusiness,
   CalendarClock,
+  ChevronLeft,
   Crosshair,
   Home,
   ReceiptText,
@@ -81,6 +82,10 @@ export default function MobileApp() {
   const alasanTahan = useSyncHoldReason();
 
   const identitasVisual = useIdentitasVisualAplikasi();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [tabAktif, hrisSubTab, crmSubTab, salesSubTab]);
 
   useEffect(() => {
     terapkanFaviconAplikasi(identitasVisual.faviconUrl || identitasVisual.logoUrl);
@@ -270,6 +275,16 @@ export default function MobileApp() {
       ];
 
   const namaPemakai = karyawanAktif?.nama || sesi?.namaLengkap || 'Pengguna AMS';
+  const judulHalaman: Record<MobileTabId, string> = {
+    beranda: 'AMS Mobile',
+    absensi: 'Absensi & Lokasi',
+    'shift-cuti': 'Cuti & Jadwal Kerja',
+    'slip-gaji': 'Slip Gaji',
+    hris: 'Layanan HRIS',
+    crm: 'CRM & Kunjungan',
+    penjualan: 'Penjualan',
+    profil: 'Profil Saya'
+  };
 
   if (memeriksaSesi) {
     return (
@@ -320,17 +335,23 @@ export default function MobileApp() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div className="ams-mobile min-h-screen bg-blue-50/60 text-slate-900">
       {/* Sticky Top Header */}
-      <header className="sticky top-0 z-30 h-13 border-b border-slate-200 bg-white/95 backdrop-blur-sm">
-        <div className="mx-auto flex h-full max-w-5xl items-center justify-between gap-3 px-4">
+      <header className="sticky top-0 z-30 border-b border-blue-700 bg-blue-800 text-white pt-[env(safe-area-inset-top)]">
+        <div className="mx-auto flex min-h-16 max-w-3xl items-center justify-between gap-3 px-4">
           <div className="flex items-center gap-2.5 min-w-0">
-            <LogoAplikasi ukuran="sm" />
+            {tabAktif === 'beranda' ? <LogoAplikasi ukuran="sm" /> : (
+              <button type="button" onClick={() => setTabAktif('beranda')}
+                aria-label="Kembali ke beranda"
+                className="min-h-[44px] min-w-[44px] rounded-xl bg-white/10 flex items-center justify-center hover:bg-white/20">
+                <ChevronLeft className="h-5 w-5" />
+              </button>
+            )}
             <div className="min-w-0">
-              <p className="text-sm font-bold text-slate-900 leading-none truncate">
-                AMS Mobile
-              </p>
-              <p className="text-2xs text-slate-500 truncate mt-0.5">
+              <h1 className="text-sm font-bold leading-none truncate">
+                {judulHalaman[tabAktif]}
+              </h1>
+              <p className="text-2xs text-blue-100 truncate mt-1">
                 {capabilities.isSales ? 'HRIS · CRM · Sales' : 'HRIS Karyawan'}
               </p>
             </div>
@@ -344,16 +365,16 @@ export default function MobileApp() {
               disabled={syncingPb}
               aria-label="Sinkronkan PocketBase AMS"
               title="Sinkronkan PocketBase AMS & Server Real-Time"
-              className="min-h-[40px] min-w-[40px] rounded-xl border border-slate-200 bg-white flex items-center justify-center text-slate-700 hover:bg-slate-50 disabled:opacity-60 transition cursor-pointer"
+              className="min-h-[44px] min-w-[44px] rounded-xl border border-white/20 bg-white/10 flex items-center justify-center text-white hover:bg-white/20 disabled:opacity-60 transition cursor-pointer"
             >
-              <RefreshCw className={`w-4 h-4 ${syncingPb ? 'animate-spin text-teal-700' : ''}`} />
+              <RefreshCw className={`w-4 h-4 ${syncingPb ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto w-full max-w-5xl px-4 pb-24 pt-4">
+      <main className="mx-auto w-full max-w-3xl px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4">
         {conn.lastSyncError && (
           <div role="alert" className="mb-4 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-xs text-rose-900">
             Sinkronisasi belum berhasil: {conn.lastSyncError}. Perubahan tetap tertunda; periksa data atau hubungi administrator.
@@ -520,9 +541,9 @@ export default function MobileApp() {
       {/* Fixed Bottom Navigation */}
       <nav
         aria-label="Navigasi Mobile AMS"
-        className="fixed bottom-0 left-0 right-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-sm pb-[env(safe-area-inset-bottom)]"
+        className="fixed bottom-0 left-0 right-0 z-40 rounded-t-2xl border-t border-blue-100 bg-white/95 shadow-[0_-4px_20px_rgb(25_56_86_/_0.06)] backdrop-blur-sm pb-[env(safe-area-inset-bottom)]"
       >
-        <div className="mx-auto grid h-16 max-w-5xl grid-cols-5">
+        <div className={`mx-auto grid h-16 max-w-3xl ${daftarTabBawah.length === 4 ? 'grid-cols-4' : 'grid-cols-5'}`}>
           {daftarTabBawah.map((item) => {
             const Icon = item.icon;
             const aktif = tabAktif === item.id;
@@ -531,11 +552,14 @@ export default function MobileApp() {
                 key={item.id}
                 type="button"
                 onClick={() => setTabAktif(item.id)}
+                aria-current={aktif ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center gap-0.5 text-2xs font-bold transition cursor-pointer ${
-                  aktif ? 'text-teal-700' : 'text-slate-500 hover:text-slate-800'
+                  aktif ? 'text-blue-600' : 'text-slate-600 hover:text-blue-800'
                 }`}
               >
-                <Icon className={`w-5 h-5 ${aktif ? 'stroke-[2.4]' : 'stroke-[1.9]'}`} />
+                <span className={`rounded-xl px-3 py-1 ${aktif ? 'bg-blue-50' : ''}`}>
+                  <Icon className={`w-5 h-5 ${aktif ? 'stroke-[2.4]' : 'stroke-[1.9]'}`} />
+                </span>
                 <span className="truncate max-w-full px-1">{item.label}</span>
               </button>
             );

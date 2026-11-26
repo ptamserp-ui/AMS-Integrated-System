@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createElement, type ComponentProps } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MobileHomeView } from '../../src/components/mobile/MobileHomeView';
+import { MobileAbsensiView } from '../../src/components/mobile/MobileAbsensiView';
 import {
   findKaryawanForSession,
   getMobileCapabilities,
@@ -127,6 +131,100 @@ function pasangLocalStorageMock() {
 describe('Mobile App — Utilitas HRIS, Cuti & Server Self-Service Sync', () => {
   beforeEach(() => {
     pasangLocalStorageMock();
+  });
+
+  describe('Mobile App — Adaptasi Employee ERP', () => {
+    const karyawan = INITIAL_KARYAWAN_HRIS[0];
+    const props: ComponentProps<typeof MobileHomeView> = {
+      namaPengguna: 'Pegawai Uji',
+      capabilities: getMobileCapabilities(buatSesiUji('karyawan', {})),
+      karyawan,
+      absensiList: [],
+      shiftList: [],
+      cutiList: [],
+      slipList: [],
+      prospekList: [],
+      kunjunganList: [],
+      praOrderList: [],
+      tenderList: [],
+      statusKoneksiLabel: 'Offline',
+      pocketbaseOnline: false,
+      onNavigate: () => {}
+    };
+
+    it('menampilkan modul yang tersedia tanpa slip terbatas atau fitur referensi yang belum ada', () => {
+      const html = renderToStaticMarkup(createElement(MobileHomeView, props));
+      expect(html).toContain('Menu Modul');
+      expect(html).toContain('Profil Saya');
+      expect(html).toContain('Jadwal Kerja');
+      expect(html).not.toContain('Slip Gaji');
+      expect(html).not.toContain('Reimburse');
+      expect(html).not.toContain('Tugas &amp; KPI');
+      expect(html).not.toContain('Pre-Order');
+      expect(html).toContain('--:--');
+      expect(html).toContain('Belum ada catatan absensi hari ini');
+      expect(html).toMatch(/disabled=""[^>]*>.*?Absen Pulang/s);
+    });
+
+    it('mempertahankan pintasan CRM/Sales dan slip berdasarkan capability yang sudah ada', () => {
+      const html = renderToStaticMarkup(createElement(MobileHomeView, {
+        ...props,
+        capabilities: { ...props.capabilities, isSales: true, canViewAllEmployees: true }
+      }));
+      expect(html).toContain('Kunjungan');
+      expect(html).toContain('Pre-Order');
+      expect(html).toContain('Slip Gaji');
+    });
+
+    it('tidak menampilkan shift milik orang lain sebagai shift aktif pengguna', () => {
+      const html = renderToStaticMarkup(createElement(MobileHomeView, {
+        ...props,
+        shiftList: [{
+          id: 'SHIFT-ORANG-LAIN',
+          namaShift: 'Shift 1 (07.00-15.00)',
+          area: 'Area Orang Lain',
+          tanggalMulai: '2020-01-01',
+          tanggalBerakhir: '2099-12-31',
+          polaRotasi: 'Harian',
+          tim: ['Pegawai Lain']
+        }]
+      }));
+      expect(html).not.toContain('Area Orang Lain');
+      expect(html).toContain('Lihat jadwal shift');
+    });
+
+    it('ringkasan absensi hanya menghitung catatan pengguna pada bulan berjalan', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-11-26T05:00:00Z'));
+      try {
+        const log = {
+          id: 'ABS-SELF',
+          karyawanId: karyawan.id,
+          nama: karyawan.nama,
+          tanggal: '2026-11-25',
+          jamMasuk: '08:00',
+          jamKeluar: '-',
+          sumber: 'Geofencing GPS (Mobile)' as const,
+          status: 'Hadir' as const,
+          lokasi: 'Kantor'
+        };
+        const html = renderToStaticMarkup(createElement(MobileAbsensiView, {
+          karyawan,
+          absensiList: [
+            log,
+            { ...log, id: 'ABS-OTHER', karyawanId: 'EMP-OTHER' },
+            { ...log, id: 'ABS-OLD', tanggal: '2026-10-25' }
+          ],
+          onRefresh: () => {}
+        }));
+        const ringkasan = html.split('aria-label="Ringkasan kehadiran bulan ini"')[1].split('</section>')[0];
+        expect(ringkasan).toContain('2026-11');
+        expect(ringkasan).toMatch(/>1<\/p><p[^>]*>Hadir<\/p>/);
+        expect(ringkasan).toMatch(/>0<\/p><p[^>]*>Terlambat<\/p>/);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('hitungJumlahHariCuti menghitung durasi inklusif secara akurat dan menolak rentang terbalik', () => {

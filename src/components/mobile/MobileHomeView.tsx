@@ -9,7 +9,10 @@ import {
   ReceiptText,
   ShoppingCart,
   Sparkles,
-  TrendingUp
+  TrendingUp,
+  UserCircle2,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import type {
   JadwalShift,
@@ -84,8 +87,8 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
 
   const shiftAktif = useMemo(() => {
     const cocok = shiftList.filter((s) => s.tim.includes(namaKaryawan));
-    return (cocok.length > 0 ? cocok : shiftList)[0] || null;
-  }, [shiftList, namaKaryawan]);
+    return cocok.find((s) => s.tanggalMulai <= hariIni && s.tanggalBerakhir >= hariIni) || null;
+  }, [shiftList, namaKaryawan, hariIni]);
 
   const cutiMenunggu = useMemo(
     () =>
@@ -129,62 +132,101 @@ export const MobileHomeView: React.FC<MobileHomeViewProps> = ({
   const keSlipGaji = () =>
     onNavigate(capabilities.isSales ? { tab: 'hris', sub: 'slip-gaji' } : { tab: 'slip-gaji' });
 
+  const sudahPulang = Boolean(logHariIni?.jamKeluar && logHariIni.jamKeluar !== '-');
+  const inisial = namaKaryawan.trim().split(/\s+/).slice(0, 2).map((bagian) => bagian[0]).join('');
+  const menuModul = [
+    { label: 'Absensi', icon: Crosshair, buka: keAbsensi },
+    { label: 'Cuti & Izin', icon: Sparkles, buka: keShiftCuti },
+    ...(capabilities.canViewAllEmployees
+      ? [{ label: 'Slip Gaji', icon: ReceiptText, buka: keSlipGaji }]
+      : []),
+    { label: 'Jadwal Kerja', icon: CalendarClock, buka: keShiftCuti },
+    ...(capabilities.isSales
+      ? [
+          { label: 'Kunjungan', icon: MapPin, buka: () => onNavigate({ tab: 'crm', sub: 'kunjungan' }) },
+          { label: 'Pre-Order', icon: ShoppingCart, buka: () => onNavigate({ tab: 'penjualan', sub: 'order' }) }
+        ]
+      : []),
+    { label: 'Profil Saya', icon: UserCircle2, buka: () => onNavigate({ tab: 'profil' }) }
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Greeting + Sync Banner */}
-      <section className="rounded-2xl bg-slate-900 text-white p-5 shadow-sm space-y-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-2xs font-bold uppercase tracking-wider text-teal-300">
-              {capabilities.roleLabel} · {formatTanggal(hariIni)}
-            </p>
-            <h2 className="text-xl font-bold tracking-tight mt-0.5 truncate">
-              Halo, {karyawan?.nama || namaPengguna}
-            </h2>
-            <p className="text-xs text-slate-300 truncate mt-0.5">
-              {karyawan?.jabatan || 'PT Anugrahmitra Selaras'} · {karyawan?.lokasi || 'Operasional AMS'}
-            </p>
-          </div>
-          <span
-            className={`shrink-0 rounded-md border px-2 py-1 text-2xs font-bold ${
-              pocketbaseOnline
-                ? 'border-emerald-400/40 bg-emerald-500/20 text-emerald-200'
-                : 'border-slate-600 bg-slate-800 text-slate-300'
-            }`}
-          >
-            {pocketbaseOnline ? 'PB AMS Aktif' : 'Sync Real-Time'}
-          </span>
-        </div>
-
-        <div className="rounded-xl bg-white/10 border border-white/10 p-3.5 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-2xs uppercase tracking-wider text-slate-300 font-bold">
-              Kehadiran Hari Ini
-            </p>
-            {logHariIni ? (
-              <p className="text-xs font-semibold text-white mt-0.5">
-                Masuk {logHariIni.jamMasuk}
-                {logHariIni.jamKeluar && logHariIni.jamKeluar !== '-'
-                  ? ` · Pulang ${logHariIni.jamKeluar}`
-                  : ' · Belum Pulang'}
-              </p>
-            ) : (
-              <p className="text-xs text-amber-200 mt-0.5">
-                Belum ada log absensi GPS hari ini
-              </p>
-            )}
-          </div>
+      <section className="rounded-3xl bg-gradient-to-br from-blue-800 via-blue-600 to-blue-500 text-white p-4 shadow-lg shadow-blue-900/10 space-y-3">
+        <div className="flex items-start gap-3">
           <button
             type="button"
-            onClick={keAbsensi}
-            className="min-h-[44px] shrink-0 rounded-xl bg-teal-500 hover:bg-teal-400 px-3.5 text-xs font-bold text-slate-950 inline-flex items-center gap-1.5 transition cursor-pointer"
+            onClick={() => onNavigate({ tab: 'profil' })}
+            aria-label="Buka profil saya"
+            className="h-12 w-12 shrink-0 rounded-full border-2 border-white/60 bg-white/15 text-lg font-bold flex items-center justify-center focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           >
-            <Crosshair className="w-4 h-4" />
-            {logHariIni ? 'Lihat Absensi' : 'Absen GPS'}
+            {inisial}
           </button>
+          <div className="min-w-0">
+            <p className="text-xs text-blue-100">
+              Selamat datang
+            </p>
+            <h2 className="text-lg font-bold tracking-tight mt-0.5 break-words">
+              {namaKaryawan}
+            </h2>
+            <p className="text-xs text-blue-100 mt-0.5">
+              {karyawan?.jabatan || capabilities.roleLabel}
+              {karyawan && ` · ID: ${karyawan.id}`}
+            </p>
+          </div>
         </div>
 
-        <p className="text-2xs text-slate-400">{statusKoneksiLabel}</p>
+        <div className="rounded-2xl bg-white/10 border border-white/20 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold">
+              Absensi Hari Ini
+            </p>
+            <span className="text-2xs text-blue-100">{formatTanggal(hariIni)}</span>
+          </div>
+          <p className="text-4xl font-bold text-center tabular-nums">
+            {sudahPulang ? logHariIni?.jamKeluar : logHariIni?.jamMasuk || '--:--'}
+          </p>
+          <p className="text-xs text-center text-blue-100">
+            {logHariIni
+              ? `Masuk ${logHariIni.jamMasuk} · ${sudahPulang ? `Pulang ${logHariIni.jamKeluar}` : logHariIni.status}`
+              : 'Belum ada catatan absensi hari ini'}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={keAbsensi}
+              className="min-h-[44px] rounded-xl bg-white px-2 text-xs font-bold text-blue-800 inline-flex items-center justify-center gap-1.5 hover:bg-blue-50">
+              <LogIn className="h-4 w-4" />
+              {logHariIni ? 'Lihat Absensi' : 'Absen Masuk'}
+            </button>
+            <button type="button" onClick={keAbsensi} disabled={!logHariIni || sudahPulang}
+              className="min-h-[44px] rounded-xl border border-white/40 bg-white/10 px-2 text-xs font-bold inline-flex items-center justify-center gap-1.5 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed">
+              <LogOut className="h-4 w-4" />
+              Absen Pulang
+            </button>
+          </div>
+          <p className="text-2xs text-blue-100 flex items-center gap-1.5">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            {karyawan?.lokasi || 'Lokasi kerja belum ditautkan'} · Verifikasi GPS di halaman absensi
+          </p>
+        </div>
+
+        <p className="text-2xs text-blue-100">
+          {pocketbaseOnline ? 'PB AMS Aktif · ' : ''}{statusKoneksiLabel}
+        </p>
+      </section>
+
+      <section aria-label="Menu modul mobile" className="space-y-3">
+        <h3 className="text-sm font-bold text-blue-950">Menu Modul</h3>
+        <div className="grid grid-cols-3 gap-3">
+          {menuModul.map(({ label, icon: Icon, buka }) => (
+            <button key={label} type="button" onClick={buka}
+              className="min-h-[96px] rounded-2xl border border-blue-100 bg-white p-3 shadow-sm shadow-blue-900/5 flex flex-col items-center justify-center gap-2 text-xs font-bold text-blue-950 hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+              <span className="h-10 w-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                <Icon className="h-5 w-5" />
+              </span>
+              {label}
+            </button>
+          ))}
+        </div>
       </section>
 
       {/* Ringkasan HRIS Personal */}

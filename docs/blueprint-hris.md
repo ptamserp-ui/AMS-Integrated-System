@@ -5,6 +5,8 @@
 Status: **Blueprint historis; implementasi dan integrasi parsial**
 
 Parent Document: `/docs/system-blueprint.md` (Domain: Supporting System — HRD & Pelatihan PJT)  
+Rancangan Employee Self-Service lintas modul: [Blueprint Employee Dashboard](./blueprint-employee-dashboard.md) — kebutuhan target, bukan klaim bahwa seluruh dashboard telah diimplementasikan.
+
 Sasaran Modul: `src/components/modules/supporting/HRDModule.tsx` (beserta 7 sub-modul HRIS di `src/components/modules/supporting/hris/`)  
 Kerangka Regulasi: Klausul 6.2 ISO 13485:2016 (Kompetensi Personel), Bab II CDAKB (Personalia), UU Ketenagakerjaan RI, UU Cipta Kerja, BPJS Kesehatan & Ketenagakerjaan, PPh 21.
 Coded by Langgo Bramandityo

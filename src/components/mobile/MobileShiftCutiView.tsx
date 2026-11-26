@@ -108,13 +108,13 @@ export const MobileShiftCutiView: React.FC<MobileShiftCutiViewProps> = ({
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs">
-          <p className="text-2xs font-bold uppercase tracking-wider text-slate-400">
+        <div className="rounded-2xl bg-gradient-to-br from-blue-700 to-blue-600 text-white p-3.5 shadow-sm">
+          <p className="text-2xs font-bold uppercase tracking-wider text-blue-100">
             Sisa Cuti
           </p>
-          <p className="text-xl font-bold text-slate-900 mt-1 tabular-nums">
+          <p className="text-xl font-bold mt-1 tabular-nums">
             {Math.max(jatahTahunan - terpakai, 0)}{' '}
-            <span className="text-xs font-semibold text-slate-500">hari</span>
+            <span className="text-xs font-semibold text-blue-100">hari</span>
           </p>
         </div>
         <div className="rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xs">

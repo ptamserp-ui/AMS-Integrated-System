@@ -61,6 +61,10 @@ export const MobileAbsensiView: React.FC<MobileAbsensiViewProps> = ({
   );
 
   const logHariIni = riwayatSaya.find((a) => a.tanggal === hariIni);
+  const catatanBulanIni = useMemo(
+    () => karyawan ? riwayatSaya.filter((a) => a.tanggal.slice(0, 7) === hariIni.slice(0, 7)) : [],
+    [riwayatSaya, hariIni, karyawan]
+  );
 
   const titikAktif =
     LOKASI_GEOFENCE_AMS.find((t) => t.id === titikTerpilihId) || defaultTitik;
@@ -235,7 +239,16 @@ export const MobileAbsensiView: React.FC<MobileAbsensiViewProps> = ({
           </select>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="h-12 w-12 shrink-0 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+              <MapPin className="h-6 w-6" />
+            </span>
+            <div>
+              <p className="text-sm font-bold text-blue-950">{titikAktif.nama}</p>
+              <p className="text-xs text-blue-700">Area absensi · Radius {titikAktif.radiusMeter} m</p>
+            </div>
+          </div>
           <div className="flex items-center justify-between gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700">
               <MapPin className="w-4 h-4 text-teal-700 shrink-0" />
@@ -317,12 +330,35 @@ export const MobileAbsensiView: React.FC<MobileAbsensiViewProps> = ({
             type="button"
             onClick={lakukanClockOut}
             disabled={!logHariIni || (logHariIni.jamKeluar !== '-' && logHariIni.jamKeluar !== '')}
-            className="h-12 rounded-xl border border-slate-300 bg-slate-900 text-white text-sm font-bold inline-flex items-center justify-center gap-2 hover:bg-slate-800 active:scale-[0.99] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="h-12 rounded-xl border border-blue-200 bg-blue-50 text-blue-800 text-sm font-bold inline-flex items-center justify-center gap-2 hover:bg-blue-100 active:scale-[0.99] transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <LogOut className="w-4 h-4" />
             {logHariIni && logHariIni.jamKeluar !== '-' ? `Pulang ${logHariIni.jamKeluar}` : 'Absen Pulang'}
           </button>
         </div>
+      </section>
+
+      <section aria-label="Ringkasan kehadiran bulan ini" className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-blue-950">Ringkasan Kehadiran</h3>
+          <span className="text-xs text-slate-600">{hariIni.slice(0, 7)}</span>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {([
+            { label: 'Hadir', status: ['Hadir'], warna: 'bg-emerald-50 text-emerald-800' },
+            { label: 'Terlambat', status: ['Terlambat'], warna: 'bg-blue-50 text-blue-800' },
+            { label: 'Izin/Sakit', status: ['Izin', 'Sakit'], warna: 'bg-amber-50 text-amber-800' },
+            { label: 'Mangkir', status: ['Mangkir'], warna: 'bg-rose-50 text-rose-800' }
+          ]).map(({ label, status, warna }) => (
+            <div key={label} className={`rounded-xl px-1 py-3 text-center ${warna}`}>
+              <p className="text-xl font-bold tabular-nums">
+                {catatanBulanIni.filter((a) => status.includes(a.status)).length}
+              </p>
+              <p className="text-2xs font-semibold">{label}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-2xs text-slate-600">Jumlah catatan bulan ini dari data absensi Anda, bukan perhitungan hari kerja atau saldo cuti.</p>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs">

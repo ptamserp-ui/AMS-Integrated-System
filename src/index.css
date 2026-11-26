@@ -10,6 +10,24 @@
   --brand-font: 'Quicksand', 'Google Sans', system-ui, sans-serif;
 };
 
+.ams-mobile {
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-3xl: 28px;
+  --text-4xl: 34px;
+}
+
+.ams-mobile button:focus-visible,
+.ams-mobile a:focus-visible {
+  outline: 2px solid var(--color-blue-400);
+  outline-offset: 3px;
+}
+
 /* =========================================================================
    FONT LOKAL (self-hosted) — Quicksand 400–700, JetBrains Mono 400–700,
    Open Sans 400–800. Berkas variable woff2 latin + latin-ext di public/fonts/.
