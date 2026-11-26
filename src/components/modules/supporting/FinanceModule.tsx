@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useState } from 'react';
 import DeveloperNotes from '../../common/DeveloperNotes';
 import ErrorBoundary from '../../common/ErrorBoundary';
 import type { UserRole } from '../../../types';
+import { punyaIzin, type SesiLogin } from '../../../utils/autentikasi';
 import { TANGGAL_ACUAN_BENIH, buatTanggalAcuan } from '../operations/gudang/ui';
 
 const DasborTab = lazy(() => import('./finance/DasborTab'));
@@ -11,6 +12,7 @@ const LaporanTab = lazy(() => import('./finance/LaporanTab'));
 const PajakTab = lazy(() => import('./finance/PajakTab'));
 const PeriodeTab = lazy(() => import('./finance/PeriodeTab'));
 const PersediaanTab = lazy(() => import('./finance/PersediaanTab'));
+const DaftarKodeAkunTab = lazy(() => import('./finance/DaftarKodeAkunTab'));
 import { type FinanceTabId, identitasPeranFinance } from './finance/ui';
 import { BarChart3, CalendarClock, type Coins, LayoutDashboard, PackageSearch, Plus, Receipt, ScrollText, Wallet } from 'lucide-react';
 
@@ -21,10 +23,11 @@ const DAFTAR_TAB: { id: FinanceTabId; nomor: number; label: string; ikon: typeof
   { id: 'laporan', nomor: 4, label: 'Neraca & Laba Rugi', ikon: BarChart3 },
   { id: 'persediaan', nomor: 5, label: 'Valuasi & Write-Off', ikon: PackageSearch },
   { id: 'pajak', nomor: 6, label: 'PPN, e-Faktur & Landed Cost', ikon: Receipt },
-  { id: 'periode', nomor: 7, label: 'Periode & Biaya Mutu', ikon: CalendarClock }
+  { id: 'periode', nomor: 7, label: 'Periode & Biaya Mutu', ikon: CalendarClock },
+  { id: 'kode-akun', nomor: 8, label: 'Daftar Kode Akun', ikon: ScrollText }
 ];
 
-export default function FinanceModule({ currentRole }: { currentRole?: UserRole }) {
+export default function FinanceModule({ currentRole, sesi }: { currentRole?: UserRole; sesi: SesiLogin }) {
   const [activeTab, setActiveTab] = useState<FinanceTabId>('faktur');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [bukaFormFaktur, setBukaFormFaktur] = useState(0);
@@ -77,7 +80,7 @@ export default function FinanceModule({ currentRole }: { currentRole?: UserRole 
         </button>
       </div>
 
-      {/* Strip 7 Tab (Pola WarehouseModule, aksen Blue khas Supporting) */}
+      {/* Strip Tab (Pola WarehouseModule, aksen Blue khas Supporting) */}
       <div className="flex items-center gap-1.5 border-b border-slate-200 text-xs overflow-x-auto">
         {DAFTAR_TAB.map((tab) => {
           const Ikon = tab.ikon;
@@ -138,6 +141,7 @@ export default function FinanceModule({ currentRole }: { currentRole?: UserRole 
             />
           )}
           {activeTab === 'pajak' && <PajakTab identitas={identitas} dariAcuan={dariAcuan} />}
+          {activeTab === 'kode-akun' && <DaftarKodeAkunTab bolehUbah={punyaIzin(sesi, 'finance-akuntansi', 'update')} aktor={sesi.namaLengkap || sesi.namaPengguna} />}
           {activeTab === 'periode' && (
             <PeriodeTab
               identitas={identitas}

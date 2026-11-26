@@ -220,6 +220,7 @@ export const KATALOG_KOLEKSI_DATA: readonly DefinisiKoleksiData[] = [
 
   // Master Sistem (Dipertahankan saat purge dummy)
   { key: 'keuangan_coa', label: 'Bagan Akun Standar (CoA)', modul: 'Finance & Accounting', kategori: 'master_sistem' },
+  { key: 'keuangan_referensi_akun', label: 'Daftar Kode Akun Referensi', modul: 'Finance & Accounting', kategori: 'konfigurasi_user' },
   { key: 'keuangan_periode', label: 'Periode Buku Akuntansi', modul: 'Finance & Accounting', kategori: 'master_sistem' },
   { key: 'keuangan_tetapan_pajak', label: 'Tetapan Tarif Pajak (PPN/PPh/PIB)', modul: 'Finance & Accounting', kategori: 'master_sistem' },
   { key: 'gudang_pengaturan', label: 'Konfigurasi Ambang & Endpoint Gudang', modul: 'Gudang & Logistik', kategori: 'master_sistem' },

@@ -3,6 +3,7 @@ import { db } from '../../../../services/pocketbase';
 import { useDbTick } from '../../../../hooks/useDbSync';
 import {
   KODE_AKUN,
+  cariTransaksiRujukanJurnal,
   csvEksporKpp,
   drafXmlEFaktur,
   hitungLandedCostImpor,
@@ -53,9 +54,9 @@ export default function PajakTab({ identitas, dariAcuan }: { identitas: Identita
     const keluar = jurnal.filter((j) => j.status === 'Posted' && j.sumberRujukan === 'FAKTUR_PENJUALAN' && j.tanggalTransaksi.startsWith(masa));
     const kredit = (j: (typeof keluar)[number], kode: string) => j.baris.filter((b) => b.akunKode === kode).reduce((a, b) => a + b.kredit, 0);
     return keluar.map((j) => {
-      const tagihan = transaksi.find((t) => t.nomorFaktur === j.idRujukan);
+      const tagihan = cariTransaksiRujukanJurnal(j.idRujukan, transaksi);
       return {
-        nomorFaktur: j.idRujukan,
+        nomorFaktur: tagihan?.nomorFaktur ?? `TIDAK DITEMUKAN (${j.idRujukan})`,
         tanggalFaktur: j.tanggalTransaksi,
         npwpPembeli: NPWP_BELUM_DICATAT,
         namaPembeli: tagihan?.fasyankesAtauPemasok ?? j.uraian,
@@ -67,6 +68,10 @@ export default function PajakTab({ identitas, dariAcuan }: { identitas: Identita
   }, [jurnal, transaksi, masa]);
 
   const tanpaNpwp = barisFaktur.filter((b) => b.npwpPembeli === NPWP_BELUM_DICATAT).length;
+  const rujukanTidakDitemukan = jurnal.filter(
+    (j) => j.status === 'Posted' && j.sumberRujukan === 'FAKTUR_PENJUALAN' &&
+      j.tanggalTransaksi.startsWith(masa) && !cariTransaksiRujukanJurnal(j.idRujukan, transaksi)
+  );
   const xml = drafXmlEFaktur(barisFaktur, '0000000000000000');
   const csv = csvEksporKpp(barisFaktur);
 
@@ -157,17 +162,23 @@ export default function PajakTab({ identitas, dariAcuan }: { identitas: Identita
         keterangan="Draf lokal saja. Sistem ini TIDAK terhubung ke DJP: tidak ada kode DJP, tidak ada pengajuan, dan berkasnya berlabel BELUM DIKIRIM KE DJP."
         aksi={
           <div className="flex items-center gap-1.5">
-            <button type="button" onClick={() => unduhTeks(`draf-efaktur-${masa}.xml`, xml, 'application/xml')} className={`${tombolSekunder} !px-2.5 !py-1`}>
+            <button type="button" disabled={rujukanTidakDitemukan.length > 0} onClick={() => unduhTeks(`draf-efaktur-${masa}.xml`, xml, 'application/xml')} className={`${tombolSekunder} !px-2.5 !py-1`}>
               <Download className="w-3.5 h-3.5" />
               Unduh Draf XML
             </button>
-            <button type="button" onClick={() => unduhTeks(`ekspor-kpp-${masa}.csv`, csv, 'text/csv')} className={`${tombolSekunder} !px-2.5 !py-1`}>
+            <button type="button" disabled={rujukanTidakDitemukan.length > 0} onClick={() => unduhTeks(`ekspor-kpp-${masa}.csv`, csv, 'text/csv')} className={`${tombolSekunder} !px-2.5 !py-1`}>
               <Download className="w-3.5 h-3.5" />
               Unduh CSV KPP
             </button>
           </div>
         }
       >
+        {rujukanTidakDitemukan.length > 0 && (
+          <div className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-xs text-rose-900">
+            Ekspor ditahan: {rujukanTidakDitemukan.length} jurnal memiliki rujukan faktur yang tidak ditemukan atau tidak unik.
+            Periksa transaksi dan jurnal terkait sebelum mengunduh draf.
+          </div>
+        )}
         {tanpaNpwp > 0 && (
           <div className="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-xs text-rose-900 flex items-start gap-2">
             <FileText className="w-4 h-4 mt-0.5 shrink-0" />

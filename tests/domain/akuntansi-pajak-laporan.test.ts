@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AkunCoA, PenarikanProduk, TransaksiKeuangan } from '../../src/types';
+import FakturTab from '../../src/components/modules/supporting/finance/FakturTab';
+import PajakTab from '../../src/components/modules/supporting/finance/PajakTab';
+import { db } from '../../src/services/pocketbase';
 import { INITIAL_COA, INITIAL_JURNAL_KEUANGAN, INITIAL_PERIODE_BUKU, INITIAL_VALUASI_BATCH } from '../../src/data/seedKeuangan';
 import { INITIAL_STOK_GUDANG } from '../../src/data/initialData';
 import {
@@ -8,6 +13,7 @@ import {
   type RancanganJurnal,
   alokasiBiayaMutu,
   bukuBesar,
+  cariTransaksiRujukanJurnal,
   csvEksporKpp,
   drafXmlEFaktur,
   gerbangPenagihanCdakb,
@@ -551,6 +557,55 @@ describe('rancangJurnalFaktur — perlakuan PPN adalah keputusan pemilik, bukan 
     expect(kalibrasi.baris.find((b) => b.akunKode === KODE_AKUN.BEBAN_KALIBRASI)?.pusatBiayaId).toBe('PB-QA');
     expect(kalibrasi.sumberRujukan).toBe('BEBAN_MUTU_KALIBRASI');
     expect(kalibrasi.baris.find((b) => b.akunKode === KODE_AKUN.HUTANG_USAHA)).toBeDefined();
+  });
+});
+
+describe('rujukan jurnal dan faktur pajak', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('menemukan transaksi dari ID jurnal atau nomor faktur legacy, dan menolak nomor ambigu', () => {
+    const item = transaksi();
+    expect(cariTransaksiRujukanJurnal(item.id, [item])).toEqual(item);
+    expect(cariTransaksiRujukanJurnal(item.nomorFaktur, [item])).toEqual(item);
+    expect(cariTransaksiRujukanJurnal(item.nomorFaktur, [item, { ...item, id: 'LAIN' }])).toBeUndefined();
+  });
+
+  it('menampilkan nomor faktur dari ID transaksi dan menahan unduhan untuk rujukan yang hilang', () => {
+    const item = transaksi();
+    const journal = {
+      ...INITIAL_JURNAL_KEUANGAN[0],
+      idRujukan: item.id,
+      tanggalTransaksi: '2024-06-10',
+      sumberRujukan: 'FAKTUR_PENJUALAN' as const,
+      status: 'Posted' as const
+    };
+    vi.spyOn(db, 'getJurnalKeuangan').mockReturnValue([journal]);
+    vi.spyOn(db, 'getTransaksi').mockReturnValue([item]);
+    vi.spyOn(db, 'getPeriodeBuku').mockReturnValue([{ ...INITIAL_PERIODE_BUKU[0], id: '2024-06', status: 'Terbuka' }]);
+    vi.spyOn(db, 'getTetapanPajak').mockReturnValue([]);
+    vi.spyOn(db, 'getSuratJalan').mockReturnValue([]);
+    const props = { identitas: { pengguna: 'Uji', peran: 'Finance', bolehPosting: true, bolehAjukanWriteOff: true }, dariAcuan: new Date('2024-06-15') };
+
+    const tampilanFaktur = renderToStaticMarkup(createElement(FakturTab, { ...props, bukaForm: 0, onPerubahanData: () => {} }));
+    expect(tampilanFaktur).toContain(journal.nomorJournal);
+    expect(tampilanFaktur).not.toContain('TANPA JURNAL');
+    const biaya = transaksi({ id: 'BEBAN-UJI', kategori: 'Biaya Uji Kalibrasi' });
+    vi.mocked(db.getTransaksi).mockReturnValue([biaya]);
+    vi.mocked(db.getJurnalKeuangan).mockReturnValue([{ ...journal, idRujukan: biaya.id, sumberRujukan: 'BEBAN_MUTU_KALIBRASI' }]);
+    const tampilanBiaya = renderToStaticMarkup(createElement(FakturTab, { ...props, bukaForm: 0, onPerubahanData: () => {} }));
+    expect(tampilanBiaya).not.toContain('TANPA JURNAL');
+    vi.mocked(db.getTransaksi).mockReturnValue([item]);
+    vi.mocked(db.getJurnalKeuangan).mockReturnValue([journal]);
+    const terkait = renderToStaticMarkup(createElement(PajakTab, props));
+    expect(terkait).toContain(item.nomorFaktur);
+    expect(terkait).not.toContain('Ekspor ditahan');
+    expect(terkait).not.toContain('TIDAK DITEMUKAN');
+
+    vi.mocked(db.getTransaksi).mockReturnValue([]);
+    const hilang = renderToStaticMarkup(createElement(PajakTab, props));
+    expect(hilang).toContain('Ekspor ditahan');
+    expect(hilang).toContain(`TIDAK DITEMUKAN (${item.id})`);
+    expect(hilang).toMatch(/<button[^>]*disabled[^>]*>[^<]*<[^>]*>.*?Unduh Draf XML/s);
   });
 });
 

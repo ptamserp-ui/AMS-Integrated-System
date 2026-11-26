@@ -108,6 +108,7 @@ export const SEARCH_COLLECTION_META: readonly SearchCollectionMeta[] = [
   { key: 'keuangan_valuasi_batch', label: 'Valuasi Biaya Batch', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
   { key: 'keuangan_jurnal', label: 'Jurnal Umum & Buku Besar', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
   { key: 'keuangan_coa', label: 'Bagan Akun (CoA)', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
+  { key: 'keuangan_referensi_akun', label: 'Daftar Kode Akun Referensi', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
   { key: 'keuangan_periode', label: 'Periode Buku Akuntansi', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
   { key: 'keuangan_tetapan_pajak', label: 'Tetapan Tarif Pajak', moduleId: 'finance-akuntansi', moduleLabel: 'Finance & Accounting' },
 

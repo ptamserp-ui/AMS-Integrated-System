@@ -167,6 +167,47 @@ describe('perlindungan antrean offline saat akses berubah', () => {
     vi.restoreAllMocks();
   });
 
+  it('mengirim daftar kode akun lengkap melalui antrean HTTP dan menerima pembaruan server', async () => {
+    const financeSession: SesiLogin = { ...session, permissions: { overview: ['view'], 'finance-akuntansi': ['view', 'update'] } };
+    setSession(financeSession);
+    manager.prepareSessionSync(financeSession);
+    await manager.syncFromServer(false);
+    offline();
+    const key = 'keuangan_referensi_akun';
+    const initial = manager.getReferensiKodeAkun()[0];
+    manager.simpanReferensiKodeAkun({ ...initial, nama: 'Akun Uji Sync' }, initial, 'Finance Uji');
+    expect(manager.getConnectionStatus().pendingKeys).toContain(key);
+    expect(storage.getItem(QUEUE_KEY)).toContain(key);
+    expect(sent).toHaveLength(0);
+
+    online();
+    await manager.syncFromServer(false);
+    const request = sent.find((entry) => entry.url === '/api/sync/batch');
+    expect(request?.init?.method).toBe('POST');
+    const body = JSON.parse(String(request?.init?.body));
+    expect(body.expectedVersions[key]).toBe(0);
+    const value = body.updates[key];
+    expect(value).toHaveLength(180);
+    expect(value[0].nama).toBe('Akun Uji Sync');
+    expect(manager.getConnectionStatus().pendingKeys).not.toContain(key);
+
+    serverEntries[key] = { value: value.map((item: { id: string; nama: string }) =>
+      item.id === initial.id ? { ...item, nama: 'Revisi Server' } : item), version: 3 };
+    serverVersions[key] = 3;
+    await manager.syncFromServer(false);
+    expect(manager.getReferensiKodeAkun()[0].nama).toBe('Revisi Server');
+  });
+
+  it('tidak melaporkan sukses simpan akun ketika antrean offline gagal dipersistenkan', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    offline();
+    storage.failKey = QUEUE_KEY;
+    const awal = manager.getReferensiKodeAkun()[0];
+    expect(() => manager.simpanReferensiKodeAkun({ ...awal, nama: 'Draf lokal' }, awal, 'Finance Uji')).toThrow('antrean');
+    expect(manager.getReferensiKodeAkun()[0].nama).toBe('Draf lokal');
+    expect(manager.getSyncHoldReason()).not.toBeNull();
+  });
+
   it('mengantrekan versi draf tetapi tidak mengirim ulang snapshot yang sudah dikonfirmasi server', () => {
     offline();
     const draf = manager.getWebsiteDraft();

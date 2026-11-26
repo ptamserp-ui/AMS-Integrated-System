@@ -97,11 +97,16 @@ Menurut CDAKB, produk alkes kedaluwarsa atau rusak harus masuk karantina. Di apl
 
 | # | Tab Akuntansi | Fitur Utama di Aplikasi |
 | --- | --- | --- |
-| 1 | **Jurnal Umum (Ledger)** | Pencatatan double-entry ber-SHA256 signature, validasi total debit == kredit, dan detail batch alkes per baris jurnal. |
-| 2 | **Chart of Accounts (CoA)** | Direktori master akun terstruktur (Asset, Liability, Equity, Revenue, Expense) PT Anugrahmitra Selaras. |
-| 3 | **Valuasi & Write-off CDAKB** | Tabel pemantauan batch aktif, status karantina/recall, serta tombol eksekusi jurnal penghapusan persediaan (*Write-off*). |
-| 4 | **Landed Cost Impor Alkes** | Kalkulator interaktif HPP impor (FOB, Bea Masuk, PPN, PPh 22) dan riwayat pencatatan impor alat elektromedik. |
-| 5 | **Laporan Laba Rugi & Segmen** | Laporan komparatif Pendapatan vs Beban serta analisis kontribusi segmen Distribusi (65%) vs Manufaktur (35%). |
+| 1 | **Faktur & Piutang** | Daftar transaksi, pencatatan faktur dan piutang. |
+| 2 | **Dasbor Kendali** | Ringkasan kendali keuangan berdasarkan data aplikasi. |
+| 3 | **Jurnal & Buku Besar** | Jurnal double-entry, validasi debit/kredit dan buku besar. |
+| 4 | **Neraca & Laba Rugi** | Laporan keuangan berdasarkan jurnal yang dibukukan. |
+| 5 | **Valuasi & Write-Off** | Valuasi batch, HPP, penghapusan persediaan dan draf beban promosi FOC. |
+| 6 | **PPN, e-Faktur & Landed Cost** | Kalkulator pajak/biaya impor dan draf ekspor; bukan integrasi live DJP. |
+| 7 | **Periode & Biaya Mutu** | Periode buku dan pengelolaan biaya mutu. |
+| 8 | **Daftar Kode Akun** | 180 akun referensi awal dan dokumen sumber lengkap; pencarian, tambah/edit dengan izin update Finance. Koleksi `keuangan_referensi_akun` disimpan lokal dan diantrekan ke server dengan pemeriksaan versi; bukan pengganti `keuangan_coa`, jurnal atau laporan. |
+
+Panduan penggunaan tab 8: [daftar-kode-akun.md](./daftar-kode-akun.md). Kode dapat berubah tanpa mengganti ID akun; duplikasi kode, data wajib kosong dan draf usang ditolak. Status antrean belum membuktikan acknowledgment server. Pengujian lokal dan batas verifikasi staging tercatat di [evaluasi-staging.md](./evaluasi-staging.md).
 
 ---
 

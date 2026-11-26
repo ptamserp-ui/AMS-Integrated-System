@@ -2,7 +2,7 @@ import type { JurnalKeuangan, PeriodeBuku, UserRole } from '../../../../types';
 import { nomorJournalUntuk } from '../../../../utils/akuntansi';
 import type { Tone } from '../../../ui';
 
-export type FinanceTabId = 'dasbor' | 'jurnal' | 'laporan' | 'persediaan' | 'pajak' | 'faktur' | 'periode';
+export type FinanceTabId = 'dasbor' | 'jurnal' | 'laporan' | 'persediaan' | 'pajak' | 'faktur' | 'periode' | 'kode-akun';
 
 export const TAB_NOMOR_KE_ID: Record<number, FinanceTabId> = {
   1: 'dasbor',
@@ -11,7 +11,8 @@ export const TAB_NOMOR_KE_ID: Record<number, FinanceTabId> = {
   4: 'persediaan',
   5: 'pajak',
   6: 'faktur',
-  7: 'periode'
+  7: 'periode',
+  8: 'kode-akun'
 };
 
 export interface IdentitasFinance {

@@ -50,6 +50,7 @@ Menu ERP mencakup modul dan ruang kerja berikut:
     - Kalkulasi payroll tersedia; verifikasi geofencing dan integrasi BPJS/DJP belum terbukti.
 13. **Finance & Accounting**
     - Jurnal *double-entry*, Chart of Accounts, faktur, pajak, persediaan, dan laporan keuangan.
+    - **Daftar Kode Akun**: 180 akun referensi awal, dokumen acuan lengkap, pencarian serta tambah/edit dengan izin update Finance. Perubahan diantrekan ke server; daftar ini tidak mengganti CoA/jurnal aktif. Panduan: [daftar-kode-akun.md](docs/daftar-kode-akun.md).
     - Tarif dan hasil perhitungan perlu ditinjau terhadap ketentuan serta data perusahaan; integrasi live e-Faktur/DJP belum dibuktikan.
 14. **IT & Traceability Hub**
     - Informasi penyimpanan dan sinkronisasi, pengelolaan pengguna dan peran, ekspor audit, serta panduan deployment.

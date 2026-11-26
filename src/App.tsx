@@ -510,7 +510,7 @@ function Dasbor({
                 onKonsumsiPelangganQuotation={() => setQuotationPelangganAwal(null)}
               />
             )}
-            {activeTab === 'finance-akuntansi' && <FinanceModule currentRole={currentRole} />}
+            {activeTab === 'finance-akuntansi' && <FinanceModule currentRole={currentRole} sesi={sesi} />}
             {activeTab === 'it-traceability' && (
               <ITModule
                 currentRole={currentRole}

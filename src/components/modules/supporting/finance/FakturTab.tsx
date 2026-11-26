@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { db } from '../../../../services/pocketbase';
 import { useDbTick } from '../../../../hooks/useDbSync';
 import type { TransaksiKeuangan } from '../../../../types';
-import { gerbangPenagihanCdakb, rancangJurnalFaktur } from '../../../../utils/akuntansi';
+import { cariTransaksiRujukanJurnal, gerbangPenagihanCdakb, rancangJurnalFaktur, sumberJurnalTransaksi } from '../../../../utils/akuntansi';
 import { Badge, Panel, chipFilter, formatRupiah } from '../../../ui';
 import { type IdentitasFinance, kepalaTabelKelas, pesanClass, selKelas, tabelKelas } from './ui';
 import { Search, ShieldCheck } from 'lucide-react';
@@ -88,7 +88,9 @@ export default function FakturTab({
         t.kategori.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  const jurnalFaktur = (nomorFaktur: string) => jurnal.find((j) => j.sumberRujukan === 'FAKTUR_PENJUALAN' && j.idRujukan === nomorFaktur);
+  const jurnalFaktur = (item: TransaksiKeuangan) => jurnal.find(
+    (j) => j.sumberRujukan === sumberJurnalTransaksi(item) && cariTransaksiRujukanJurnal(j.idRujukan, transaksiList)?.id === item.id
+  );
 
   const handleSaveTransaction = (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,7 +134,7 @@ export default function FakturTab({
 
   const totalPendapatan = transaksiList.filter((t) => t.kategori === 'Pendapatan Alkes').reduce((acc, curr) => acc + curr.jumlah, 0);
   const totalBiayaMutu = transaksiList.filter((t) => t.kategori !== 'Pendapatan Alkes').reduce((acc, curr) => acc + curr.jumlah, 0);
-  const belumTerbukukan = transaksiList.filter((t) => !jurnalFaktur(t.nomorFaktur)).length;
+  const belumTerbukukan = transaksiList.filter((t) => !jurnalFaktur(t)).length;
   const gerbangTerkait = useMemo(
     () =>
       transaksiList
@@ -213,7 +215,7 @@ export default function FakturTab({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((item) => {
-                const j = jurnalFaktur(item.nomorFaktur);
+                const j = jurnalFaktur(item);
                 return (
                   <Fragment key={item.id}>
                   <tr className="hover:bg-slate-50">

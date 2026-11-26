@@ -383,6 +383,10 @@ const PETA_BEBAN: Record<Exclude<TransaksiKeuangan['kategori'], 'Pendapatan Alke
   'Biaya Retur Mutu': { akun: KODE_AKUN.BEBAN_RETUR_MUTU, pusatBiaya: 'PB-QA', sumber: 'BIAYA_RETUR_MUTU' }
 };
 
+export function sumberJurnalTransaksi(transaksi: TransaksiKeuangan): JurnalKeuangan['sumberRujukan'] {
+  return transaksi.kategori === 'Pendapatan Alkes' ? 'FAKTUR_PENJUALAN' : PETA_BEBAN[transaksi.kategori].sumber;
+}
+
 function pisahPpn(nominal: number, tarifPersen: number, termasukDalamNominal: boolean) {
   if (!termasukDalamNominal) {
     const dpp = bulat(nominal);
@@ -390,6 +394,16 @@ function pisahPpn(nominal: number, tarifPersen: number, termasukDalamNominal: bo
   }
   const ppn = tarifPersen > 0 ? bulat((nominal * tarifPersen) / (100 + tarifPersen)) : 0;
   return { dpp: bulat(nominal) - ppn, ppn };
+}
+
+export function cariTransaksiRujukanJurnal(
+  idRujukan: string,
+  transaksi: readonly TransaksiKeuangan[]
+): TransaksiKeuangan | undefined {
+  const berdasarkanId = transaksi.filter((item) => item.id === idRujukan);
+  if (berdasarkanId.length > 0) return berdasarkanId.length === 1 ? berdasarkanId[0] : undefined;
+  const berdasarkanNomor = transaksi.filter((item) => item.nomorFaktur === idRujukan);
+  return berdasarkanNomor.length === 1 ? berdasarkanNomor[0] : undefined;
 }
 
 export function rancangJurnalFaktur(transaksi: TransaksiKeuangan, opsi: OpsiPostingFaktur): RancanganJurnal {
@@ -426,7 +440,7 @@ export function rancangJurnalFaktur(transaksi: TransaksiKeuangan, opsi: OpsiPost
     nomorJournal: nomorJournalUntuk(periode, opsi.urutanNomor(periode)),
     tanggalTransaksi: transaksi.tanggal,
     tanggalPosting: null,
-    sumberRujukan: transaksi.kategori === 'Pendapatan Alkes' ? 'FAKTUR_PENJUALAN' : PETA_BEBAN[transaksi.kategori].sumber,
+    sumberRujukan: sumberJurnalTransaksi(transaksi),
     idRujukan: transaksi.id,
     uraian: `${transaksi.kategori} — ${transaksi.fasyankesAtauPemasok}`,
     status: 'Draft',

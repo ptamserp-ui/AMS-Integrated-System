@@ -192,7 +192,7 @@ describe('pengiriman FOC', () => {
         nomorIzinEdar: 'NIE-A-UJI',
         nomorBatch: 'LOT-A',
         jumlahStok: 3,
-        qtyDipesan: 0,
+        qtyDipesan: 1,
         tanggalKedaluwarsa: '2030-01-01',
         statusStok: 'AVAILABLE',
         binId: bin.id,
@@ -205,8 +205,8 @@ describe('pengiriman FOC', () => {
         namaAlkes: 'Produk B',
         nomorIzinEdar: 'NIE-B-UJI',
         nomorBatch: 'LOT-B',
-        jumlahStok: 2,
-        qtyDipesan: 0,
+        jumlahStok: 3,
+        qtyDipesan: 1,
         tanggalKedaluwarsa: '2030-02-01',
         statusStok: 'AVAILABLE',
         binId: bin.id,
@@ -248,10 +248,44 @@ describe('pengiriman FOC', () => {
     const hasil = db.catatPengirimanSalesOrder(pesanan.id, new Date('2026-06-15T12:00:00'));
 
     expect(hasil.boleh).toBe(true);
-    expect(db.getStokGudang().find((item) => item.id === 'STK-MAIN-UJI')?.jumlahStok).toBe(2);
-    expect(db.getStokGudang().find((item) => item.id === 'STK-KOMP-UJI')?.jumlahStok).toBe(0);
+    expect(db.getStokGudang().find((item) => item.id === 'STK-MAIN-UJI')).toMatchObject({ jumlahStok: 2, qtyDipesan: 1 });
+    expect(db.getStokGudang().find((item) => item.id === 'STK-KOMP-UJI')).toMatchObject({ jumlahStok: 1, qtyDipesan: 1 });
     expect(db.getSuratJalan()[0]?.promosiFoc?.komponen[0]?.alokasi).toEqual([{ nomorBatch: 'LOT-B', qty: 2, binId: bin.id }]);
     expect(db.getTransaksi()[0]?.jumlah).toBe(10000);
     expect(db.getTransaksi()[0]?.barisFaktur).toEqual([expect.objectContaining({ subtotal: 0, tarifPpnPersen: 0, nilaiPpn: 0, jenis: 'FOC' })]);
+  });
+
+  it('menolak FOC dengan SKU yang sama bila sisa stok bebas tidak cukup setelah alokasi utama', () => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: new MemoryStorage() });
+    const base = INITIAL_STOK_GUDANG[0];
+    const bin = INITIAL_LOKASI_BIN.find((item) => item.id === base?.binId);
+    if (!base || !bin) throw new Error('fixture lokasi stok tidak tersedia');
+    db.saveStokGudang([{
+      ...base, id: 'STK-SAMA', kodeSKU: 'SKU-A', namaAlkes: 'Produk A',
+      nomorIzinEdar: 'NIE-A-UJI', nomorBatch: 'LOT-A', jumlahStok: 5, qtyDipesan: 3,
+      tanggalKedaluwarsa: '2030-01-01', statusStok: 'AVAILABLE', binId: bin.id, gudangId: bin.gudangId
+    }]);
+    db.saveIzinEdar([{ ...INITIAL_IZIN_EDAR[0]!, id: 'NIE-A-UJI', namaAlkes: 'Produk A', nomorIzinEdar: 'NIE-A-UJI', skuCode: 'SKU-A', tanggalKedaluwarsa: '2030-01-01', status: 'Aktif' }]);
+    db.saveSuratJalan([]);
+    db.saveTransaksi([]);
+    db.savePenjualan([{
+      id: 'SO-FOC-SAMA', nomorPesanan: 'SP-KLINIK-2026-903', fasyankes: 'Klinik Uji',
+      jalurPenjualan: 'Klinik & Laboratorium', namaAlkes: 'Produk A', kodeSKU: 'SKU-A',
+      nomorBatch: 'LOT-A', jumlah: 1, satuan: 'Unit', totalHarga: 10000,
+      statusVerifikasiEtikaIklan: 'Memenuhi Etika Promosi', statusKirim: 'Menunggu Alokasi FEFO',
+      tanggalPesanan: '2026-06-15',
+      promosiFoc: {
+        promosiId: 'FOC-UJI', namaPromosi: 'Promo Uji', paketId: 'KIT-UJI',
+        namaPaket: 'Paket Complimentary', jumlahKit: 1,
+        komponen: [{ kodeSKU: 'SKU-A', namaAlkes: 'Produk A', qtyPerKit: 2, satuan: 'Unit' }]
+      }
+    }]);
+    const hasil = db.catatPengirimanSalesOrder('SO-FOC-SAMA', new Date('2026-06-15T12:00:00'));
+
+    expect(hasil.boleh).toBe(false);
+    expect(hasil.keterangan).toContain('Komponen FOC');
+    expect(db.getStokGudang()[0]).toMatchObject({ jumlahStok: 5, qtyDipesan: 3 });
+    expect(db.getSuratJalan()).toEqual([]);
+    expect(db.getTransaksi()).toEqual([]);
   });
 });

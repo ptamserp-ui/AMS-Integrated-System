@@ -1,4 +1,6 @@
 import PocketBase from 'pocketbase';
+import { INITIAL_REFERENSI_KODE_AKUN } from '../data/referensiKodeAkun';
+import { validasiReferensiKodeAkun, type ReferensiKodeAkun } from '../utils/daftarKodeAkun';
 import {
   IzinEdarAlkes,
   SertifikatPerusahaan,
@@ -3298,7 +3300,6 @@ export class AMSDatabaseManager {
         const stok = stokSimulasi.find((baris) => baris.id === item.stokId);
         if (!stok) continue;
         stok.jumlahStok = Math.max(stok.jumlahStok - item.diambil, 0);
-        stok.qtyDipesan = Math.max((stok.qtyDipesan ?? 0) - item.diambil, 0);
         alokasiSemua.push({ ...item, satuan });
       }
     };
@@ -3376,8 +3377,6 @@ export class AMSDatabaseManager {
       const baris = daftarStok.find((s) => s.id === u.stokId);
       if (!baris) return;
       baris.jumlahStok = Math.max(baris.jumlahStok - u.diambil, 0);
-      // Kunci pesanan dilepas secukupnya; sisa kuota terkunci tetap melindungi pesanan lain.
-      baris.qtyDipesan = Math.max((baris.qtyDipesan ?? 0) - u.diambil, 0);
       baris.statusFEFO = nilaiUmurStok(baris, konfigurasi, waktuKirim).label;
     });
     this.saveStokGudang(daftarStok);
@@ -4594,6 +4593,35 @@ export class AMSDatabaseManager {
   }
 
   // Finance
+  public getReferensiKodeAkun(): ReferensiKodeAkun[] {
+    try {
+      const stored = typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_PREFIX + 'keuangan_referensi_akun');
+      if (stored === null) return INITIAL_REFERENSI_KODE_AKUN.map((item) => ({ ...item }));
+      const value: unknown = JSON.parse(stored);
+      if (!Array.isArray(value)) throw new Error('Data referensi akun bukan daftar.');
+      validasiReferensiKodeAkun(value);
+      return value;
+    } catch (error) {
+      console.error('Gagal membaca daftar kode akun referensi:', error);
+      throw error;
+    }
+  }
+
+  public simpanReferensiKodeAkun(draf: ReferensiKodeAkun, awal: ReferensiKodeAkun | null, aktor: string): void {
+    const current = this.getReferensiKodeAkun();
+    const latest = current.find((item) => item.id === draf.id);
+    if (awal ? !latest || latest.id !== awal.id || latest.kode !== awal.kode ||
+        latest.nama !== awal.nama || latest.kelompok !== awal.kelompok : Boolean(latest))
+      throw new Error('Data akun berubah. Salin draf, lalu buka kembali data terbaru.');
+    const bersih = { ...draf, kode: draf.kode.trim(), nama: draf.nama.trim(), kelompok: draf.kelompok.trim() };
+    const updated = awal ? current.map((item) => item.id === bersih.id ? bersih : item) : [...current, bersih];
+    validasiReferensiKodeAkun(updated);
+    this.setCollection('keuangan_referensi_akun', updated, true);
+    if (this.syncHoldReason) throw new Error('Daftar tersimpan di perangkat, tetapi antrean sinkronisasi ditahan. Jangan tutup browser; hubungi administrator.');
+    this.logAudit('Finance & Accounting', awal ? 'Mengubah kode akun referensi' : 'Menambahkan kode akun referensi', bersih.kode, aktor, 'Finance & Accounting',
+      [{ kolom: 'akun referensi', nilaiLama: awal ? JSON.stringify(awal) : '-', nilaiBaru: JSON.stringify(bersih) }]);
+  }
+
   public getTransaksi(): TransaksiKeuangan[] {
     return this.getCollection<TransaksiKeuangan>('transaksi', INITIAL_TRANSAKSI);
   }
@@ -5220,6 +5248,7 @@ export class AMSDatabaseManager {
       case 'keuangan_jurnal': return this.getJurnalKeuangan();
       case 'audit_trail': return this.getAuditTrail();
       case 'keuangan_coa': return this.getCoA();
+      case 'keuangan_referensi_akun': return this.getReferensiKodeAkun();
       case 'keuangan_periode': return this.getPeriodeBuku();
       case 'keuangan_tetapan_pajak': return this.getTetapanPajak();
       case 'gudang_pengaturan': return [this.getKonfigurasiGudang()];

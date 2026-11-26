@@ -54,6 +54,8 @@ Klik **Eksekusi FEFO & Terbitkan SJ** pada pesanan yang akan dikirim. Sistem men
 - **Jika stok komponen tidak lengkap atau alokasinya tidak lolos gerbang gudang:** pengiriman ditolak dan stok fisik tidak dimutasi. Pesanan tetap menunggu alokasi; alasan penolakan dicatat.
 - **Jika seluruh alokasi lolos:** stok produk utama dan komponen dikurangi, pergerakan barang dicatat, lalu Surat Jalan dan transaksi/faktur diterbitkan.
 
+Alokasi mengambil stok bebas setelah dikurangi kuota yang sudah dipesan dan tidak melepas kuota tersebut. Jika produk utama dan komponen memakai SKU yang sama, keduanya memakai saldo bebas yang sama dalam simulasi. Ini adalah pemeriksaan lokal sebelum mutasi, bukan bukti transaksi atomik lintas koleksi atau perlindungan terhadap pengiriman bersamaan pada server.
+
 Pada daftar Surat Jalan, kartu **Free of Charge** menampilkan nama promosi/paket, jumlah kit, nama dan SKU komponen, total kuantitas, serta batch dan bin hasil alokasi. Rute picking yang tersusun saat ini mengikuti alokasi produk utama; rincian lokasi komponen FOC ditampilkan terpisah pada kartu FOC.
 
 ## 4. Tampilan faktur dan piutang

@@ -330,6 +330,7 @@ export function canWriteSyncKey(role: RoleDefinition, key: string): boolean {
   if (key === 'website_published') {
     return perms.includes('publish');
   }
+  if (key === 'keuangan_referensi_akun') return perms.includes('update');
   return perms.includes('create') || perms.includes('update') || perms.includes('publish');
 }
 
